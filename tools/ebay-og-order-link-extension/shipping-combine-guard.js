@@ -1,4 +1,4 @@
-/* Prevent separate shipping-label purchases for a buyer's pending orders. */
+/* Combine only the selected shipping orders for each buyer. */
 (() => {
   'use strict';
   const ID = 'og-combined-shipping-guard';
@@ -47,8 +47,8 @@
     const host = dialog || document.querySelector('#bulk-labels-app, [data-testid="order-page"]') || document.body;
     if (panel.parentElement !== host) host.prepend(panel);
     panel.dataset.blocked = String(decision.blocked);
-    text(panel.querySelector('[data-heading]'), decision.blocked ? 'One shipping label per buyer' : 'Combined shipping checked');
-    text(panel.querySelector('[data-message]'), loading && !checkedAt ? 'Checking this buyer’s pending orders in Invsto…' : error || decision.reason);
+    text(panel.querySelector('[data-heading]'), decision.blocked ? 'Combine selected orders' : 'Selected shipping orders checked');
+    text(panel.querySelector('[data-message]'), loading && !checkedAt ? 'Checking the selected orders in Invsto…' : error || decision.reason);
     const action = panel.querySelector('[data-action]');
     action.hidden = !decision.blocked || !decision.action;
     text(action, decision.action === 'load' ? `Load all ${decision.orderNumbers.length} orders` : 'Combine orders per buyer');

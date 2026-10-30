@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OG eBay Order Link",
   "description": "Connects eBay orders and separate TikTok exports, receipts and shipping labels to OG.",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "permissions": [
     "storage",
     "activeTab",

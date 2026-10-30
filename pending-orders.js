@@ -4215,9 +4215,10 @@ function buildEbayBulkLabelUrl(orderNumbers = []) {
 
 function getBuyerShippingLabelLines(line) {
   if (!line) return [];
-  // Use the full queue, never the filtered card or the checkout selection.
+  // A buyer card uses its checked lines, including selections outside the current filter.
   return getBuyerLines(getBuyerKey(line)).filter(entry =>
-    isOpenOrderLine(entry) && !getLineFulfillmentBlock(entry) && getRemainingLineQuantity(entry) > 0
+    state.adminSelectedLineIds.has(entry.id) && isOpenOrderLine(entry)
+      && !getLineFulfillmentBlock(entry) && getRemainingLineQuantity(entry) > 0
   );
 }
 
@@ -4226,9 +4227,9 @@ function getShippingLabelAction(lines = []) {
   return {
     combined,
     label: combined ? "Create combined label" : "Create shipping label",
-    help: combined
-      ? `${lines.length} pending item lines · one package for this buyer. On eBay, choose “Combine orders per buyer” before buying the label.`
-      : "Create a shipping label for this order.",
+    help: !lines.length ? "Select the orders to ship. Use Select pending lines to include all orders in this buyer card." : combined
+      ? `${lines.length} selected item lines · selected orders only. On eBay, choose “Combine orders per buyer” before buying the label.`
+      : "Create a shipping label for the selected order only.",
     disabled: !lines.length || lines.some(line => !normalizeEbayOrderNumber(line.order?.order_number)),
   };
 }
@@ -4246,8 +4247,8 @@ async function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLi
   }
   const blocked = requestedLines.find(line => getLineFulfillmentBlock(line));
   if (blocked) return setStatus(getLineFulfillmentBlock(blocked), "error");
-  const lines = [...new Map(requestedLines.flatMap(getBuyerShippingLabelLines).map(line => [line.id, line])).values()];
-  if (!lines.length) return setStatus("This buyer has no eligible pending items to ship.", "error");
+  const lines = requestedLines.filter(line => isOpenOrderLine(line) && !getLineFulfillmentBlock(line) && getRemainingLineQuantity(line) > 0);
+  if (!lines.length) return setStatus("The selected orders have no eligible pending items to ship.", "error");
   if (lines.some(line => !normalizeEbayOrderNumber(line.order?.order_number))) {
     return setStatus("A pending item for this buyer is missing its eBay order number. Refresh before creating a combined label.", "error");
   }
@@ -4258,7 +4259,7 @@ async function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLi
   const useBulk = selectedLineCount > 1 || lines.length > 1 || unique.length > 1;
   const url = useBulk ? buildEbayBulkLabelUrl(unique) : buildEbaySingleLabelUrl(unique[0]);
   // eBay labels cover whole orders. Preserve the refund/cancellation guard for
-  // every sibling in each order, including blocked siblings of expanded buyers.
+  // every item line inside each selected order, without adding other buyer orders.
   const orderLines = state.orders.filter(line => unique.includes(normalizeEbayOrderNumber(getOrderFromLine(line)?.order_number)));
   // Open from the user's click, then navigate only after the database approves.
   const popup = window.open("about:blank", "_blank");
@@ -4269,7 +4270,7 @@ async function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLi
   else if (!popup) return setStatus("Allow popups, then click the label button again.", "error");
 
   const orderWord = unique.length === 1 ? "order" : "orders";
-  const instruction = combined ? " Choose “Combine orders per buyer” on eBay, then buy one label per buyer. All eligible pending items for each selected buyer are included." : "";
+  const instruction = combined ? " Choose “Combine orders per buyer” on eBay, then buy one label per buyer for these selected orders only." : " Only the selected orders are included.";
   setStatus(`Opened ${useBulk ? "eBay bulk shipping" : "the eBay shipping label page"} for ${lines.length} item line${lines.length === 1 ? "" : "s"} across ${unique.length} ${orderWord}: ${unique.join(", ")}.${instruction}`, "info");
 }
 
@@ -4379,12 +4380,12 @@ function renderAdminOrderActions() {
 
   $("admin-clear-order-selection")?.toggleAttribute("disabled", count === 0);
   $("admin-open-ebay-labels")?.toggleAttribute("disabled", count === 0);
-  const selectedLabelLines = [...new Map(getSelectedAdminLines().flatMap(getBuyerShippingLabelLines).map(line => [line.id, line])).values()];
+  const selectedLabelLines = getSelectedAdminLines();
   const selectedLabelBuyers = new Set(selectedLabelLines.map(getBuyerKey));
   const labelButton = $("admin-open-ebay-labels");
   if (labelButton) {
     labelButton.textContent = selectedLabelLines.length > selectedLabelBuyers.size ? "Create combined labels" : "Create shipping labels";
-    labelButton.title = "Includes all eligible pending items for each selected buyer. Combine each buyer’s orders into one package on eBay.";
+    labelButton.title = "Includes only the selected order numbers. Other orders for the same buyer stay pending. Combine the selected orders per buyer on eBay.";
   }
   $("admin-mark-packed-no-stock")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-cancelled")?.toggleAttribute("disabled", count === 0);
@@ -4704,7 +4705,7 @@ function renderOrders(options = {}) {
             <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}" title="${escapeHtml(shippingLabelAction.help)}" ${shippingLabelAction.disabled ? "disabled" : ""}><i data-lucide="truck"></i>${shippingLabelAction.label}</button>
             <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Saved labels</button>
           </div>
-          ${shippingLabelAction.combined ? '<small class="buyer-card-shipping-help">One package per buyer. Choose “Combine orders per buyer” on eBay.</small>' : ""}
+          <small class="buyer-card-shipping-help">${escapeHtml(shippingLabelAction.help)}</small>
         </div>
         <div class="buyer-card-action-group buyer-card-packing-group" role="group" aria-label="Packing">
           <span class="card-action-label">Packing</span>
@@ -4979,7 +4980,7 @@ function renderOrders(options = {}) {
                 <span class="card-action-label">Packing &amp; tasks</span>
                 <div class="card-action-buttons">
                   <button type="button" class="secondary-btn buyer-line-action-btn" data-line-pack="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Pack item</button>
-                  ${shippingLabelAction.combined ? "" : `<button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) && canActOnLine ? "" : "disabled"}>Create shipping label</button>`}
+                  ${getBuyerLines(group.key).filter(isOpenOrderLine).length > 1 ? "" : `<button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) && canActOnLine ? "" : "disabled"}>Create shipping label</button>`}
                 </div>
               </div>
               <div class="card-tool-group" role="group" aria-label="Item videos"><span class="card-action-label">Item videos</span><div class="card-action-buttons">${lineTaskVideoMarkup}</div></div>
@@ -5812,7 +5813,7 @@ function renderEbayLabelPanel() {
     const details = $("ebay-label-details");
     const previewButton = $("preview-ebay-label");
     const openLabelButton = $("open-ebay-label-page");
-    const shippingAction = getShippingLabelAction(getBuyerShippingLabelLines(state.selectedLine));
+    const shippingAction = getShippingLabelAction(state.selectedLine ? [state.selectedLine] : []);
     summary.textContent = summaryText;
     details.innerHTML = detailsHtml;
     if (openLabelButton) {
@@ -11049,22 +11050,17 @@ async function ensureExtensionOrderLinesLoaded(options = {}) {
   return matches;
 }
 
-async function loadPendingLabelBuyerBatch(matchingLines, options = {}) {
-  const buyerUsernames = [...new Set(matchingLines.map((line) => getOrderFromLine(line).buyer_username).filter(Boolean))];
-  const buyerKeys = new Set(matchingLines.map(getBuyerKey));
-  const buyerLines = buyerUsernames.length
-    ? await loadPendingOrderLinesForExtensionMatch({ buyerUsernames, deferRender: options.deferRender })
-    : [];
-  // Orders without a username stay scoped to their own order number.
-  return [...buyerLines, ...matchingLines.filter((line) => !getOrderFromLine(line).buyer_username)]
-    .filter((line) => buyerKeys.has(getBuyerKey(line)) && isOpenOrderLine(line));
+async function getPendingLabelOrderBatch(matchingLines, options = {}) {
+  // The label's confirmed order numbers are the shipping scope. Same buyer is
+  // not evidence that another order is in this package.
+  return matchingLines.filter(isOpenOrderLine);
 }
 
 async function openPendingNoInventorySessionForLabel(orderNumbers, options = {}) {
   const numbers = (Array.isArray(orderNumbers) ? orderNumbers : [orderNumbers]).map(normalizeEbayOrderNumber).filter(Boolean);
-  const batchLines = options.batchLines || await loadPendingLabelBuyerBatch(
+  const batchLines = (options.batchLines || await getPendingLabelOrderBatch(
     await ensureExtensionOrderLinesLoaded({ orderNumbers: numbers, refresh: true })
-  );
+  )).filter(line => numbers.includes(normalizeEbayOrderNumber(getOrderFromLine(line).order_number)));
   const candidates = batchLines.filter(isNoInventoryCompletionLine);
   const openMatch = candidates.find((line) => line.id === state.selectedLine?.id) || candidates[0];
   if (!openMatch) return false;
@@ -11090,7 +11086,7 @@ async function openPendingNoInventorySessionForLabel(orderNumbers, options = {})
     const lineIds = candidates.map((line) => line.id);
     await openWorkerNoInventoryModal({ autoRequestPhoto: true, lineIds, batchCandidateIds: lineIds });
   } else {
-    // Apply the same Select All default to an already-open checkout, preserving notes/photos.
+    // Only the orders on this label may enter the completion selection.
     state.workerNoInventoryCandidates = candidates;
     setAllWorkerNoInventoryLines(true);
     renderEbayLabelPanel();
@@ -11249,8 +11245,8 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw createLabelRouteError("history", `Order ${closedOrderNumbers.join(", ")} ${closedOrderNumbers.length === 1 ? "is" : "are"} already closed in the pending queue. Opening order history to attach the label.`);
   }
 
-  // Resolve the whole buyer batch before saving, so a failed lookup cannot silently select a subset.
-  const batchLines = await loadPendingLabelBuyerBatch(matchingLines, {deferRender: true});
+  // All pages for the declared order numbers were loaded above. Never expand by buyer.
+  const batchLines = await getPendingLabelOrderBatch(matchingLines, {deferRender: true});
   // Immutable paths preserve different PDFs even when eBay reuses the shipment ID.
   const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   const destinationPath = [targetOrderNumbers.length > 1 ? "bulk-labels" : safeStorageSegment(targetOrderNumbers[0], "order"),

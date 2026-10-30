@@ -2916,8 +2916,9 @@
       .map((li) => li.textContent || "")
       .map((text) => text.match(ORDER_NUMBER_PATTERN)?.[0])
       .filter(Boolean);
-    const fallbackFromPageText = uniqueTextMatches(document.body?.innerText || "", ORDER_NUMBER_PATTERN);
-    return [...new Set([...fromItemDetails, ...fallbackFromPageText])];
+    // Only the purchased label's item details identify its orders. Page-wide
+    // text and old cached selections can include orders outside this package.
+    return [...new Set(fromItemDetails)];
   }
 
   function normalizeBulkContextOrderIds(context) {
@@ -3023,8 +3024,7 @@
     const pageText = document.body?.innerText || "";
     const cachedBulkContext = getOptionalCachedBulkContext();
     const extractedOrderIds = getBulkConfirmationOrderIds();
-    const cachedOrderIds = normalizeBulkContextOrderIds(cachedBulkContext);
-    const orderIds = extractedOrderIds.length ? extractedOrderIds : cachedOrderIds;
+    const orderIds = extractedOrderIds;
     const labelRows = getBulkConfirmationLabelRows();
     const rowTrackingNumbers = unique(labelRows.flatMap((row) => row.trackingNumbers || []));
     const trackingNumbers = unique(rowTrackingNumbers.length ? rowTrackingNumbers : getBulkConfirmationTrackingNumbers())
@@ -3838,6 +3838,7 @@
       const metadata = getBulkLabelConfirmationSnapshot();
       labelLog("bulk metadata", metadata);
       if (!metadata.labelUrl) throw new Error("Could not find the bulk label download URL.");
+      if (!metadata.orderIds.length) throw new Error("The purchased label’s order numbers have not loaded. Expand its item details on eBay, then send it again.");
 
       setBulkLabelButtonStatus("Sending to OG...");
       const label = await fetchLabelUrlFromContentScript(metadata.labelUrl);

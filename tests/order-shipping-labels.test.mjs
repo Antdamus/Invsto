@@ -198,7 +198,7 @@ async function injectLabel(page, metadata, transferId='batch-label') {
   }),{metadata,base64,transferId});
 }
 
-test('combined label stays available without selection and removes individual item label buttons',async t=>{
+test('buyer label requires selection and keeps same-order item lines together',async t=>{
   const page=await open(t,database());
   await page.evaluate(()=>{
     const first=state.orders[0];
@@ -210,10 +210,9 @@ test('combined label stays available without selection and removes individual it
     window.open=()=>({location:{replace(url){labelWindows.push(url);}},close(){}});
     renderOrders();renderAdminOrderActions();
   });
-  await expect(page.locator('[data-line-open-label]')).toHaveCount(0);
-  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
-  await expect(page.locator('[data-buyer-label-key]')).toBeEnabled();
-  await page.locator('.buyer-card-expanded [data-admin-group-select]').check();
+  await expect(page.locator('[data-buyer-label-key]')).toBeDisabled();
+  await page.locator('.buyer-order-tools > summary').click();
+  await page.locator('[data-admin-group-select]').check();
   await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(2);
   await page.locator('[data-buyer-label-key]').click();
   await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(1);
@@ -226,7 +225,7 @@ test('combined label stays available without selection and removes individual it
   await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(3);
   assert.equal(await page.evaluate(()=>labelWindows.at(-1)),'https://www.ebay.com/ship/bulk?t=11-22222-33333');
   await page.locator('[data-admin-line-select="line-a"]').uncheck();
-  await expect(page.locator('[data-buyer-label-key]')).toBeEnabled();
+  await expect(page.locator('[data-buyer-label-key]')).toBeDisabled();
   await expect(page.locator('#admin-open-ebay-labels')).toBeDisabled();
 });
 
@@ -263,10 +262,11 @@ test('eleven selected items across eight orders show the item count and retain t
     window.labelWindows=[];window.open=()=>({location:{replace(url){labelWindows.push(url);}},close(){}});
     renderOrders();
   });
-  await page.locator('.buyer-card-expanded [data-admin-group-select]').check();
+  await page.locator('.buyer-order-tools > summary').click();
+  await page.locator('[data-admin-group-select]').check();
   await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(11);
   await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
-  await expect(page.locator('.buyer-combined-shipping')).toContainText('11 pending item lines');
+  await expect(page.locator('.buyer-card-shipping-help')).toContainText('11 selected item lines');
   await page.locator('[data-buyer-label-key]').click();
   await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(1);
   const address=new URL(await page.evaluate(()=>labelWindows[0]));
@@ -278,10 +278,10 @@ test('eleven selected items across eight orders show the item count and retain t
   assert.equal(await page.evaluate(ids=>state.orders.filter(line=>line.order_id==='batch-order-7'&&ids.includes(line.order.order_number)).length,sentOrders),4);
   await page.locator('[data-admin-line-select="batch-line-7-3"]').uncheck();
   await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
-  await expect(page.locator('.buyer-combined-shipping')).toContainText('11 pending item lines');
+  await expect(page.locator('.buyer-card-shipping-help')).toContainText('10 selected item lines');
 });
 
-test('injected label selects the full buyer batch in an open modal and completion sends every eligible line',async t=>{
+test('single-order label attaches and preselects only that order, preserving other buyer orders',async t=>{
   const db=database(),page=await open(t,db);
   await prepareLabelBatch(page);
   db.orders.push({id:'order-c',order_number:'22-33333-55555',buyer_username:'different-buyer',label_metadata:{}});
@@ -298,25 +298,28 @@ test('injected label selects the full buyer batch in an open modal and completio
     document.querySelector('#worker-no-inventory-note').value='Keep this packing note';
     state.noInventoryEvidencePhotos=[{bucket:'test',path:'existing-photo.jpg'}];
   });
-  await expect(page.locator('#worker-no-inventory-count')).toHaveText('1 of 2 selected');
+  await expect(page.locator('#worker-no-inventory-count')).toContainText('1 of 2 selected');
   await injectLabel(page,{orderId:db.orders[0].order_number});
-  await expect(page.locator('#worker-no-inventory-count')).toHaveText('4 of 4 selected');
-  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
-  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-a2','line-b','line-b2']);
-  assert.deepEqual(await page.evaluate(()=>[...state.adminSelectedLineIds].sort()),['line-a','line-a2','line-b','line-b2']);
+  await expect(page.locator('#worker-no-inventory-count')).toContainText('2 of 3 selected');
+  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(2);
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-a2']);
+  assert.deepEqual(await page.evaluate(()=>[...state.adminSelectedLineIds].sort()),['line-a','line-a2']);
   assert.equal(await page.evaluate(()=>state.noInventoryEvidencePhotos[0].path),'existing-photo.jpg');
   await expect(page.locator('#worker-no-inventory-note')).toHaveValue('Keep this packing note');
-  assert.ok(db.calls.some(call=>call.name==='list_pending_ebay_order_matches'&&call.args._buyer_usernames.length),'associated orders are loaded from the database, even if not in the current view');
+  assert.ok(!db.calls.some(call=>call.name==='list_pending_ebay_order_matches'&&call.args._buyer_usernames.length),'label scope never expands by buyer');
+  assert.deepEqual(db.calls.find(call=>call.name==='append_ebay_shipping_label').args._order_ids,['order-a']);
+  assert.equal(db.orders[1].label_file_path,undefined);
   await page.locator('#confirm-worker-no-inventory').click();
   await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
   const completion=db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence');
-  assert.deepEqual([...completion.args._order_line_ids].sort(),['line-a','line-a2','line-b','line-b2']);
+  assert.deepEqual([...completion.args._order_line_ids].sort(),['line-a','line-a2']);
+  assert.equal(db.lines.find(line=>line.id==='line-b').line_status,'pending');
   assert.equal(completion.args._notes,'Keep this packing note');
   assert.equal(db.lines.find(line=>line.id==='unrelated').line_status,'pending');
   assert.equal(db.lines.find(line=>line.id==='partial').fulfilled_quantity,1);
 });
 
-test('bulk label keeps every declared order and opens a fresh checkout with all associated buyer lines selected',async t=>{
+test('bulk label keeps every declared order and selects only their item lines',async t=>{
   const db=database();db.orders[1].buyer_username='second-buyer';
   const page=await open(t,db);await prepareLabelBatch(page);
   db.lines.push({...db.lines[0],id:'line-a2'},{...db.lines[1],id:'line-b2'});
@@ -329,7 +332,7 @@ test('bulk label keeps every declared order and opens a fresh checkout with all 
   await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
   // Select All is a default, not a forced selection after staff review.
   await page.locator('[data-no-inventory-line="line-b2"]').uncheck();
-  await expect(page.locator('#worker-no-inventory-count')).toHaveText('3 of 4 selected');
+  await expect(page.locator('#worker-no-inventory-count')).toContainText('3 of 4 selected');
   await page.locator('#select-all-worker-no-inventory').click();
   await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
   await page.locator('[data-no-inventory-line="line-b2"]').uncheck();
@@ -339,12 +342,28 @@ test('bulk label keeps every declared order and opens a fresh checkout with all 
   assert.equal(db.lines.find(line=>line.id==='line-b2').line_status,'pending');
 });
 
+test('two selected same-buyer orders receive the combined label while a third stays untouched',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  const third={id:'order-c',order_number:'11-22222-55555',buyer_username:db.orders[0].buyer_username,label_metadata:{}};
+  db.orders.push(third);db.lines.push({...db.lines[0],id:'line-c',order_id:third.id,order:third});
+  await page.evaluate(line=>{state.orders.push(line);state.adminSelectedLineIds=new Set(['line-c']);},db.lines.at(-1));
+  await injectLabel(page,{source:'ebay-bulk-label-confirmation',orderIds:db.orders.slice(0,2).map(o=>o.order_number)});
+  assert.deepEqual(db.calls.find(call=>call.name==='append_ebay_shipping_label').args._order_ids.sort(),['order-a','order-b']);
+  assert.equal(third.label_file_path,undefined);
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-b']);
+  await page.locator('[data-no-inventory-line="line-b"]').uncheck();
+  await page.locator('#confirm-worker-no-inventory').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+  assert.deepEqual(db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence').args._order_line_ids,['line-a']);
+  assert.equal(db.lines.find(l=>l.id==='line-b').line_status,'pending');assert.equal(db.lines.find(l=>l.id==='line-c').line_status,'pending');
+});
+
 test('label checkout confirms its checked batch even when the main-page focused line is lost',async t=>{
   const db=database(),page=await open(t,db);await prepareLabelBatch(page);
   db.lines.push({...db.lines[0],id:'line-a2'});
   await injectLabel(page,{orderId:db.orders[0].order_number});
-  await expect(page.locator('#worker-no-inventory-count')).toHaveText('3 of 3 selected');
-  await page.locator('[data-no-inventory-line="line-b"]').uncheck();
+  await expect(page.locator('#worker-no-inventory-count')).toContainText('2 of 3 selected');
+  await expect(page.locator('[data-no-inventory-line="line-b"]')).toHaveCount(0);
   await page.locator('#worker-no-inventory-note').fill('Reviewed batch');
   // The modal remains the user's reviewed selection when the underlying page loses focus.
   await page.evaluate(()=>{state.selectedLine=null;state.activeBuyerKey='';});
@@ -390,10 +409,10 @@ test('a missing buyer username never selects unrelated unnamed orders',async t=>
   assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-a2']);
 });
 
-test('failed full-batch lookup stops the handoff instead of saving a label with a partial default selection',async t=>{
+test('failed selected-order lookup stops the handoff before saving a label',async t=>{
   const db=database(),page=await open(t,db);await prepareLabelBatch(page);
-  db.failBuyerBatch=true;
-  await assert.rejects(injectLabel(page,{orderId:db.orders[0].order_number}),/Could not load full buyer batch/);
+  db.failMatchOffset=0;
+  await assert.rejects(injectLabel(page,{orderId:db.orders[0].order_number}),/complete pending order batch/);
   assert.equal(db.uploads.length,0);
   assert.equal(db.calls.filter(call=>call.name==='append_ebay_shipping_label').length,0);
   await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
@@ -405,11 +424,11 @@ test('batch lookup reads every database page rather than stopping at the first p
   db.lines=Array.from({length:size+1},(_,i)=>({...db.lines[0],id:`page-line-${i}`}));
   const loaded=await page.evaluate(async()=>{
     const matches=await ensureExtensionOrderLinesLoaded({orderNumbers:[lines[0].order.order_number],refresh:true});
-    const batch=await loadPendingLabelBuyerBatch(matches);
+    const batch=await getPendingLabelOrderBatch(matches);
     return {matches:matches.length,batch:batch.length};
   });
   assert.deepEqual(loaded,{matches:size+1,batch:size+1});
-  for (const field of ['_order_numbers','_buyer_usernames']) {
+  for (const field of ['_order_numbers']) {
     const requests=db.calls.filter(call=>call.name==='list_pending_ebay_order_matches'&&call.args[field].length);
     assert.deepEqual(requests.map(call=>call.args._offset),[0,size]);
   }
@@ -999,7 +1018,7 @@ test('purchase dates match the local sale day and preserve date-only imports acr
   }
 });
 
-test('fulfilled view clears pending due filters and label handoff opens its entire batch despite a previous filter',async t=>{
+test('label handoff clears old due filters but only selects the label orders from a buyer batch',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
   await page.locator('#phone-queue-filter-options [data-order-due-filter="today"]').click();
   await page.getByLabel('Earliest pending purchase date').fill('2026-10-01');
@@ -1012,12 +1031,14 @@ test('fulfilled view clears pending due filters and label handoff opens its enti
   await page.evaluate(()=>{$('order-status-filter').value='pending';applyOrderFilters();});
   await page.getByLabel('Earliest pending purchase date').fill('2026-10-02');
   await page.evaluate(async()=>{
-    await openPendingNoInventorySessionForLabel(['b-today'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
+    state.orders.find(line=>line.id==='b-today').order.order_number='11-22222-33333';
+    state.orders.find(line=>line.id==='b-later').order.order_number='11-22222-44444';
+    await openPendingNoInventorySessionForLabel(['11-22222-33333'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
   });
   assert.deepEqual(await visibleIds(page),['b-today','b-later']);
   await expect(page.locator('#buyer-remaining-count')).toBeVisible();
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   await expect(page.getByLabel('Earliest pending purchase date')).toHaveValue('');
-  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today']);
 });

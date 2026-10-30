@@ -19,29 +19,36 @@ function fixture(lines) {
 }
 const numbers = f => new URL(f.launches.at(-1).url).searchParams.get('t')?.split(',');
 
-test('one selected/filtered line launches all eligible orders for that buyer, with no single-label route',async()=>{
+test('one selected/filtered line ships only its order, leaving same-buyer siblings out',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-44444'),line('c','22-33333-55555','other')]);
   await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[0]]);
-  assert.deepEqual(numbers(f),['11-22222-33333','11-22222-44444']);
-  assert.deepEqual([...f.checks[0].args._line_ids],['a','b']);
-  assert.match(f.messages.at(-1).message,/Combine orders per buyer/);
+  assert.equal(f.launches[0].url,'https://www.ebay.com/ship/single/11-22222-33333');
+  assert.deepEqual([...f.checks[0].args._line_ids],['a']);
+  assert.match(f.messages.at(-1).message,/Only the selected orders/);
   assert.equal(f.ctx.stateRef.adminSelectedLineIds.size,0,'shipping scope does not change checkout selection');
 });
 
-test('customer action needs no checkboxes; direct detail and order-number routes cannot bypass combining',async()=>{
+test('buyer action requires checked orders, while a detail action ships just its focused order',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-44444')]);
   f.ctx.stateRef.selectedLine=f.ctx.stateRef.orders[0];
   await f.ctx.openSelectedEbayLabelPage();
   await f.ctx.openBuyerGroupSelectedEbayLabelPages({lines:[f.ctx.stateRef.orders[0]]});
   await f.ctx.openEbayLabelPagesForOrderNumbers(['11-22222-33333']);
-  assert.equal(f.launches.length,3);
-  for(const launch of f.launches) assert.equal(launch.url,'https://www.ebay.com/ship/bulk?t=11-22222-33333,11-22222-44444');
+  assert.equal(f.launches.length,2);
+  for(const launch of f.launches) assert.equal(launch.url,'https://www.ebay.com/ship/single/11-22222-33333');
+  f.ctx.stateRef.adminSelectedLineIds=new Set(['b']);
+  await f.ctx.openBuyerGroupSelectedEbayLabelPages({lines:[f.ctx.stateRef.orders[0]]});
+  assert.equal(f.launches.at(-1).url,'https://www.ebay.com/ship/single/11-22222-44444');
+  f.ctx.stateRef.adminSelectedLineIds=new Set(['a','b']);
+  await f.ctx.openBuyerGroupSelectedEbayLabelPages({lines:[f.ctx.stateRef.orders[0]]});
+  assert.deepEqual(numbers(f),['11-22222-33333','11-22222-44444']);
 });
 
 test('two item lines in the same order stay in combined flow, without duplicate order numbers',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-33333')]);
   await f.ctx.openEbayLabelPagesForOrderNumbers(['11-22222-33333']);
   assert.deepEqual(numbers(f),['11-22222-33333']);
+  f.ctx.stateRef.adminSelectedLineIds=new Set(['a','b']);
   assert.equal(f.ctx.getShippingLabelAction(f.ctx.getBuyerShippingLabelLines(f.ctx.stateRef.orders[0])).combined,true);
 });
 
@@ -54,11 +61,11 @@ test('single eligible item still opens a normal label and skips closed, refunded
   assert.deepEqual([...f.checks[0].args._line_ids],['a']);
 });
 
-test('batch of different buyers expands each buyer separately and never pulls an unrelated customer',async()=>{
+test('batch of different buyers preserves the exact selected orders',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-44444'),line('c','22-33333-55555','other'),
     line('d','22-33333-66666','other'),line('e','33-44444-77777','unrelated')]);
   await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[0],f.ctx.stateRef.orders[2]]);
-  assert.deepEqual(numbers(f),['11-22222-33333','11-22222-44444','22-33333-55555','22-33333-66666']);
+  assert.deepEqual(numbers(f),['11-22222-33333','22-33333-55555']);
 });
 
 test('missing buyer usernames do not combine unrelated orders',async()=>{
@@ -67,25 +74,27 @@ test('missing buyer usernames do not combine unrelated orders',async()=>{
   assert.equal(f.launches[0].url,'https://www.ebay.com/ship/single/11-22222-33333');
 });
 
-test('a missing sibling order number blocks a partial combined label',async()=>{
+test('an unselected missing order number does not block the selected shipment',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','')]);
   await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[0]]);
-  assert.equal(f.launches.length,0);assert.match(f.messages.at(-1).message,/missing its eBay order number/);
+  assert.equal(f.launches.length,1);
+  await f.ctx.openEbayLabelPagesForLines(f.ctx.stateRef.orders);
+  assert.equal(f.launches.length,1);assert.match(f.messages.at(-1).message,/missing its eBay order number/);
 });
 
-test('database eligibility failure closes the blank tab without opening eBay, including expanded orders',async()=>{
+test('database eligibility failure closes the blank tab without opening eBay',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-44444')]);
   f.ctx.supabase.rpc=async(name,args)=>{f.checks.push({name,args});return {data:[{order_number:'11-22222-44444',reason:'Refund reported'}]};};
-  await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[0]]);
+  await f.ctx.openEbayLabelPagesForLines(f.ctx.stateRef.orders);
   assert.deepEqual([...f.checks[0].args._line_ids],['a','b']);
   assert.equal(f.launches[0].closed,true);assert.equal(f.launches[0].url,undefined);
   assert.match(f.messages.at(-1).message,/Refund/);
 });
 
-test('blocked lines in a whole eBay order cannot slip through the expanded buyer scope',async()=>{
+test('blocked sibling lines within a selected eBay order still prevent label creation',async()=>{
   const f=fixture([line('a','11-22222-33333'),line('b','11-22222-44444'),line('c','11-22222-44444','buyer-one',{line_status:'cancelled'})]);
-  await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[0]]);
-  assert.equal(f.launches[0].closed,true);assert.equal(f.launches[0].url,undefined);
+  await f.ctx.openEbayLabelPagesForLines([f.ctx.stateRef.orders[1]]);
+  assert.equal(f.launches.length,0);assert.match(f.messages.at(-1).message,/cancel/i);
 });
 
 test('extension safety payload exposes loaded state and refunds without combining unknown buyers',()=>{

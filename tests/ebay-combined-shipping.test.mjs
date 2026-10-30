@@ -17,13 +17,13 @@ test('separate same-buyer shipments block review and final purchase even when eB
 test('a verified combined shipment permits purchase with a different buyer in its own package',()=>{
   assert.equal(assess({...base,shipments:[row(a,b),row(c)]}).blocked,false);
 });
-test('single-order entry cannot miss another pending order for that buyer',()=>{
+test('one selected order does not pull in other pending orders for that buyer',()=>{
   const r=assess({...base,single:true,shipments:[row(a)]});
-  assert.equal(r.blocked,true);assert.equal(r.action,'load');assert.deepEqual(r.orderNumbers,[a,b]);
+  assert.equal(r.blocked,false);assert.deepEqual(r.orderNumbers,[a]);
 });
-test('removing a sibling from bulk shipping does not bypass one-package rule',()=>{
+test('a partial shipment leaves unselected same-buyer orders outside its scope',()=>{
   const r=assess({...base,shipments:[row(a),row(c)]});
-  assert.equal(r.blocked,true);assert.equal(r.action,'load');assert.deepEqual(new Set(r.orderNumbers),new Set([a,b,c]));
+  assert.equal(r.blocked,false);assert.deepEqual(new Set(r.orderNumbers),new Set([a,c]));
 });
 test('Undo combine immediately changes the decision back to blocked',()=>{
   assert.equal(assess({...base,shipments:[row(a,b)]}).blocked,false);
@@ -49,9 +49,9 @@ test('refunded sibling orders are excluded; trying to ship the refunded order st
   assert.equal(assess({ready:true,priorities,single:true,shipments:[row(a)]}).blocked,false);
   const r=assess({ready:true,priorities,shipments:[row(a,b)]});assert.equal(r.blocked,true);assert.match(r.reason,/Refund reported/);
 });
-test('missing order identity cannot silently drop an eligible item from the package',()=>{
+test('an unselected item with a missing order identity is not added to the package',()=>{
   const priorities=[group([a])];priorities[0].lines.push({orderNumber:'',shippingEligible:true});
-  assert.equal(assess({ready:true,priorities,single:true,shipments:[row(a)]}).blocked,true);
+  assert.equal(assess({ready:true,priorities,single:true,shipments:[row(a)]}).blocked,false);
 });
 test('published manifest loads the guard before eBay purchase handlers with no new permissions',async()=>{
   const manifest=JSON.parse(await readFile(new URL('../tools/ebay-og-order-link-extension/manifest.json',import.meta.url),'utf8'));
