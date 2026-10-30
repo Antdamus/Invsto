@@ -159,7 +159,7 @@
       progress(`Preparing customer ${customers.length+1} of ${names.length}: ${name}...`);
       const records=await buyer.loadRecords(client,name,()=>{},{evidenceLineIds:lines.map(l=>l.id)});
       const customer=makeCustomer(name,records,lines,baseUrl,new Date(preparedAt));
-      await buyer.loadImages(client,customer.rows,()=>{});customers.push(customer);
+      await buyer.loadImages(client,customer.rows,progress,{allImages:true});customers.push(customer);
     }
     return makeReport(customers,scope,preparedAt);
   }
@@ -171,6 +171,20 @@
     ['Partial refunds',c.partial.amount,`${c.partial.count} orders / included in total refunds`],
     ['Requests / pending',String(c.financial.requestedOrders),'Orders / not deducted from spending'],
   ];}
+  function screenshots(row){
+    return Array.isArray(row.screenshots)?row.screenshots:row.image?[{image:row.image,review:row.review||'',createdAt:''}]:[];
+  }
+  function screenshotFigure(row,shot,index,total){
+    return `<figure class="evidence-shot${shot.image?'':' evidence-unavailable'}">${shot.image?`<img src="${html(shot.image.crop)}" alt="Screenshot ${index+1} of ${total}: ${html(row.title)}" loading="lazy">`:`<div class="image-placeholder"><span>SCREENSHOT UNAVAILABLE</span><p>${html(shot.status)}</p><a href="${html(row.historyUrl)}" target="_blank" rel="noopener">Open system record ↗</a></div>`}<figcaption><strong>Screenshot ${index+1} of ${total}</strong><span>${shot.createdAt?`Saved ${html(date(shot.createdAt))}`:'Saved item evidence · verify against the title'}</span>${shot.review?`<p class="evidence-review">${html(shot.review)}</p>`:''}</figcaption></figure>`;
+  }
+  function primaryEvidence(row){
+    const shots=screenshots(row);
+    return shots.length?screenshotFigure(row,shots[0],0,shots.length):`<div class="image-placeholder"><span>ITEM EVIDENCE</span><p>${html(row.imageStatus)}</p><a data-report-receipt="${html(row.id)}" href="${html(buyer.receiptAction(row).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(row).label)} ↗</a></div>`;
+  }
+  function additionalEvidence(row){
+    const shots=screenshots(row);
+    return shots.length>1?`<section class="evidence-gallery" aria-label="Additional screenshots for ${html(row.title)}"><header><div class="eyebrow">ITEM EVIDENCE / ${shots.length} SAVED SCREENSHOTS</div><h4>More views of this item</h4><p>All saved screenshots matched to this order line, newest first.</p></header><div class="evidence-grid">${shots.slice(1).map((shot,i)=>screenshotFigure(row,shot,i+1,shots.length)).join('')}</div></section>`:'';
+  }
   function render(model){
     return `<header class="report-hero"><div class="eyebrow">OG JEWELERS / FULFILLMENT PRIORITIES</div><h1>Missing items.<br><em>Every detail, in one place.</em></h1><p>Customer history, item evidence and shipping deadlines.</p><div class="edition">Prepared ${html(model.date)}<br>Scope: ${html({all:'All marked missing items',watches:'Missing watches','not-found':'Items marked not found'}[model.scope])}</div></header>
       <div class="overview"><div><strong>${model.count}</strong><span>Missing item lines</span></div><div><strong>${model.customers.length}</strong><span>Customers</span></div><div class="is-overdue"><strong>${model.overdue}</strong><span>Overdue lines</span></div><div class="is-today"><strong>${model.today}</strong><span>Due today</span></div></div>
@@ -185,10 +199,11 @@
         <h3 class="item-index-heading">Missing item index</h3><nav class="missing-item-index" aria-label="Missing items for ${html(c.name||c.username)}">${c.rows.map((r,j)=>`<a href="#missing-item-${html(r.id)}" class="${r.deadline.level}"><span><strong>${j+1}. ${html(r.title)}</strong><small>Order ${html(r.orderNumber)}</small></span><span><small>Original item amount</small><strong class="index-item-price">${html(money(r.price.total,r.price.currency))}</strong><small>Qty ${r.price.quantity}</small></span><span class="index-shipping"><small>${r.deadline.level==='overdue'?'Overdue for':'Shipping status'}</small><strong class="index-item-deadline">${html(r.deadline.level==='overdue'?r.deadline.age:r.deadline.label)}</strong></span></a>`).join('')}</nav>
         ${c.rows.map((r,j)=>`<article class="missing-item ${r.deadline.level}" id="missing-item-${html(r.id)}"><div class="item-heading"><div><strong class="item-customer">${html(r.customerName||c.name||'Customer name not recorded')}</strong><span class="item-owner">eBay: ${html(c.username)}</span><span>ITEM ${j+1} / ORDER ${html(r.orderNumber)}</span></div><span class="pill ${r.deadline.level}">${html(r.deadline.label)}</span></div>
           <div class="deadline-banner"><strong>${r.deadline.level==='overdue'?`Overdue for ${html(r.deadline.age)}`:html(r.deadline.label)}</strong><span>${r.deadline.since?`Overdue since ${html(r.deadline.since)}`:`Ship by ${html(r.deadline.due)}`}</span></div>
-          <div class="item-body"><div class="item-image">${r.image?`<img src="${r.image.crop}" alt="Saved screenshot for ${html(r.title)}"><small>Saved item evidence · verify against the title</small>`:`<div class="image-placeholder"><span>ITEM EVIDENCE</span><p>${html(r.imageStatus)}</p><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>`}</div>
+          <div class="item-body"><div class="item-image">${primaryEvidence(r)}</div>
           <div class="item-details"><div class="eyebrow">ORIGINAL PURCHASE</div><h3>${html(r.title)}</h3><p class="item-price">${html(money(r.price.total,r.price.currency))}<small>Qty ${r.price.quantity} · original item amount</small></p><ol class="item-timeline" aria-label="Item timeline">${r.timeline.map(e=>`<li class="${e.tone}"><b>${html(e.label)}</b><span>${html(e.text)}</span></li>`).join('')}</ol><dl><dt>Missing marker</dt><dd>${html(r.markedBy)}<small>${html(r.markedAt)}</small></dd><dt>eBay item</dt><dd>${html(r.item||'Not recorded')}</dd><dt>Saved eBay status</dt><dd>${html(r.ebayStatus)}</dd></dl></div></div>
+          ${additionalEvidence(r)}
           ${r.groups.length?`<div class="item-note"><b>Grouped order context</b>${r.groups.map(g=>`<p>${html(g)}</p>`).join('')}</div>`:''}
-          ${r.notes.length?`<div class="item-note"><b>Item notes · newest first</b>${r.notes.map(n=>`<div class="item-note-entry"><strong>${html(n.author)}</strong><small>${html(n.date)}${n.date!=='Not recorded'?' · Eastern time':' · Date/time not recorded'}</small><p>${html(n.text)}</p></div>`).join('')}</div>`:''}${r.review?`<p class="verification">${html(r.review)}</p>`:''}
+          ${r.notes.length?`<div class="item-note"><b>Item notes · newest first</b>${r.notes.map(n=>`<div class="item-note-entry"><strong>${html(n.author)}</strong><small>${html(n.date)}${n.date!=='Not recorded'?' · Eastern time':' · Date/time not recorded'}</small><p>${html(n.text)}</p></div>`).join('')}</div>`:''}
           <details class="refund-context"${r.refund?.refundSignal||r.refund?.requests.length?' open':''}><summary>${html(r.refund?.label||'Refund status not recorded')}</summary>${refunds.detailLines(r.refund).map(s=>`<p>${html(s)}</p>`).join('')}${(r.refund?.requests||[]).map(q=>`<a href="${html(q.url)}" target="_blank" rel="noopener">Review case ${html(q.caseNumber)}</a>`).join(' ')}</details>
           <nav class="item-navigation" aria-label="Report navigation"><a href="#customer-directory">↑ Customer directory</a><a href="#customer-${i}">↑ Customer profile</a></nav>
           <div class="item-links"><a href="${html(r.orderUrl)}" target="_blank" rel="noopener">eBay order ↗</a><a href="${html(r.pendingUrl)}" target="_blank" rel="noopener">Pending order ↗</a><a href="${html(r.historyUrl)}" target="_blank" rel="noopener">System record ↗</a><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>
@@ -214,7 +229,7 @@
     }catch(error){progress('Report could not be completed.');$('error').textContent=error.message||'Please try again.';$('error').hidden=false;}
     finally{busy=false;$('refresh-report').disabled=false;$('report-scope').disabled=false;}
   }
-  const api={loadQueue,selectMissing,deadline,elapsed,missingAge,timeline,itemNotes,latestNote,directoryUrgency,makeCustomer,makeReport,load,stats,render,start,money,date,NOTICE,NOTES,POLICY_URL};
+  const api={loadQueue,selectMissing,deadline,elapsed,missingAge,timeline,itemNotes,latestNote,directoryUrgency,makeCustomer,makeReport,load,stats,screenshots,render,start,money,date,NOTICE,NOTES,POLICY_URL};
   root.OGMissingReport=api;if(typeof module!=='undefined')module.exports=api;
   if(typeof document!=='undefined'&&document.body?.dataset.page==='ebay-missing-report'){
     const boot=()=>{document.getElementById('refresh-report').addEventListener('click',start);document.getElementById('report-scope').addEventListener('change',start);start();};

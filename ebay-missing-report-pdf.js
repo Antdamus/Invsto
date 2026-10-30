@@ -72,6 +72,19 @@
           for(const s of wrap(value,540,size,font)){await this.ensure(size*1.4);await text(this.page,s,36,this.y,size,font,fill);this.y-=size*1.4;}this.y-=gap;
         }};
     }
+    async function screenshot(page,shot,index,total,x,top,w,h){
+      rect(page,x,top-h,w,h,color('e9ede7'));
+      if(shot.image){
+        const data=shot.image.crop,image=/^data:image\/png/.test(data)?await pdf.embedPng(data):await pdf.embedJpg(data);
+        const scale=Math.min((w-16)/image.width,(h-57)/image.height);
+        page.drawImage(image,{x:x+(w-image.width*scale)/2,y:top-h+47+(h-57-image.height*scale)/2,width:image.width*scale,height:image.height*scale});
+      }else{
+        await block(page,'Screenshot unavailable',x+16,top-45,w-32,15,2,amber);
+        await block(page,shot.status||'Refresh the report or open the system record.',x+16,top-85,w-32,9,0,muted);
+      }
+      await text(page,`SCREENSHOT ${index+1} OF ${total}`,x+12,top-h+28,8,1,ink);
+      await text(page,shot.createdAt?`Saved ${report.date(shot.createdAt)}`:'Saved item evidence / verify against title',x+12,top-h+13,7,0,muted);
+    }
     let page=await newPage('Report overview');
     rect(page,0,501,612,234,ink);
     await text(page,'FULFILLMENT PRIORITIES',36,701,9,1,color('d6bc8e'));
@@ -163,12 +176,11 @@
         await f.write(`${r.price.source}. Item amount excludes shipping and tax.`,8,0,muted,16);
         const timelineH=r.timeline.reduce((h,e)=>h+wrap(e.label,233,10,1).length*14+wrap(e.text,233,9).length*12.6+16,0);
         const evidenceH=Math.max(210,timelineH+24);await f.ensure(evidenceH+15);
-        const top=f.y;rect(f.page,36,top-evidenceH,258,evidenceH,color('e9ede7'));
-        if(r.image){
-          const data=r.image.crop,image=/^data:image\/png/.test(data)?await pdf.embedPng(data):await pdf.embedJpg(data),scale=Math.min(242/image.width,(evidenceH-38)/image.height);
-          f.page.drawImage(image,{x:44+(242-image.width*scale)/2,y:top-evidenceH+28+(evidenceH-38-image.height*scale)/2,width:image.width*scale,height:image.height*scale});
-          await text(f.page,'SAVED ITEM EVIDENCE',48,top-evidenceH+13,8,1,muted);
+        const shots=report.screenshots(r),top=f.y;
+        if(shots.length){
+          await screenshot(f.page,shots[0],0,shots.length,36,top,258,evidenceH);
         }else{
+          rect(f.page,36,top-evidenceH,258,evidenceH,color('e9ede7'));
           await text(f.page,'ITEM EVIDENCE',54,top-evidenceH/2+34,9,1,muted);
           await block(f.page,r.imageStatus||'No saved item screenshot',54,top-evidenceH/2+10,218,17,2,muted);
           await text(f.page,'Use the video receipt link below.',54,top-evidenceH+24,9,0,muted);
@@ -181,10 +193,10 @@
           const yy=await block(f.page,e.label,333,ty,233,10,1,tone(e.tone));await block(f.page,e.text,333,yy-3,233,9,0,muted);ty-=h;
         }
         f.y=top-evidenceH-22;
+        if(shots[0]?.review)await f.write(`Screenshot 1: ${shots[0].review}`,9,1,amber);
         await f.write(`Missing marker: ${r.missingReason} | ${r.markedBy} | ${r.markedAt}`,8,0,muted);
         await f.write(`eBay item ${r.item||'Not recorded'} | Saved eBay status: ${r.ebayStatus}`,8,0,muted);
         for(const group of r.groups)await f.write(group,8,0,muted);
-        if(r.review)await f.write(r.review,9,1,amber);
         if(r.notes?.length){
           await f.ensure(75);await f.write('ITEM NOTES / NEWEST FIRST',8,1,gold,8);
           for(const note of r.notes){
@@ -198,6 +210,15 @@
         if(refundActivity)await f.write('REFUND CONTEXT',8,1,gold,5);
         for(const [i,s] of refunds.detailLines(r.refund).entries())await f.write(s,i===0&&refundActivity?10:8,i===0?1:0,i===0&&refundActivity?rose:muted,4);
         for(const q of r.refund?.requests||[]){await f.ensure(28);await link(f.page,`Review case ${q.caseNumber}`,q.url,36,f.y,9);f.y-=26;}
+        // Keep the item details together before flowing additional views onto gallery pages.
+        for(let si=1;si<shots.length;si+=2){
+          const pair=shots.slice(si,si+2),cardWidth=pair.length===1?540:258,cardHeight=pair.length===1?270:220;
+          await f.ensure(cardHeight+47);
+          await f.write(`MORE VIEWS / SCREENSHOTS ${si+1}${pair.length>1?`-${si+2}`:''} OF ${shots.length}`,9,1,gold,8);
+          for(const [offset,shot] of pair.entries())await screenshot(f.page,shot,si+offset,shots.length,36+offset*282,f.y,cardWidth,cardHeight);
+          f.y-=cardHeight+20;
+          for(const [offset,shot] of pair.entries())if(shot.review)await f.write(`Screenshot ${si+offset+1}: ${shot.review}`,9,1,amber);
+        }
       }
     }
     customerKey=null;
@@ -206,7 +227,7 @@
       ['MISSING ITEMS','Only pending item lines explicitly marked not found or attached to an active missing-watch hold appear. Unreviewed items are not assumed missing. Other items in the same buyer package are excluded; grouped order context is shown when saved.'],
       ['CUSTOMER FINANCES',report.NOTES],
       ['DEADLINES & TIMELINE','The timeline follows the dates available in saved records. Date-only purchases do not imply an exact purchase time. Overdue duration runs from the shipping deadline and is measured at report preparation time. Missing-marker dates and staff attribution appear in the timeline. A date-only shipping deadline becomes overdue at the start of the next Pacific day; exact eBay timestamps are respected.'],
-      ['ITEM EVIDENCE & LINKS','Screenshots are matched to the individual item. If a direct video receipt is not saved, the PDF links to the eBay order to find the Live receipt. Order, system, buyer-report and case links may require sign-in. Customer directory and item index entries are clickable.'],
+      ['ITEM EVIDENCE & LINKS','All saved screenshots matched to each individual item are numbered, newest first. Additional views continue on extra pages as needed; an unavailable screenshot is identified so you can refresh the report or check the system record. Images show the item area when a saved crop is available. If a direct video receipt is not saved, the PDF links to the eBay order to find the Live receipt. Order, system, buyer-report and case links may require sign-in. Customer directory and item index entries are clickable.'],
       ['SHIPPING PRIORITY',report.NOTICE],
     ]){await f.ensure(50);await f.write(title,9,1,gold,7);await f.write(body,10,0,ink,18);}
     await f.ensure(24);await link(f.page,'eBay payment-hold policy',report.POLICY_URL,36,f.y);

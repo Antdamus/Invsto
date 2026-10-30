@@ -231,23 +231,33 @@
       return {full, crop: valid ? render(rect, 1100) : full, cropped: Boolean(valid)};
     } finally { URL.revokeObjectURL(url); }
   }
-  async function loadImages(client, rows, progress = () => {}) {
+  async function loadImages(client, rows, progress = () => {}, {allImages = false} = {}) {
     let completed = 0, next = 0;
     async function worker() {
       while (next < rows.length) {
         const row = rows[next++];
+        row.image = null; row.review = '';
+        if (allImages) row.screenshots = [];
         for (const photo of row.photos) {
+          const screenshot = {image:null, createdAt:photo.created_at || '', review:'', status:'Saved screenshot could not be loaded. Refresh the report or open the system record.'};
           try {
             const {data, error} = await client.storage.from(photo.bucket).download(photo.path);
             if (error || !data) throw error || new Error('No image');
-            row.image = await blobImage(data, photo);
+            screenshot.image = await blobImage(data, photo);
             const digest = await root.crypto.subtle.digest('SHA-256', new TextEncoder().encode(photo.path));
             const fingerprint = [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
-            row.review = photo.metadata?.reviewNote || SCREENSHOT_REVIEWS[fingerprint] || '';
+            screenshot.review = photo.metadata?.reviewNote || SCREENSHOT_REVIEWS[fingerprint] || '';
+            screenshot.status = 'Saved item screenshot';
+            if (!row.image) { row.image = screenshot.image; row.review = screenshot.review; }
             row.videoUrl = row.videoUrl || receiptUrl(photo, row.item);
             row.imageStatus = 'Saved item screenshot';
-            break;
-          } catch { row.imageStatus = 'Saved screenshot could not be loaded. Retry the report or open the system record.'; }
+          } catch { row.imageStatus = screenshot.status; }
+          if (allImages) row.screenshots.push(screenshot);
+          else if (row.image) break;
+        }
+        if (allImages && row.screenshots.length) {
+          const loaded = row.screenshots.filter(s => s.image).length;
+          row.imageStatus = `${loaded} of ${row.screenshots.length} saved screenshots loaded`;
         }
         progress(`Preparing screenshots: ${++completed} of ${rows.length} items...`);
       }
