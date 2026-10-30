@@ -72,10 +72,10 @@ async function open(t, {width = 390, admin = false} = {}) {
   return page;
 }
 
-test('queue summary shows before-fee value and confirmed after-fee amounts with a visible disclaimer', async t => {
+test('queue summary shows shipping separately and the dollar amount of estimated fees, updating to actual fees', async t => {
   const page = await open(t, {width: 1440, admin: true});
   await expect(page.locator('#summary-pending-value')).toHaveText('$712.00 item sales · before fees');
-  await expect(page.locator('#summary-pending-fees')).toContainText('fees missing for 8 of 8 lines');
+  await expect(page.locator('#summary-pending-fees')).toHaveText('$670.40 items + shipping after eBay fees · $41.60 of fees estimated');
   await page.evaluate(() => {
     const usd = value => ({value: String(value), currency: 'USD'});
     state.orders.forEach(line => {
@@ -89,9 +89,17 @@ test('queue summary shows before-fee value and confirmed after-fee amounts with 
   await expect(page.locator('#summary-pending-shipping')).toHaveText('Shipping collected: $40.00');
   await expect(page.locator('#summary-pending-fees')).toHaveText('$728.00 items + shipping after eBay fees');
   await expect(page.locator('.summary-money-disclaimer')).toBeVisible();
+  await expect(page.locator('.summary-money-disclaimer')).toContainText('5.5% + $0.30 per order');
   await expect(page.locator('.summary-money-disclaimer')).toContainText('shipping labels, refunds and item costs are not deducted');
+  await page.evaluate(() => {
+    state.orders.slice(4).forEach(line => delete line.order.raw_payload.order.totalMarketplaceFee);
+    renderSummaryStrip();
+  });
+  await expect(page.locator('#summary-pending-shipping')).toHaveText('Shipping collected: $40.00');
+  await expect(page.locator('#summary-pending-fees')).toHaveText('$718.12 items + shipping after eBay fees · $21.88 of fees estimated');
+  await expect(page.locator('#summary-overdue-fees')).toHaveText('$718.12 items + shipping after eBay fees · $21.88 of fees estimated');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-  await page.locator('#summary-strip').screenshot({path: 'test-results/pending-summary-values.png'});
+  await page.locator('#summary-strip').screenshot({path: 'test-results/pending-summary-estimated-fees.png'});
   assert.deepEqual(await page.evaluate(() => databaseWrites), []);
 });
 

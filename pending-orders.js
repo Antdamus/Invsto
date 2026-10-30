@@ -3513,8 +3513,8 @@ function getPendingOrderLineAmounts(line) {
   const rawLine = line.raw_payload?.line || {};
   const financials = order.raw_payload?.order || {};
   const currency = rawLine.total?.currency || rawLine.lineItemCost?.currency || financials.pricingSummary?.total?.currency;
-  // Older net_payout fields can be estimates before marketplace fees. Use only
-  // an actual eBay fee, allocated over ALL original order lines, including closed ones.
+  // Older net_payout fields can be estimates before marketplace fees. Prefer the
+  // actual fee, or a labeled estimate, allocated over ALL original order lines.
   const orderLines = Array.isArray(financials.lineItems) ? financials.lineItems : [];
   const lineItemId = rawLine.lineItemId || line.transaction_id;
   const matches = orderLines.filter(item => lineItemId && item.lineItemId === lineItemId);
@@ -3533,20 +3533,54 @@ function getPendingOrderLineAmounts(line) {
     if (unit != null && Number.isInteger(quantity) && quantity > 0) gross = unit * quantity;
   }
   let shipping = isApi ? usd(item.deliveryCost?.shippingCost) : cents(line.shipping_and_handling);
-  let fee = null;
+  let fee = null, feeSource = "unavailable";
   if (matched && window.OGLiveReportFinances) {
     const result = window.OGLiveReportFinances.forItem({ amount: gross == null ? null : gross / 100 }, {
       line: { ...line, raw_payload: { line: matched } },
       order: { ...order, financials },
     });
     shipping = result.shipping;
-    if (result.source === "actual") fee = result.fee;
+    fee = result.fee;
+    feeSource = result.source;
   }
-  return { gross, shipping, fee };
+  // Imported checkout totals include shipping/tax. They are only an estimation
+  // basis, never evidence that marketplace fees have already been deducted.
+  const estimateBasis = !isApi && gross != null && shipping != null
+    ? Math.max(gross + shipping, cents(line.total_price) ?? 0) : null;
+  return { gross, shipping, fee, feeSource, estimateBasis };
 }
 
-function getPendingOrderMoneySummary(lines, amounts = new Map()) {
-  let gross = 0, shipping = 0, fees = 0, missingPrices = 0, missingShipping = 0, missingFees = 0;
+function getPendingOrderAmountMap(lines) {
+  const amounts = new Map(lines.map(line => [line, getPendingOrderLineAmounts(line)]));
+  const importedOrders = new Map();
+  for (const line of lines) {
+    if (amounts.get(line).estimateBasis == null) continue;
+    const order = getOrderFromLine(line);
+    const key = line.order_id || order.id || order.order_number || line;
+    if (!importedOrders.has(key)) importedOrders.set(key, []);
+    importedOrders.get(key).push(line);
+  }
+  for (const rows of importedOrders.values()) {
+    if (!window.OGLiveReportFinances) continue;
+    const weights = rows.map(line => amounts.get(line).estimateBasis);
+    const knownBasis = weights.reduce((sum, value) => sum + value, 0);
+    const orderTotal = Number(getOrderFromLine(rows[0]).total_price);
+    const basis = Math.max(knownBasis, Number.isFinite(orderTotal) ? Math.round(orderTotal * 100) : 0);
+    const keys = rows.map((line, index) => line.id || line.transaction_id || String(index));
+    // Reserve the share belonging to closed/unloaded lines when the imported
+    // order total is larger. Never charge the fixed estimate once per item line.
+    if (basis > knownBasis) { weights.push(basis - knownBasis); keys.push("unloaded-lines"); }
+    const estimate = window.OGLiveReportFinances.forItem({ amount: basis / 100 });
+    const allocated = window.OGLiveReportFinances.allocate(estimate.fee, weights, keys);
+    rows.forEach((line, index) => Object.assign(amounts.get(line), {
+      fee: allocated[index], feeSource: "estimated",
+    }));
+  }
+  return amounts;
+}
+
+function getPendingOrderMoneySummary(lines, amounts = getPendingOrderAmountMap(lines)) {
+  let gross = 0, shipping = 0, fees = 0, estimatedFees = 0, estimatedFeeLines = 0, missingPrices = 0, missingShipping = 0, missingFees = 0;
   for (const line of lines) {
     const value = amounts.get(line) || getPendingOrderLineAmounts(line);
     if (value.gross == null) missingPrices += 1;
@@ -3555,8 +3589,12 @@ function getPendingOrderMoneySummary(lines, amounts = new Map()) {
     else shipping += value.shipping;
     if (value.fee == null) missingFees += 1;
     else fees += value.fee;
+    if (value.fee != null && value.feeSource === "estimated") {
+      estimatedFees += value.fee;
+      estimatedFeeLines += 1;
+    }
   }
-  return { gross, shipping, fees, missingPrices, missingShipping, missingFees,
+  return { gross, shipping, fees, estimatedFees, estimatedFeeLines, missingPrices, missingShipping, missingFees,
     afterFees: missingPrices || missingShipping || missingFees ? null : gross + shipping - fees };
 }
 
@@ -3586,6 +3624,7 @@ function renderPendingOrderMoneySummary(bucket, lines, amounts) {
       : totals.missingFees
       ? `After-fee total unavailable · fees missing for ${totals.missingFees} of ${lines.length} lines`
       : lines.length ? `${formatMoney(totals.afterFees / 100)} items + shipping after eBay fees` : "No open item lines";
+  if (totals.estimatedFeeLines) fees.textContent += ` · ${formatMoney(totals.estimatedFees / 100)} of fees estimated`;
 }
 
 function renderSummaryStrip() {
@@ -3600,7 +3639,7 @@ function renderSummaryStrip() {
     tomorrow: { groups: 0, lines: 0 },
   };
   const urgencyLines = { overdue: [], today: [], tomorrow: [] };
-  const amounts = new Map(openLines.map(line => [line, getPendingOrderLineAmounts(line)]));
+  const amounts = getPendingOrderAmountMap(state.orders);
 
   openGroups.forEach((group) => {
     const lines = group.lines.filter(isOpenOrderLine);

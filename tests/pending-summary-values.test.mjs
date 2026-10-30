@@ -40,13 +40,23 @@ test('actual fees allocate exact cents once across all original lines, including
   assert.equal(context.getPendingOrderMoneySummary(rows.slice(0, 2)).fees, 51);
 });
 
-test('missing fees, estimated payout, or ambiguous line identity never become a confirmed after-fee total', () => {
+test('missing fees use one order estimate, replaced by actual fees on the next render', () => {
   const {context} = app(), rows = lines();
   delete rows[0].order.raw_payload.order.totalMarketplaceFee;
   let total = context.getPendingOrderMoneySummary(rows);
-  assert.equal(total.gross, 6000); assert.equal(total.afterFees, null); assert.equal(total.missingFees, 3);
+  assert.equal(total.gross, 6000); assert.equal(total.afterFees, 5640); assert.equal(total.missingFees, 0);
+  assert.equal(total.fees, 360); assert.equal(total.estimatedFees, 360); assert.equal(total.estimatedFeeLines, 3);
+  total = context.getPendingOrderMoneySummary(rows.slice(0, 2));
+  assert.equal(total.afterFees, 2820); assert.equal(total.estimatedFees, 180);
+  rows[0].order.raw_payload.order.totalMarketplaceFee = usd(1.01);
+  total = context.getPendingOrderMoneySummary(rows);
+  assert.equal(total.afterFees, 5899); assert.equal(total.estimatedFees, 0); assert.equal(total.estimatedFeeLines, 0);
+});
+
+test('ambiguous line identity cannot duplicate a fee from a multi-line order', () => {
+  const {context} = app();
   const fresh = lines(); fresh[0].raw_payload = {}; fresh[0].transaction_id = 'unknown'; fresh[0].item_number = 'unknown';
-  total = context.getPendingOrderMoneySummary(fresh);
+  const total = context.getPendingOrderMoneySummary(fresh);
   assert.equal(total.missingFees, 1); assert.equal(total.afterFees, null);
 });
 
@@ -54,11 +64,43 @@ test('zero actual fees are known, foreign currencies are not silently mixed into
   const {context} = app(), rows = lines();
   rows[0].order.raw_payload.order.totalMarketplaceFee = usd(0);
   assert.equal(context.getPendingOrderMoneySummary(rows).afterFees, 6000);
+  assert.equal(context.getPendingOrderMoneySummary(rows).estimatedFeeLines, 0);
   rows[0].order.raw_payload.order.totalMarketplaceFee.currency = 'EUR';
-  assert.equal(context.getPendingOrderMoneySummary(rows).afterFees, null);
+  assert.equal(context.getPendingOrderMoneySummary(rows).estimatedFees, 360);
+  assert.equal(context.getPendingOrderMoneySummary(rows).afterFees, 5640);
   rows[0].raw_payload.line.total.currency = 'EUR';
   const total = context.getPendingOrderMoneySummary(rows);
   assert.equal(total.gross, 5000); assert.equal(total.missingPrices, 1);
+});
+
+test('estimates include known shipping and tax in the fee basis while revenue excludes tax', () => {
+  const {context} = app(), rows = lines().slice(0, 1);
+  const item = rows[0].raw_payload.line;
+  Object.assign(item, {lineItemCost: usd(53), total: usd(54), deliveryCost: {shippingCost: usd(1)},
+    ebayCollectAndRemitTaxes: [{amount: usd(4.32), collectionMethod: 'NET'}]});
+  rows[0].order.raw_payload.order = {lineItems: [item], totalFeeBasisAmount: usd(58.32)};
+  const total = context.getPendingOrderMoneySummary(rows);
+  assert.equal(total.gross, 5300); assert.equal(total.shipping, 100);
+  assert.equal(total.estimatedFees, 351); assert.equal(total.afterFees, 5049);
+});
+
+test('imported orders share one fixed fee across their lines and reserve the share of closed or unloaded lines', () => {
+  const {context} = app(), order = {id: 'csv-order', total_price: 60, buyer_username: 'buyer'};
+  const rows = [10, 20, 30].map((amount, index) => ({id: `csv-${index}`, order_id: order.id, order,
+    sold_for: amount, total_price: amount, quantity: 1, shipping_and_handling: 0}));
+  let total = context.getPendingOrderMoneySummary(rows);
+  assert.equal(total.fees, 360); assert.equal(total.estimatedFees, 360); assert.equal(total.afterFees, 5640);
+  total = context.getPendingOrderMoneySummary(rows.slice(0, 2));
+  assert.equal(total.fees, 180); assert.equal(total.afterFees, 2820);
+  const amounts = context.getPendingOrderAmountMap(rows);
+  total = context.getPendingOrderMoneySummary(rows.slice(0, 2), amounts);
+  assert.equal(total.fees, 180);
+  rows.reverse();
+  assert.equal(context.getPendingOrderAmountMap(rows).get(rows[2]).fee, amounts.get(rows[2]).fee);
+  // Separate eBay orders for the same buyer still each have a fixed charge.
+  const other = {...rows[0], id: 'other', order_id: 'other', order: {...order, id: 'other', total_price: 30}};
+  total = context.getPendingOrderMoneySummary([...rows, other]);
+  assert.equal(total.estimatedFees, 555);
 });
 
 test('item sales exclude shipping/tax, use API line costs once and multiply imported unit prices by quantity', () => {
@@ -99,7 +141,10 @@ test('summary dollars cover the same whole groups as the due counts, exclude clo
   assert.equal(text('summary-tomorrow-value'), '$70.00 item sales · before fees');
   assert.equal(text('summary-today-value'), '$0.00 item sales · before fees');
   assert.equal(text('summary-pending-shipping'), 'Shipping collected: $0.00');
-  assert.match(text('summary-pending-fees'), /fees missing for 1 of 3 lines/);
+  assert.equal(text('summary-pending-fees'), '$66.99 items + shipping after eBay fees · $2.50 of fees estimated');
+  assert.equal(text('summary-overdue-fees'), text('summary-pending-fees'));
+  assert.equal(text('summary-tomorrow-fees'), text('summary-pending-fees'));
+  assert.equal(text('summary-today-fees'), 'No open item lines');
   run('renderPendingOrderSummaryLoading()');
   assert.equal(text('summary-pending-value'), 'Loading value…'); assert.equal(text('summary-pending-fees'), '');
   run('renderPendingOrderSummaryError()');
