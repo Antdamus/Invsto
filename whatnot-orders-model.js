@@ -20,7 +20,9 @@
   return '';
  }
  const snapshot=lines=>lines.map(l=>({id:l.id,revision:l.revision}));
+ function scope(l,o=l.order_record){return o.status==='cancelled'||l.work_state!=='pending'?'history':['pending','failed'].includes(o.status)||l.holds?.length||l.replacement_shipment_id?'review':'pending';}
+ function deadline(l){return scope(l)==='history'?(l.ship_by_date?'Scheduled due day · '+l.ship_by_date:'Due date not provided'):urgency(l.ship_by_date).text;}
  const ready=l=>l.work_state==='pending'&&l.order_record.status==='pending_fulfillment'&&!l.item_missing&&!l.cgl_pending&&!l.holds?.length&&!l.replacement_shipment_id&&Boolean(l.tracking_number);
  function receipt(l){const direct=url(l.receipt_url);if(direct)return direct;const order=url(l.order_record?.url);return order?order+'#invsto-receipt='+encodeURIComponent(l.id)+'&order='+encodeURIComponent(l.order_id):'';}
- return {escape,url,money,time,calendar,urgency,tracking,snapshot,ready,receipt};
+ return {escape,url,money,time,calendar,urgency,tracking,snapshot,ready,receipt,scope,deadline};
 });

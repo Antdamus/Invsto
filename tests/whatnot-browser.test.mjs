@@ -44,9 +44,10 @@ test('token form sends only to authenticated edge connection and clears on close
  assert.equal(await page.evaluate(()=>localStorage.getItem('whatnotToken')),null);assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='whatnot-order-sync'&&c.body.action==='connect').length),1);await page.close();
 });
 test('report has buyer and item indexes, tracking and receipt links without inventing refunds',async()=>{
- const page=await browser.newPage();await fixture(page);const opened=page.waitForEvent('popup');await page.getByRole('button',{name:'Shown items report / PDF'}).click();const report=await opened;
+ const page=await browser.newPage();await fixture(page);await page.evaluate(()=>{fixtureLines[1].work_state='completed';fixtureLines[1].scope='history';fixtureLines[1].order_record={...fixtureLines[1].order_record,status:'completed'};});await page.getByRole('button',{name:'↻ Reload saved orders'}).click();const opened=page.waitForEvent('popup');await page.getByRole('button',{name:'Shown items report / PDF'}).click();const report=await opened;
  await expect(report.locator('h1')).toContainText('Whatnot items in this view');await expect(report.locator('.item')).toHaveCount(2);await expect(report.getByText('Refund amounts are not supplied',{exact:false})).toBeVisible();
  assert.equal(await report.locator('a[href="#directory"]').count()>1,true);await expect(report.locator('body')).toContainText('Fixture Customer');await expect(report.locator('body')).toContainText('$25.00');
+ await expect(report.locator('.item').first()).toContainText('Overdue');await expect(report.locator('.item').nth(1)).not.toContainText('Overdue');await expect(report.locator('.item').nth(1)).toContainText('Scheduled due day');
  await report.screenshot({path:'output/whatnot/report-preview.png',fullPage:true});await report.close();await page.close();
 });
 test('Whatnot shadow-player capture identifies the exact order and crops the visible video',async()=>{
