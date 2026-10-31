@@ -104,9 +104,9 @@
    const header=async()=>{await ensure(40);rect(40,y-8,532,21,color('e6ece4'));await text(page,'CARRIER DATE / TIME',48,y,7,1,muted);await text(page,'SCAN / LOCATION',207,y,7,1,muted);y-=23;};await header();
    for(const [n,r] of rows.entries()){
     if(!r.date){await write(r.body,9,0,ink,8);continue;}
-    const left=wrap(r.date.replace(/(\d{4}),?\s+(?:at\s+)?/,'$1\n'),145,8),right=wrap(r.body,355,8.5),h=Math.max(left.length*10,right.length*11)+7;
+    const left=wrap(r.date.replace(/(\d{4}),?\s+(?:at\s+)?/,'$1\n'),145,8),right=wrap(r.body,355,8.5),h=Math.max(left.length*10,right.length*10)+4;
     if(y-h<74){await newPage();await header();}if(h>580){await write(r.date,8,1,gold);await write(r.body,9);continue;}
-    if(n%2===0)rect(40,y-h+7,532,h,color('edf1ea'));let yy=y;for(const line of left){await text(page,line,48,yy,8,0,muted);yy-=10;}yy=y;for(const [j,line] of right.entries()){await text(page,line,207,yy,8.5,j===0?1:0,ink);yy-=11;}y-=h;
+    if(n%2===0)rect(40,y-h+7,532,h,color('edf1ea'));let yy=y;for(const line of left){await text(page,line,48,yy,8,0,muted);yy-=10;}yy=y;for(const [j,line] of right.entries()){await text(page,line,207,yy,8.5,j===0?1:0,ink);yy-=10;}y-=h;
    }y-=9;
   }
   async function tracking(i){await heading('Tracking & complete carrier history');
