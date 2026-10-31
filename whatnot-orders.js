@@ -27,7 +27,7 @@
  }
  async function refresh(){
   const seq=++generation;loading=true;status('Loading saved Whatnot orders…');
-  try{const r=await rpc('whatnot_workspace',{_view:view,_search:$('wn-search').value.trim(),_filter:filter,_offset:offset});if(seq!==generation)return;groups=r.groups;totalBuyers=r.buyers;
+  try{const r=await rpc('whatnot_workspace',{_view:view,_search:window.OGTrackingSearch?.needle($('wn-search').value)||$('wn-search').value.trim(),_filter:filter,_offset:offset});if(seq!==generation)return;groups=r.groups;totalBuyers=r.buyers;
    $('wn-views').innerHTML=Object.entries(knownViews).map(([v,label])=>`<button data-view="${v}" ${view===v?'aria-current="page"':''}>${label}<strong>${v==='all'?Object.values(r.counts).reduce((a,b)=>a+b,0):r.counts[v]}</strong></button>`).join('');
    const names={all:'All lines',overdue:'Overdue',today:'Due today',tomorrow:'Due tomorrow',missing:'Item not found',cgl:'Pending CGL',no_tracking:'No tracking',unknown:'Date needed'};
    $('wn-filters').innerHTML=Object.entries(names).map(([k,label])=>`<button data-filter="${k}" aria-pressed="${filter===k}">${label}<span>${r.filters[k]}</span></button>`).join('');
