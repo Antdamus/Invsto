@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OG eBay Order Link",
   "description": "Connects eBay, TikTok and Whatnot orders, receipts and shipping evidence to Invsto.",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "permissions": [
     "storage",
     "activeTab",
