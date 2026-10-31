@@ -9,12 +9,25 @@ async function save(rows,next=null){await db.exec(`update tiktok_chat_sync_state
 before(async()=>{db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role;create schema auth;create schema net;create schema cron;
  create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb);insert into auth.users values('${admin}','admin@example.test','{}'),('${staff}','staff@example.test','{"full_name":"Pat staff"}');
  create function auth.uid() returns uuid language sql stable as $$select current_setting('test.actor',true)::uuid$$;set test.actor='${admin}';
+ create function can_manage_inventory() returns boolean language sql stable as $$select current_setting('test.inventory',true) is distinct from 'no'$$;
  create table employees(user_id uuid,role text,active boolean,email_triage_access boolean);insert into employees values('${admin}','admin',true,false),('${staff}','employee',true,false);
  create table tiktok_orders(id uuid,api_buyer_id text,buyer_username text,order_number text,recipient_name text);insert into tiktok_orders values(gen_random_uuid(),'7494924360615101687','pat_buyer','577637745070936130','Pat Jones');
  create table tiktok_api_connection(singleton boolean primary key,shop_id text,credentials text);insert into tiktok_api_connection values(true,'shop','encrypted');
  create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds int) returns bigint language sql as $$select 1::bigint$$;
- create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);await db.exec(await readFile(new URL('../supabase/migrations/20261031180000_tiktok_messages.sql',import.meta.url),'utf8'));await db.exec(await readFile(new URL('../supabase/migrations/20261031193000_tiktok_chat_replies.sql',import.meta.url),'utf8'));});
+ create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);await db.exec(await readFile(new URL('../supabase/migrations/20261031180000_tiktok_messages.sql',import.meta.url),'utf8'));await db.exec(await readFile(new URL('../supabase/migrations/20261031193000_tiktok_chat_replies.sql',import.meta.url),'utf8'));await db.exec(await readFile(new URL('../supabase/migrations/20261031210000_tiktok_order_chat_markers.sql',import.meta.url),'utf8'));});
 after(async()=>db?.close());
+
+test('order chat markers isolate the shop and exact buyer, exclude message content and require both permissions',async()=>{
+ await db.exec('begin');try{
+  await save([record()]);const order=(await run('select id from tiktok_orders limit 1'))[0].id;
+  await run("insert into tiktok_chat_conversations(shop_id,conversation_id,buyer_id,unread_count) values('other-shop','7494924360615101685','7494924360615101687',99),('shop','7494924360615101666','7494924360615101667',88)");
+  const unknown='00000000-0000-4000-8000-000000000077';await run('insert into tiktok_orders(id,buyer_username) values($1,$2)',[unknown,'pat_buyer']);
+  await db.exec('set role authenticated');const rows=await run('select * from list_tiktok_order_chat_markers($1)',[[order,order,unknown]]);
+  assert.equal(rows.length,2);const matched=rows.find(r=>r.order_id===order);assert.equal(matched.chats.length,1);assert.equal(matched.chats[0].unread_count,2);assert.equal(matched.buyer_linked,true);assert.deepEqual(Object.keys(matched.chats[0]).sort(),['id','latest_message_at','synced_at','unread_count']);assert.deepEqual(rows.find(r=>r.order_id===unknown).chats,[]);assert.equal(rows.find(r=>r.order_id===unknown).buyer_linked,false);
+  await db.exec('savepoint bad_limit');await assert.rejects(run('select * from list_tiktok_order_chat_markers($1)',[Array(501).fill(order)]),/at most 500/);await db.exec('rollback to bad_limit');
+  await db.exec("set test.inventory='no'");await assert.rejects(run('select * from list_tiktok_order_chat_markers($1)',[[order]]),/access required/);
+ }finally{await db.exec('rollback');}
+});
 test('only active authorized staff can read or update chat data',async()=>{
  await save([record()]);await db.exec(`set test.actor='${staff}';set role authenticated;`);assert.equal((await run('select can_access_tiktok_messages() ok'))[0].ok,false);assert.equal((await run('select * from tiktok_chat_conversations')).length,0);await assert.rejects(run('select list_tiktok_chats()'),/access required/);await assert.rejects(run('select dispatch_tiktok_chat_worker()'),/permission denied/);
  await db.exec(`reset role;update employees set email_triage_access=true where user_id='${staff}';set role authenticated;`);assert.equal((await run('select * from tiktok_chat_conversations')).length,1);await assert.rejects(run("update tiktok_chat_conversations set triage_status='done'"),/permission denied/);

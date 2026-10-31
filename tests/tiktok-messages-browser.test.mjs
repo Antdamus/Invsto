@@ -6,9 +6,9 @@ import {chromium,expect} from '@playwright/test';
 let server,browser,origin;const root=new URL('../',import.meta.url);
 before(async()=>{server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let c=await readFile(new URL(name,root));if(name.endsWith('.html'))c=c.toString().replace(/<script\b[\s\S]*?<\/script>/gi,'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(c);}catch{res.writeHead(404).end();}});await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch();await mkdir(new URL('../output/tiktok-messages/',import.meta.url),{recursive:true});});
 after(async()=>{await browser?.close();server?.closeAllConnections();if(server)await new Promise(r=>server.close(r));});
-async function setup(page,{allowed=true,permission=false,order=false}={}){
- await page.goto(origin+'/tiktok-messages.html'+(order?'?order=00000000-0000-4000-8000-000000000099':''));
- await page.evaluate(({allowed,permission})=>{
+async function setup(page,{allowed=true,permission=false,order=false,conversation=null,multiple=false}={}){
+ await page.goto(origin+'/tiktok-messages.html'+(order?'?order=00000000-0000-4000-8000-000000000099'+(conversation?'&conversation='+encodeURIComponent(conversation):''):''));
+ await page.evaluate(({allowed,permission,multiple})=>{
   const chat={id:'00000000-0000-4000-8000-000000000001',conversation_id:'7494924360615101685',buyer_id:'7494924360615101687',buyer_name:'Morgan Ellis',latest_preview:'Could you check the tracking for my ring?',latest_message_at:'2026-10-31T16:00:00Z',unread_count:2,triage_status:'open',revision:1};
   const orders=[{id:'00000000-0000-4000-8000-000000000099',order_number:'577637745070936130',recipient_name:'Morgan Ellis',buyer_username:'morgan.ell',order_amount:124.5,stage:'pending',marketplace_status:'To ship',created_time:'2026-10-30T16:30:00Z',ship_by_date:'2026-11-02',lines:[{title:'925 silver ring · 4.2 grams',quantity:1,tracking_number:'9400111000000000001234'}]}];
   window.calls=[];window.failHistory=false;window.failNote=false;window.notes=[];window.sends=[];window.sendMode='sent';window.sendDelay=0;
@@ -17,11 +17,15 @@ async function setup(page,{allowed=true,permission=false,order=false}={}){
    if(body.action==='send_status')return {data:{attempt:sends.find(s=>s.id===body.requestId)||null}};
    if(['mark_read','open_chat'].includes(body.action))return {data:{ok:true}};
    if(body.action==='inbox')return {data:{conversations:permission?[]:[{...chat}],counts:{all:1,open:chat.triage_status==='open'?1:0,waiting:chat.triage_status==='waiting'?1:0,unread:1},status:{needs_permission:permission,connected:true,shop_name:'OG Jewelers',last_synced_at:'2026-10-31T16:00:00Z'}}};
-   if(body.action==='order')return {data:{order:orders[0],conversations:[{id:chat.id}]}};
+   if(body.action==='order')return {data:{order:orders[0],conversations:[{id:chat.id},...(multiple?[{id:'00000000-0000-4000-8000-000000000002'}]:[])]}};
    if(body.action==='conversation')return {data:{conversation:{...chat},orders,notes:[...notes],sends:[...sends],replies_enabled:true,messages:failHistory?[]:body.cursor?[{id:'1000000000000000001',index:'1',type:'TEXT',role:'BUYER',sent_at:'2026-10-30T15:59:00Z',text:'Thank you!'}]:[{id:'1000000000000000002',index:'2',type:'TEXT',role:'BUYER',sent_at:'2026-10-31T16:00:00Z',text:'Could you check the tracking for my ring?'},{id:'1000000000000000003',index:'3',type:'TEXT',role:'SHOP',sent_at:'2026-10-31T16:01:00Z',text:'We are checking the shipment for you.'},{id:'1000000000000000004',index:'4',type:'TEXT',role:'BUYER',sent_at:'2026-10-31T16:02:00Z',text:window.fixtureSafe?'I appreciate your help.': '<img src=x onerror="window.attacked=true">'}],next_page_token:body.cursor?null:'older',...(failHistory?{history_error:'TikTok is temporarily unavailable.'}:{})}};
    if(body.action==='refresh')return {data:{queued:true}};throw Error('Unexpected action');}}};
- },{allowed,permission});for(const src of ['tiktok-order-import.js','tiktok-chat-composer.js','tiktok-messages.js'])await page.addScriptTag({url:origin+'/'+src});
+ },{allowed,permission,multiple});for(const src of ['tiktok-order-import.js','tiktok-chat-composer.js','tiktok-messages.js'])await page.addScriptTag({url:origin+'/'+src});
 }
+test('queue deep links select only a conversation verified for the requested order buyer',async()=>{
+ const page=await browser.newPage();const id='00000000-0000-4000-8000-000000000002';await setup(page,{order:true,multiple:true,conversation:id});await expect(page.locator('#tm-reader')).toContainText('Morgan Ellis');assert.equal((await page.evaluate(()=>calls.find(c=>c.body?.action==='conversation'))).body.id,id);await page.close();
+ const other=await browser.newPage();await setup(other,{order:true,multiple:true,conversation:'00000000-0000-4000-8000-000000000003'});await expect(other.locator('#tm-search')).toHaveValue('577637745070936130');assert.equal((await other.evaluate(()=>calls)).some(c=>c.body?.action==='conversation'),false);await other.close();
+});
 test('order link opens exact chat; older pages, status, notes and error recovery preserve context',async()=>{
  const page=await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await setup(page,{order:true});
  await expect(page.locator('#tm-reader')).toContainText('Morgan Ellis');await expect(page.locator('.tm-message')).toHaveCount(3);assert.equal(await page.evaluate(()=>window.attacked),undefined);

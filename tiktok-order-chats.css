@@ -1,0 +1,10 @@
+.tiktok-workspace .tk-card-button.tk-chat-badge{white-space:normal;line-height:1.4;max-width:100%;min-height:44px;gap:7px}
+.tiktok-workspace .tk-chat-badge.has-chat{background:#172d38;border-color:#547d91;color:#c5e7f8}
+.tiktok-workspace .tk-chat-badge.has-unread{background:#40341c;border-color:#d6ad56;color:#ffe3a0;font-weight:800}
+.tiktok-workspace .tk-chat-badge.has-chat::before,.tiktok-workspace .tk-chat-badge.has-unread::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
+.tiktok-workspace .tk-chat-badge:focus-visible{outline:2px solid #eed08b;outline-offset:3px}
+.tiktok-workspace .tk-order-item.has-tk-unread-chat{border-left:4px solid #e2b95f;background:linear-gradient(100deg,#e2b95f12,transparent 65%)}
+.tiktok-workspace .tk-buyer.has-tk-unread-chat>.tk-buyer-header{box-shadow:inset 4px 0 #e2b95f}
+.tiktok-workspace .tk-chat-status{font-size:12px;line-height:1.6;color:#aabbb2;margin:12px 0}
+.tiktok-workspace .tk-chat-status.is-warning{color:#ffe3a0}
+@media(max-width:760px){.tiktok-workspace .tk-item-task-actions .tk-chat-badge{flex-basis:100%;justify-content:center}.tiktok-workspace .tk-chat-status{font-size:11px}}
