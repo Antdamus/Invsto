@@ -13,7 +13,7 @@ before(async()=>{db=new PGlite();await db.exec(`create role anon;create role aut
  create table tiktok_orders(id uuid,api_buyer_id text,buyer_username text,order_number text,recipient_name text);insert into tiktok_orders values(gen_random_uuid(),'7494924360615101687','pat_buyer','577637745070936130','Pat Jones');
  create table tiktok_api_connection(singleton boolean primary key,shop_id text,credentials text);insert into tiktok_api_connection values(true,'shop','encrypted');
  create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds int) returns bigint language sql as $$select 1::bigint$$;
- create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);await db.exec(await readFile(new URL('../supabase/migrations/20261031180000_tiktok_messages.sql',import.meta.url),'utf8'));});
+ create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);await db.exec(await readFile(new URL('../supabase/migrations/20261031180000_tiktok_messages.sql',import.meta.url),'utf8'));await db.exec(await readFile(new URL('../supabase/migrations/20261031193000_tiktok_chat_replies.sql',import.meta.url),'utf8'));});
 after(async()=>db?.close());
 test('only active authorized staff can read or update chat data',async()=>{
  await save([record()]);await db.exec(`set test.actor='${staff}';set role authenticated;`);assert.equal((await run('select can_access_tiktok_messages() ok'))[0].ok,false);assert.equal((await run('select * from tiktok_chat_conversations')).length,0);await assert.rejects(run('select list_tiktok_chats()'),/access required/);await assert.rejects(run('select dispatch_tiktok_chat_worker()'),/permission denied/);
@@ -34,4 +34,25 @@ test('notes keep author/time and worker tokens are single-use and cannot be used
  const c=(await run('select * from tiktok_chat_conversations'))[0];await db.exec(`set test.actor='${staff}';set role authenticated;`);const note=(await run('select * from add_tiktok_chat_note($1,$2)',[c.id,'  Check shipping  ']))[0];assert.equal(note.body,'Check shipping');assert.equal(note.author,staff);assert.equal(note.author_name,'Pat staff');assert.ok(note.created_at);await db.exec('reset role');
  await db.exec(`update tiktok_chat_sync_state set dispatch_token='${token}',lease_until=now()+interval '2 minutes',claimed=false`);assert.equal((await run('select * from claim_tiktok_chat_worker($1)',[token]))[0].claimed,true);assert.equal((await run('select * from claim_tiktok_chat_worker($1)',[token]))[0].singleton,null);
  await db.exec("update tiktok_chat_sync_state set lease_until=now()-interval '1 minute'");await assert.rejects(run('select save_tiktok_chat_page($1,$2,$3,$4)',[token,'shop','[]',null]),/expired/);
+});
+
+test('send claims are permission-checked, immutable, and cannot leak another buyer’s order',async()=>{
+ await db.exec(`reset role;set test.actor='${admin}';`);const c=(await run('select * from tiktok_chat_conversations'))[0],id='00000000-0000-4000-8000-000000000020',hash='a'.repeat(64);
+ const claim=(requestId=id,actor=staff,type='TEXT',content={content:'Shipping update'},fingerprint=hash)=>run('select claim_tiktok_chat_send($1,$2,$3,$4,$5,$6) result',[requestId,c.id,actor,type,JSON.stringify(content),fingerprint]);
+ await db.exec('set role authenticated');await assert.rejects(claim(),/permission denied/);await db.exec('reset role');
+ await assert.rejects(claim(id,'00000000-0000-4000-8000-000000000999'),/access required/);await assert.rejects(claim(id,staff,'ORDER_CARD',{order_id:'577637745070936131'}),/does not belong/);
+ assert.equal((await claim())[0].result.dispatch,true);assert.equal((await claim())[0].result.dispatch,false);
+ await assert.rejects(claim(id,staff,'TEXT',{content:'Changed'},'b'.repeat(64)),/does not match/);
+ assert.equal((await claim('00000000-0000-4000-8000-000000000021'))[0].result.dispatch,false);
+ await assert.rejects(claim('00000000-0000-4000-8000-000000000022',staff,'TEXT',{content:'Another message'},'c'.repeat(64)),/still being sent/);
+ await run('select finish_tiktok_chat_send($1,$2,$3,$4)',[id,'sent','7494924360615101699',null]);assert.equal((await claim())[0].result.attempt.status,'sent');
+ assert.equal((await run('select triage_status from tiktok_chat_conversations where id=$1',[c.id]))[0].triage_status,'waiting');
+});
+
+test('unconfirmed sends are never resent until staff explicitly reviews them; audit remains',async()=>{
+ const c=(await run('select * from tiktok_chat_conversations'))[0],id='00000000-0000-4000-8000-000000000023',hash='d'.repeat(64);
+ const claim=requestId=>run('select claim_tiktok_chat_send($1,$2,$3,$4,$5,$6) result',[requestId,c.id,staff,'TEXT',JSON.stringify({content:'Another update'}),hash]);
+ await claim(id);await run("update tiktok_chat_sends set created_at=now()-interval '3 minutes' where id=$1",[id]);const retry=(await claim('00000000-0000-4000-8000-000000000024'))[0].result;assert.equal(retry.dispatch,false);assert.equal(retry.attempt.status,'unknown');
+ await db.exec(`set test.actor='${staff}';set role authenticated`);await assert.rejects(run("update tiktok_chat_sends set status='not_sent' where id=$1",[id]),/permission denied/);
+ const reviewed=(await run('select * from review_tiktok_chat_send($1)',[id]))[0];assert.equal(reviewed.reviewed_by,staff);assert.ok(reviewed.reviewed_at);await db.exec('reset role');assert.equal((await claim('00000000-0000-4000-8000-000000000024'))[0].result.dispatch,true);
 });
