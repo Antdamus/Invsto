@@ -33,29 +33,51 @@
   }
   async function url(label,value){if(!M.safe(value))return;await ensure(24);await text(page,label,40,y,9,1,color('235f64'));annot(page,[40,y-4,40+Math.min(532,width(label,9,1)),y+12],{A:{Type:'Action',S:'URI',URI:PDFString.of(value)}});y-=23;}
   async function jump(label,key,size=11){for(const line of wrap(label,532,size,1)){await ensure(size*1.5);await text(page,line,40,y,size,1);jumps.push({page,key,box:[40,y-4,40+Math.min(532,width(line,size,1)),y+size+2]});y-=size*1.5;}y-=8;}
-  await newPage();dest.set('summary',page.ref);rect(page,0,478,612,256,ink);await text(page,'THE EBAY REVIEW COLLECTION',40,695,10,1,color('e6c88f'));await text(page,'The evidence.',40,636,40,2,white);await text(page,'Our position.',40,586,40,2,color('e6c88f'));await text(page,'A case-by-case record prepared for review.',40,523,12,0,white);y=435;
-  await write(`${model.issues.length} marked issues / ${model.issues.reduce((n,i)=>n+i.members,0)} linked case records`,18,1);await write(`${model.issues.filter(i=>i.against).length} issues decided against us / ${model.issues.filter(i=>!i.review.position.trim()).length} positions still to write`,11,0,muted,20);
-  await write('This packet brings together saved case outcomes, original purchases, shipment evidence and written exchanges. Our position is the text saved by the team; the underlying records remain separately identified.',11,0,ink,16);
-  await write('Invsto and eBay timestamps are Eastern. Pasted carrier scan history retains the times displayed by the carrier. Missing dates, images or receipt links are explicitly identified. Shipment labels and internal completions do not establish carrier delivery.',10,0,muted,16);
-  await write(model.includeInternal?'This edition includes internal staff notes, clearly labeled.':'This edition excludes internal staff notes. Saved positions are included.',10,1,model.includeInternal?rose:ink);
-  await write('Prepared for review. This report has not been submitted to eBay. External links may require sign-in.',10,0,muted);await jump('Open the case directory','index');
-  await newPage();dest.set('index',page.ref);await write('Every issue, at a glance.',29,2,ink,22);
-  for(const [n,i] of model.issues.entries()){await ensure(110);await jump(`${n+1}. ${i.name||i.buyer} / ${i.buyer}`,i.id,13);await write(`Order ${i.orderNumbers.join(', ')||'not linked'} / Cases ${i.statuses.map(s=>s.number).join(', ')}`,9,0,muted,4);await write(i.title,10,0,ink,5);await write(`${i.against?'Decision against us':i.statuses.at(-1)?.label||'Review case'} / ${i.review.position.trim()?'Position saved':'Position needed'} / ${i.files.length} evidence files`,9,1,i.against?rose:ink,12);rule(page,y);y-=18;}
+  async function factGrid(facts){
+   for(let n=0;n<facts.length;n+=2){const pair=facts.slice(n,n+2),blocks=pair.map(f=>[
+    [f.label.toUpperCase(),8,1,muted,6],[f.value,13,1,f.tone==='against'?rose:ink,7],[f.note,8,0,muted,0]
+   ]),height=Math.max(...blocks.map(rows=>24+rows.reduce((h,[s,size,font,,gap])=>h+wrap(s,232,size,font).length*size*1.35+gap,0)));
+   await ensure(height+12);const top=y;
+   for(const [col,rows] of blocks.entries()){const x=40+col*272;rect(page,x,top-height+8,260,height,color(pair[col].tone==='against'?'fae9ed':pair[col].tone==='delivered'?'e7f1e8':'edf0e9'));let yy=top-8;
+    for(const [s,size,font,fill,gap] of rows){for(const line of wrap(s,232,size,font)){await text(page,line,x+14,yy,size,font,fill);yy-=size*1.35;}yy-=gap;}
+   }y=top-height-4;
+   }
+  }
+  async function sectionNav(i){await ensure(36);let x=40;for(const [label,key] of [['Order & tracking','purchase'],['Photos','photos'],['Timeline','timeline'],['Our position','position'],['Full records','records']]){const w=width(label,8,1);await text(page,label,x,y,8,1,color('235f64'));jumps.push({page,key:i.id+':'+key,box:[x,y-4,x+w,y+11]});x+=w+24;}y-=26;}
+  async function caseBrief(i){const o=M.overview(i);
+   await write('01 / CASE AT A GLANCE',10,1,gold,6);await write(`Issue: ${i.reason}`,10,0,ink,12);
+   await factGrid(o.facts);
+   for(const k of i.keyDates)await write(`${k.label}: ${k.value}`,9,1,ink,4);
+   await write('Completion is an internal record, not a delivery scan.',7,0,muted,12);
+   await write('LATEST SAVED BUYER MESSAGE',8,1,gold,5);
+   await write(i.latestBuyer?M.excerpt(i.latestBuyer.message_body,260):'No buyer message is saved for these case / order references.',9,0,ink,5);
+   if(i.latestBuyer)await write(`${M.date(i.latestBuyer.sent_at)} / ${i.latestBuyer.channel}. Full exchanges in the timeline.`,7,0,muted,10);
+   await write('OUR SAVED POSITION',8,1,gold,5);await write(M.excerpt(i.review.position,220)||'Our position has not been written yet.',9,0,ink,5);
+   await write(`Requested resolution: ${M.excerpt(i.review.requested_resolution,160)||'Not written yet'}`,8,0,muted,9);
+   if(o.needs.length)await write('To verify or complete: '+o.needs.map(n=>n.label).join('; ')+'.',8,1,gold,9);
+   for(const warning of i.warnings)await write(warning,8,0,rose,6);
+   await sectionNav(i);
+  }
+  await newPage();dest.set('summary',page.ref);dest.set('index',page.ref);
+  rect(page,40,587,532,141,ink);await text(page,'OG JEWELERS / THE REVIEW COLLECTION',58,704,9,1,color('e6c88f'));await text(page,'eBay case review',58,660,30,2,white);await text(page,'The facts, the evidence and our position.',58,624,11,0,white);y=557;
+  await write(`${model.issues.length} marked issues / ${model.issues.filter(i=>i.against).length} decided against us / ${model.issues.filter(i=>!i.review.position.trim()).length} positions to write`,12,1,ink,12);
+  await write('Start with each case overview, then follow the section links to the original purchase, photos, exchanges and complete source records.',10,0,muted,12);
+  await write('Times are Eastern; pasted carrier history retains the carrier’s displayed times. Missing information is identified. Prepared for review; not submitted to eBay.',9,0,muted,12);
+  await write(model.includeInternal?'Internal staff notes are included and labeled.':'Internal staff notes are excluded. Saved positions are included.',8,0,muted,18);
+  await write('Every issue, at a glance',22,2,ink,16);
+  for(const [n,i] of model.issues.entries()){await ensure(125);await jump(`${n+1}. ${i.name||i.buyer} / ${i.buyer}`,i.id,12);await write(`Order ${i.orderNumbers.join(', ')||'not linked'} / Cases ${i.statuses.map(s=>s.number).join(', ')}`,8,0,muted,4);await write(i.title,10,1,ink,5);await write(`${i.against?'Decision against us':i.statuses.at(-1)?.label||'Review case'} / Claim: ${i.statuses.map(s=>s.claim||'Not recorded').join(' / ')}`,9,1,i.against?rose:ink,5);await write(`${i.review.position.trim()?'Position saved':'Position needed'} / ${i.files.length} evidence files / ${i.messages} written or case entries`,8,0,muted,12);rule(page,y);y-=18;}
   for(const [n,i] of model.issues.entries()){
    progress(`Preparing PDF: issue ${n+1} of ${model.issues.length}…`);issue=i;await newPage();dest.set(i.id,page.ref);
-   await write(i.name||i.buyer,27,2);await write(`eBay username: ${i.buyer} / Order ${i.orderNumbers.join(', ')||'not linked'}`,10,1,muted);await write(i.title,15,1,ink,14);
-   for(const warning of i.warnings)await write(warning,9,1,rose);
-   await heading('OUR POSITION');await write(i.review.position||'Our position has not been written yet.',11);await write('Requested resolution',10,1,gold);await write(i.review.requested_resolution||'No requested resolution saved.',11);
-   if(i.review.position_updated_at)await write(`Saved by ${i.review.position_by_name||i.review.updated_by_name||'Team member'} / ${M.date(i.review.position_updated_at)}`,8,0,muted);
-   await heading('01 / CASE OUTCOMES');
-   for(const s of i.statuses){await ensure(110);await write(`${s.lane} ${s.number} / ${s.label}`,12,1,s.outcome==='against_us'?rose:ink);await write(`eBay status: ${s.status}\nOutcome reason: ${s.reason}\nRefund status: ${s.refund}${s.claim?'\nClaim amount: '+s.claim:''}\nOpened: ${s.opened}\nResponse deadline: ${s.deadline}\nLast successful sync: ${s.synced}`,10,0,ink,9);await url('Open eBay case / original order',s.url);for(const prior of s.previous||[]){await write(`Earlier stage: ${prior.lane} ${prior.number}. This is the original request for the case above, not a separate case. Its opening date and exchanges remain in the timeline.`,9,0,muted);await write(`Saved request state: ${prior.label} / ${prior.status}\nRefund status: ${prior.refund}\nOpened: ${prior.opened} / Last synced: ${prior.synced}`,8,0,muted);await url('Open original request',prior.url);}}
+   await write(i.name||i.buyer,24,2,ink,6);await write(`${i.buyer} / Order ${i.orderNumbers.join(', ')||'not linked'}`,9,1,muted,6);await write(i.title,12,1,ink,12);
+   await caseBrief(i);
+   await newPage();dest.set(i.id+':purchase',page.ref);
    await heading('02 / ORIGINAL PURCHASE & SHIPMENT');
    for(const item of i.items){await ensure(100);await write(item.title,12,1);await write(`${B.totalsFor([item])} / Quantity ${item.quantity}\nPurchased: ${item.purchased}\nOrder ${item.orderNumber} / Item ${item.item||'not recorded'}\nSystem state: ${item.state}`,10);await url('Open eBay order',item.orderUrl);await url(item.videoUrl?'Watch video receipt':'Find video receipt in eBay order',item.videoUrl||item.orderUrl);if(!item.videoUrl)await write('No direct video receipt URL is saved; use the order link to locate it.',8,0,muted);await writeDestination(item.destination);}
    if(!i.items.length)await write('No exact item lines are linked to this issue.',10,0,rose);
-   for(const t of i.tracking){await heading(`${t.label} / ${t.carrier||'Carrier not recorded'} / ${t.code}`);await write(`${t.status}${t.statusSource?' / '+t.statusSource+' / Checked '+M.date(t.statusAt):''}`,11,1);await write(t.scopes.join('\n'),9,0,muted);await url('Open full carrier tracking history',t.url);await url('View this tracking in Order History',t.historyUrl);if(t.history){await write(`Carrier history saved by ${t.history.captured_by_name||'Team member'} / ${M.date(t.history.captured_at)}. Scan times below are shown as reported by the carrier.`,9,0,muted);await write(t.history.history_text,10);await url('Carrier history source',t.history.source_url);}else await write('The full carrier scan history is not saved in this packet. Open the carrier link to review it.',9,0,muted);for(const e of t.events){await write(`${M.date(e.at)} / ${e.title}\n${e.source}${e.body?' / '+e.body:''}`,9,0,muted);}}
+   for(const t of i.tracking){await ensure(110);await write(`${t.label} / ${t.carrier||'Carrier not recorded'} / ${t.code}`,11,1,ink,6);await write(`${t.status}${t.statusSource?' / '+t.statusSource+' / Checked '+M.date(t.statusAt):''}`,9,1,ink,6);await write(t.scopes.join('\n'),8,0,muted,8);await url('Open carrier tracking',t.url);await jump('Read complete saved tracking history',i.id+':records',9);}
    if(!i.tracking.length)await write('No tracking saved for this issue.',10,0,muted);
-   await write('A saved label or tracking number does not establish delivery. Completion and packaging evidence may include other items in the same shipment.',9,0,muted);
-   if(i.files.some(f=>f.image))await ensure(440);
+   await write('Delivery status is attributed to its source. A shipping label or internal completion alone does not establish delivery.',9,0,muted);
+   await newPage();dest.set(i.id+':photos',page.ref);
    await heading('03 / VISUAL EVIDENCE');
    if(!i.files.length)await write('No photos saved for these exact order lines or their shipment.',10,0,muted);
    for(const [idx,f] of i.files.entries()){
@@ -64,12 +86,24 @@
     for(const d of f.shippingOrders||[])await writeDestination(d);
     await url('View original evidence in Invsto',i.historyUrl);
    }
+   await newPage();dest.set(i.id+':timeline',page.ref);
    await heading('04 / TIMELINE & WRITTEN EXCHANGES');await write('Oldest to newest. Undated entries appear last. Source and author distinguish buyer messages, our replies, eBay activity and internal records.',9,0,muted);
-   for(const e of i.timeline.filter(e=>model.includeInternal||!e.internal)){await ensure(70);await write(e.date,9,1,gold,4);await write(e.title,11,1,e.internal?muted:ink,4);await write([e.actor,e.source].filter(Boolean).join(' / '),8,0,muted,7);await write(e.body,10,0,ink,16);rule(page,y);y-=18;}
-   await url('Open the full issue record',i.historyUrl);
+   for(const e of i.timeline.filter(e=>model.includeInternal||!e.internal)){
+    const label=`${e.date} / ${e.title}`,source=[e.actor,e.source].filter(Boolean).join(' / '),height=wrap(label,532,9,1).length*13.05+wrap(source,532,7.5).length*10.875+wrap(e.body,532,9.5).length*13.775+30;
+    await ensure(Math.min(570,height));await write(label,9,1,e.internal?muted:gold,5);await write(source,7.5,0,muted,5);await write(e.body,9.5,0,ink,10);rule(page,y);y-=10;
+   }
+   await ensure(210);dest.set(i.id+':position',{page:page.ref,y:y+12});
+   await heading('05 / OUR POSITION');await write(i.review.position||'Our position has not been written yet.',11);await write('Requested resolution',10,1,gold);await write(i.review.requested_resolution||'No requested resolution saved.',11);
+   if(i.review.position_updated_at)await write(`Saved by ${i.review.position_by_name||i.review.updated_by_name||'Team member'} / ${M.date(i.review.position_updated_at)}`,8,0,muted);
+   await newPage();dest.set(i.id+':records',page.ref);
+   await heading('06 / FULL DECISION & TRACKING RECORDS');await url('Open the full issue record',i.historyUrl);
+   for(const s of i.statuses){await ensure(110);await write(`${s.lane} ${s.number} / ${s.label}`,12,1,s.outcome==='against_us'?rose:ink);await write(`eBay status: ${s.status}\nOutcome reason: ${s.reason}\nRefund status: ${s.refund}${s.claim?'\nClaim amount: '+s.claim:''}\nOpened: ${s.opened}\nResponse deadline: ${s.deadline}\nLast successful sync: ${s.synced}`,10,0,ink,9);await url('Open eBay case / original order',s.url);for(const prior of s.previous||[]){await write(`Earlier stage: ${prior.lane} ${prior.number}. This is the original request for the case above, not a separate case. Its opening date and exchanges remain in the timeline.`,9,0,muted);await write(`Saved request state: ${prior.label} / ${prior.status}\nRefund status: ${prior.refund}\nOpened: ${prior.opened} / Last synced: ${prior.synced}`,8,0,muted);await url('Open original request',prior.url);}}
+   for(const t of i.tracking){await heading(`${t.label} / ${t.carrier||'Carrier not recorded'} / ${t.code}`);await write(`${t.status}${t.statusSource?' / '+t.statusSource+' / Checked '+M.date(t.statusAt):''}`,11,1);await write(t.scopes.join('\n'),9,0,muted);await url('Open full carrier tracking history',t.url);await url('View this tracking in Order History',t.historyUrl);if(t.history){await write(`Carrier history saved by ${t.history.captured_by_name||'Team member'} / ${M.date(t.history.captured_at)}. Scan times below are shown as reported by the carrier.`,9,0,muted);await write(t.history.history_text,10);await url('Carrier history source',t.history.source_url);}else await write('The full carrier scan history is not saved in this packet. Open the carrier link to review it.',9,0,muted);for(const e of t.events){await write(`${M.date(e.at)} / ${e.title}\n${e.source}${e.body?' / '+e.body:''}`,9,0,muted);}}
+   if(!i.tracking.length)await write('No tracking saved for this issue.',10,0,muted);
+
   }
-  for(const [n,meta] of pages.entries()){const p=meta.page;rule(p,48);let x=40;for(const [label,key] of [['Case index','index'],...(meta.issue?[['This issue',meta.issue]]:[]),['Summary','summary']]){await text(p,label,x,29,8,1);jumps.push({page:p,key,box:[x,23,x+width(label,8,1),41]});x+=110;}await text(p,`${n+1} / ${pages.length}`,532,29,8,0,muted);}
-  for(const j of jumps)if(dest.has(j.key))annot(j.page,j.box,{Dest:[dest.get(j.key),PDFName.of('Fit')]});
+  for(const [n,meta] of pages.entries()){const p=meta.page;rule(p,48);let x=40;for(const [label,key] of [['Case index','index'],...(meta.issue?[['Case overview',meta.issue],['Photos',meta.issue+':photos'],['Timeline',meta.issue+':timeline']]:[['Summary','summary']])]){await text(p,label,x,29,8,1);jumps.push({page:p,key,box:[x,23,x+width(label,8,1),41]});x+=110;}await text(p,`${n+1} / ${pages.length}`,532,29,8,0,muted);}
+  for(const j of jumps)if(dest.has(j.key)){const target=dest.get(j.key);annot(j.page,j.box,{Dest:target.page?[target.page,PDFName.of('XYZ'),null,target.y,null]:[target,PDFName.of('Fit')]});}
   return pdf.save();
  }
  const niceGroup=g=>({item:'Item screenshots',completion:'Completion photos',packaging:'Packaging evidence',certificate:'Certificates',returned:'Returned-item evidence'})[g]||g;
