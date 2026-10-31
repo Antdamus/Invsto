@@ -20,7 +20,7 @@ await db.exec(await readFile(new URL('../supabase/migrations/20261018090000_tikt
 await db.exec(`create function is_admin() returns boolean language sql as $$select false$$;`);
 await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));
-await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql','20261018230000_tiktok_line_cancellations.sql','20261018233000_tiktok_customer_names.sql','20261018234500_tiktok_signed_cancellation_closeout.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
+await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql','20261018230000_tiktok_line_cancellations.sql','20261018233000_tiktok_customer_names.sql','20261018234500_tiktok_signed_cancellation_closeout.sql','20261031220000_tiktok_phone_customer_context.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
@@ -141,8 +141,11 @@ test('remove/replace proof is retry-safe and removed proof cannot complete an or
  assert.equal((await db.query('select jsonb_array_length(photo_attachments) n from tiktok_order_completion_photos')).rows[0].n,0);
 });
 test('phone pairing scopes requests to TikTok, one staff phone, owner-only control, and never rewinds on retry',async()=>{
+ await db.query('update tiktok_orders set recipient_name=$1,buyer_nickname=$2 where id=$3',['Pat Rivera','Pat Shop',orders[0].id]);
  const send=(r=request,ids=lines.map(l=>l.id))=>db.query('select send_tiktok_order_to_phone($1,$2,$3) r',[session,r,ids]);
  let result=(await send()).rows[0].r;assert.equal(result.request.lines.length,2);assert.equal(result.request.lines[0].quantity,1);assert.equal(result.request.lines[0].item_number,'1732759903849189622');
+ const named=result.request.lines.find(l=>l.order_id===orders[0].id).order;assert.equal(named.recipient_name,'Pat Rivera');assert.equal(named.buyer_nickname,'Pat Shop');assert.equal(named.buyer_username,'buyer');
+ const unnamed=result.request.lines.find(l=>l.order_id===orders[1].id).order;assert.equal(unnamed.recipient_name,'');assert.equal(unnamed.buyer_username,'buyer');
  await send(other,[lines[1].id]);result=(await send()).rows[0].r;assert.equal(result.request.id,other);
  await db.exec(`set test.actor='${phone}'`);await assert.rejects(send(),/another workstation/);await assert.rejects(db.query('select read_tiktok_order_phone_camera($1,false)',[session]),/Only the workstation/);
  await db.query('select read_tiktok_order_phone_camera($1,true)',[session]);await db.query('select mark_tiktok_order_phone_camera_request($1,$2,$3)',[session,other,'saved']);

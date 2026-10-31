@@ -10,7 +10,7 @@
     return UUID.test(id || "") ? id : "";
   }
   function label(lines = []) {
-    return [...new Set(lines.map(line => `${line.order?.buyer_name || line.order?.buyer_username || "Customer"} · ${line.item_title || line.item_number || "Item"}`))].join(" / ");
+    return [...new Set(lines.map(line => `${window.TikTokOrderQueue.customerName(line.order||{})} · ${line.item_title || line.item_number || "Item"}`))].join(" / ");
   }
   async function rpc(client, name, args) {
     const {data, error} = await client.rpc(name, args);
@@ -31,7 +31,7 @@
   }
 
   function createDesktop(config) {
-    let sessionId = "", data = null, busy = false, timer, stopPhotos, stopLive, liveTimer, retryRequest = null, visible = false, polling = false, revision = 0;
+    let sessionId = "", data = null, busy = false, timer, stopPhotos, stopLive, liveTimer, retryRequest = null, lastRequest = null, visible = false, polling = false, revision = 0;
     const key = () => `og-tiktok-order-phone:${config.getUserId()}`;
     function remember() {try {sessionId ? localStorage.setItem(key(), sessionId) : localStorage.removeItem(key());} catch (_) {}}
     function stored() {try {const id = localStorage.getItem(key()); return UUID.test(id || "") ? id : "";} catch (_) {return "";}}
@@ -39,14 +39,16 @@
     function paint(next) {
       const wasPaired = data ? Boolean(data.phone_email) : null;
       data = next;
-      const recent = Date.now() - new Date(data.phone_seen_at || 0).getTime() < 20000;
+      // The server deliberately stores at most one heartbeat per 30 seconds.
+      // Allow a full heartbeat interval plus polling/network jitter.
+      const recent = Date.now() - new Date(data.phone_seen_at || 0).getTime() < 90000;
       $("phone-pair-connection").textContent = data.phone_email
         ? `${recent ? "Phone connected" : "Phone paired — open its camera page"} · ${data.phone_email}`
         : "Waiting for your phone. Scan the QR code and sign in if needed.";
       window.TikTokCompletionPhotos.renderOrderContext($("phone-pair-order"), data.request?.lines, config.getCustomerName);
       $("phone-pair-progress").textContent = data.request?.saved_at ? "Photos saved on the phone. They appear below."
         : data.request?.opened_at ? "Order opened on the phone. Ready for photos." : "Order sent. Waiting for the phone to open it.";
-      if (wasPaired !== Boolean(data.phone_email)) $("phone-pair-qr-section").open = !data.phone_email;
+      if (wasPaired !== Boolean(data.phone_email)) $("phone-pair-qr-section").open = !recent;
       document.querySelectorAll("[data-phone-camera]").forEach(button => {button.textContent = data.phone_email ? "Send to phone" : "Use my phone";});
     }
     async function refresh() {
@@ -83,7 +85,11 @@
       stopPhotos?.(); stopPhotos = null;
       $("phone-pair-photos").textContent = "Waiting for the order to be sent…";
       const ids = [...new Set(lines.map(line => line.id).filter(Boolean))].sort();
-      if (!retryRequest || JSON.stringify(ids) !== JSON.stringify(retryRequest.ids)) retryRequest = {id:crypto.randomUUID(),ids,lines};
+      const fingerprint=JSON.stringify(lines.map(l=>[l.id,l.item_number||l.sku_id,l.quantity]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
+      // Reopening the same pairing must not send the phone an endless sequence
+      // of identical "next orders". A changed item/quantity gets a new request.
+      if (!retryRequest || fingerprint !== retryRequest.fingerprint) retryRequest = lastRequest?.fingerprint===fingerprint&&data?.request?.id===lastRequest.id
+        ? {...lastRequest,lines} : {id:crypto.randomUUID(),ids,lines,fingerprint};
       sessionId ||= stored() || crypto.randomUUID(); remember();
       try {
         let next;
@@ -91,9 +97,14 @@
           try {next = await rpc(config.getClient(), "send_tiktok_order_to_phone", {_session_id:sessionId,_request_id:retryRequest.id,_line_ids:ids}); break;}
           catch (error) {
             if (error.code !== "P0002" || attempt) throw error;
-            sessionId = crypto.randomUUID(); remember();
+            sessionId = crypto.randomUUID(); retryRequest={...retryRequest,id:crypto.randomUUID()};lastRequest=null;remember();
           }
         }
+        if(next.request?.id!==retryRequest.id){
+          retryRequest={...retryRequest,id:crypto.randomUUID()};lastRequest=null;
+          throw Error('Another order was sent to this phone from a different tab.');
+        }
+        lastRequest = retryRequest;
         paint(next); retryRequest = null;
         const url = new URL("pending-tiktok-orders.html", location.href); url.hash = `phone-camera=${sessionId}`;
         $("phone-pair-link").value = url.href;
@@ -106,7 +117,7 @@
       finally {
         busy = false; $("retry-phone-send").disabled = !retryRequest;
         $("disconnect-phone-camera").disabled = false;
-        clearInterval(timer); if (visible) timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 12000);
+        clearInterval(timer); if (visible) timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 5000);
       }
     }
     $("retry-phone-send").addEventListener("click", () => {if (retryRequest) send(retryRequest.lines);});
@@ -122,7 +133,7 @@
       busy = true; $("disconnect-phone-camera").disabled = true;
       try {
         await rpc(config.getClient(), "disconnect_tiktok_order_phone_camera", {_session_id:sessionId});
-        sessionId = ""; data = null; retryRequest = null; remember(); close();
+        sessionId = ""; data = null; retryRequest = null; lastRequest = null; remember(); close();
         document.querySelectorAll("[data-phone-camera]").forEach(button => {button.textContent = "Use my phone";});
       } catch (error) {status(error.message || "Could not disconnect. Try again.", true);}
       finally {busy = false; $("disconnect-phone-camera").disabled = false;}
@@ -133,9 +144,9 @@
 
   function createReceiver(config) {
     const sessionId = config.sessionId;
-    let active = null, next = null, photos, timer, stopLive, liveTimer, stopped = false, refreshing = false, authenticated = false;
+    let active = null, next = null, photos, timer, stopLive, liveTimer, stopped = false, refreshing = false, authenticated = false, connecting = false;
     const acknowledgements = new Map();
-    function status(message, error = false) {$("phone-camera-status").textContent = message; $("phone-camera-status").classList.toggle("is-error", error);}
+    function status(message, error = false) {$("phone-camera-status").textContent = message; $("phone-camera-status").classList.toggle("is-error", error);$("phone-camera-reconnect").hidden=!error;}
     function queueAck(id, value) {if (id) acknowledgements.set(id, value);}
     async function flushAcks() {
       for (const [id, value] of acknowledgements) {
@@ -156,6 +167,7 @@
       refreshing = true;
       try {
         const result = await rpc(config.getClient(), "read_tiktok_order_phone_camera", {_session_id:sessionId,_phone:true});
+        if(stopped)return;
         $("phone-camera-connected").textContent = `Connected to ${result.owner_email || "your computer"}`;
         status("Keep this page open. Photos you save appear on the computer automatically.");
         if (result.request?.id && result.request.id !== active?.id) {
@@ -164,6 +176,7 @@
             next = result.request;
             $("phone-camera-next-label").textContent = `Next: ${label(next.lines)}`;
             $("phone-camera-next").classList.remove("hidden");
+            status(photos.hasPending?'Next order received. Save or remove your current photos, then tap Next order.':'Next order received. Tap Next order to open it and take photos.');
           }
         }
         await flushAcks();
@@ -176,10 +189,12 @@
       } finally {refreshing = false;}
     }
     async function connect() {
+      if(connecting)return;connecting=true;authenticated=false;
+      try {
       const {data, error} = await config.getClient().auth.getSession();
       if (error) {status(error.message, true);return;}
       if (!data?.session?.user) {$("phone-camera-login").classList.remove("hidden");status("Sign in to connect this phone to the order.");return;}
-      config.onUser(data.session.user); authenticated = true;
+      config.onUser(data.session.user); authenticated = true;stopped=false;
       $("phone-camera-login").classList.add("hidden");
       $("phone-camera-account").textContent = `Signed in as ${data.session.user.email}`;
       photos ||= config.getPhotoController();
@@ -189,8 +204,11 @@
         }
       });
       await refresh();
-      clearInterval(timer); if (!stopped) timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 12000);
+      clearInterval(timer); if (!stopped) timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 5000);
+      } catch(error){status(error.message||'Could not connect. Tap Reconnect to retry.',true);}
+      finally{connecting=false;}
     }
+    $("phone-camera-reconnect").addEventListener("click",connect);
     $("phone-camera-login").addEventListener("submit", async event => {
       event.preventDefault(); const button = $("phone-camera-login-submit"); button.disabled = true;
       try {

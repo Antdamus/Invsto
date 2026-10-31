@@ -54,7 +54,7 @@
   if(!items.length){context.status?.('No available items selected for final photos. Mark lost items found before continuing.');return;}
   if(!desktop)desktop=window.TikTokPhoneCamera.createDesktop({getClient:()=>context.db,getUserId:()=>context.user.id,getCustomerName:o=>window.TikTokOrderQueue.customerName(o),
    onOpen:()=>$('phone-camera-pair-modal').classList.remove('hidden'),onClose:()=>$('phone-camera-pair-modal').classList.add('hidden'),
-   watchPhotos:(items,node)=>photos().watch(items,result=>photos().renderGrid(node,result)),pollMs:12000});
+   watchPhotos:(items,node)=>photos().watch(items,result=>photos().renderGrid(node,result)),pollMs:5000});
   desktop.send(items);
  }
  function renderReview(){
@@ -126,7 +126,7 @@
  function start(config){context=config;bind();window.TikTokLabels?.start(config);window.TikTokInventory?.start(config);document.addEventListener('tiktok-inventory-saved',syncReview);window.addEventListener('tiktok-work-saved',syncReview);}
  function connectPhone({db,onUser}){
   const sessionId=window.TikTokPhoneCamera?.sessionIdFromUrl();if(!sessionId)return false;
-  context={db,user:null};bind();receiver=window.TikTokPhoneCamera.createReceiver({sessionId,getClient:()=>db,onUser:user=>{context.user=user;onUser(user);},getPhotoController:photos,pollMs:12000});receiver.connect();return true;
+  context={db,user:null};bind();receiver=window.TikTokPhoneCamera.createReceiver({sessionId,getClient:()=>db,onUser:user=>{context.user=user;onUser(user);},getPhotoController:photos,pollMs:5000});receiver.connect();return true;
  }
  window.TikTokFulfillment={start,connectPhone,open,openLabels,phone:phoneOrders};
 })();

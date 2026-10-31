@@ -2,7 +2,7 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TikTokOrderQueue=api;})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const TIME_ZONE='America/New_York';
- const customerName=o=>String(o.recipient_name||o.buyer_nickname||'').trim()||'Name not provided';
+ const customerName=o=>[o.recipient_name,o.buyer_nickname,o.buyer_name,o.buyer_username].map(v=>String(v||'').trim()).find(v=>v&&!/^name not provided$/i.test(v))||'Customer';
  const lineCancelled=(l,o)=>Boolean(l.cancelled_at)||['Canceled','Cancelled'].includes(o?.marketplace_status);
  const cancelled=o=>['Canceled','Cancelled'].includes(o.marketplace_status)||Boolean(o.lines?.length&&o.lines.every(l=>lineCancelled(l)));
  const hasCancellation=o=>cancelled(o)||Boolean(o.lines?.some(l=>lineCancelled(l)));

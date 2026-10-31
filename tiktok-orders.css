@@ -25,6 +25,7 @@
 .tiktok-workspace .order-marketplace-tabs{margin:0}
 .tiktok-workspace .order-marketplace-tabs a{color:#26483b}
 .tiktok-workspace .order-marketplace-tabs a[aria-current=page]{color:white}
+@media(max-width:480px){.tiktok-workspace .order-marketplace-tabs a{flex:1;min-width:0;text-align:center;padding:10px 8px;font-size:13px}}
 .tk-views{display:flex;flex-wrap:wrap;gap:0 24px;border-bottom:1px solid var(--line);margin:0 0 2px}
 .tk-views a{padding:10px 0;text-decoration:none;color:var(--muted);font-weight:700;font-size:14px}
 .tk-views a[aria-current=page]{color:var(--gold);border-bottom:3px solid var(--gold)}
@@ -87,6 +88,7 @@
 .tk-label-select{display:flex;align-items:center;gap:8px;margin:0 0 9px;color:var(--muted);font-size:12px}.tk-label-select input{width:17px;height:17px;accent-color:var(--gold)}
 .tiktok-workspace .hidden{display:none!important}.tiktok-workspace .packing-modal{z-index:2000}
 .tiktok-workspace #phone-camera-pair-modal{z-index:2100}
+.tiktok-workspace #completion-photos-modal{z-index:2000}
 .tk-label-receiver{border:1px solid var(--line-strong);border-radius:14px;padding:20px;margin:12px 0;background:var(--panel,#111718)}
 .tk-label-receiver h2{font-size:22px}.tk-label-receiver h3{font-size:16px}.tk-label-receiver p{line-height:1.6}
 .tk-label-page{border-top:1px solid var(--line);padding:16px 0}.tk-label-page label{display:block;font-size:12px;margin-top:12px}

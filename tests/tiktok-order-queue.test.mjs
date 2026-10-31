@@ -2,6 +2,14 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const q=createRequire(import.meta.url)('../tiktok-order-queue.js');
+test('customer identity uses the username when names are missing, including legacy phone handoffs',()=>{
+ assert.equal(q.customerName({recipient_name:'  ',buyer_nickname:' ',buyer_username:'buyer-one'}),'buyer-one');
+ assert.equal(q.customerName({buyer_username:'buyer-one'}),'buyer-one');
+ assert.equal(q.customerName({recipient_name:'Name not provided',buyer_username:'buyer-one'}),'buyer-one');
+ assert.equal(q.customerName({recipient_name:' Pat Rivera ',buyer_nickname:'Pat Shop',buyer_username:'buyer-one'}),'Pat Rivera');
+ assert.equal(q.customerName({buyer_nickname:'Pat Shop',buyer_username:'buyer-one'}),'Pat Shop');
+ assert.equal(q.customerName({}),'Customer');
+});
 const now=new Date('2026-10-18T02:30:00Z'); // Still Oct 17 in the shop's timezone.
 const order=(id,buyer,date,extra={})=>({id,order_number:'57762364879664333'+id,buyer_username:buyer,ship_by_date:date,stage:'pending',marketplace_status:'To ship',order_amount:'25.68',created_time:'10/17/2026 11:48:52 AM',lines:[{quantity:1,title:'Gold ring',seller_sku:id,tracking_number:''}],documents:[],...extra});
 
