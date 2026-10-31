@@ -110,7 +110,9 @@
   get isOpen(){return Boolean(dialog?.open);},
   close(){if(dialog?.open)dialog.close();},
   open(item,start=0,trigger=document.activeElement){
-   const sources=(item.images||[]).map(C.safeImage).filter(Boolean);if(!sources.length)return false;
+   // Reports already download private evidence and render it as raster data URLs.
+   // Keep script-capable data formats out of the shared image viewer.
+   const sources=(item.images||[]).map(src=>typeof src==='string'&&/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(src)?src:C.safeImage(src)).filter(Boolean);if(!sources.length)return false;
    if(!dialog)create();origin=trigger;images=sources;heading.textContent=item.name;options=item;
    dialog.querySelector('.viewer-item-actions')?.remove();
    if(item.actions?.length){

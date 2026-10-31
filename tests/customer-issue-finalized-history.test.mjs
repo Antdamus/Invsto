@@ -89,6 +89,8 @@ before(async()=>{
  await db.exec(await sqlFile('20261031060000_customer_issue_history_close_tasks.sql'));
  await db.exec(await sqlFile('20261031070000_customer_issue_ebay_review.sql'));
  await db.exec(await sqlFile('20261031071000_customer_issue_review_action_validation.sql'));
+ await db.exec('alter table ebay_order_label_events add column id uuid default gen_random_uuid(),add column created_at timestamptz default now(),add column order_line_ids uuid[]');
+ await db.exec(await sqlFile('20261031080000_customer_issue_review_tracking.sql'));
 
 
 });
@@ -286,6 +288,15 @@ test('accepting a decision closes tasks only after eBay and receiving work is fi
 });
 
 const markReview=(caseId=id(100))=>scalar('select save_customer_issue_ebay_review($1,$2) v',[caseId,'mark']);
+test('review packet retains carrier history with author and exact-order label evidence',async()=>{
+ await markReview();await db.exec(`update ebay_return_cases set order_id='${id(10)}';insert into ebay_order_label_events(order_ids,order_line_ids,action,label_metadata) values(array['${id(10)}'::uuid],array['${id(11)}'::uuid],'attached','{"trackingNumber":"940001234567890"}')`);
+ const args=[id(100),'940001234567890','outbound','USPS','Delivered\nOctober 5, 2026 11:44 AM','https://tools.usps.com/tracking/940001234567890'];
+ const save=()=>scalar('select save_customer_issue_tracking_history($1,$2,$3,$4,$5,$6) v',args);
+ const saved=await save();assert.equal(saved.captured_by,id(1));assert.equal(saved.captured_by_name,'Operator');
+ const packet=await scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]);assert.equal(packet.tracking_history[0].history_text,args[4]);assert.equal(packet.members[0].label_events[0].label_metadata.trackingNumber,args[1]);assert.equal(packet.members[0].order_line_count,1);
+ args[5]='https://example.com/not-the-carrier';await assert.rejects(save(),/official tracking link/);args[5]='https://tools.usps.com/tracking/940001234567890';
+ await db.exec("select set_config('test.access','no',false);set role authenticated");await assert.rejects(save(),/Customer issues access/);await assert.rejects(db.exec('delete from customer_issue_tracking_history'),/permission denied/);
+});
 test('review pile persists one linked issue, does not change case/task state, and preserves positions on removal',async()=>{
  await db.exec(`update ebay_return_cases set source_lane='inquiry',issue_kind='request',raw_payload='{"ebayDetail":{"inquiryId":"D100","state":"CLOSED"}}';
  insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values('${id(101)}','case','dispute','D100','open','CLOSED',now(),'{"ebayDetail":{"caseId":"D100","sellerOutcome":"LOSE"}}')`);

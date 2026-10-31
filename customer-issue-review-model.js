@@ -9,6 +9,13 @@
  const outcomes={against_us:'Decided against us',final:'Finalized on eBay',open:'Open on eBay',escalated:'Escalated to a case',unfinished:'Follow-up / refund / appeal unfinished',unknown:'Outcome needs verification'};
  function providerHistory(c){const d=c.raw_payload?.ebayDetail||{};if(c.source_lane==='inquiry'&&String(d.inquiryId)===String(c.ebay_return_id))return d.inquiryHistoryDetails?.history||[];if(c.source_lane==='case'&&String(d.caseId)===String(c.ebay_return_id))return d.caseHistoryDetails?.history||[];return null;}
  function amount(v){if(v?.value==null||!Number.isFinite(Number(v.value)))return '';try{return new Intl.NumberFormat('en-US',{style:'currency',currency:v.currency||'USD'}).format(Number(v.value));}catch{return '';}}
+ function currentCaseStages(members){
+  const cases=members.filter(m=>m.case.source_lane==='case');
+  const successor=m=>cases.find(next=>m.case.ebay_return_id&&(
+   (m.case.source_lane==='inquiry'&&String(next.case.ebay_return_id)===String(m.case.ebay_return_id))||
+   (m.case.source_lane==='return'&&String(next.case.raw_payload?.ebayDetail?.returnId||'')===String(m.case.ebay_return_id))));
+  return members.filter(m=>!successor(m)).map(m=>({member:m,previous:members.filter(prior=>successor(prior)===m)}));
+ }
  function makeIssue(packet,entry,baseUrl){
   const buyer=root.OGBuyerReport,evidence=root.OGIssueEvidence,members=packet.members||[],records=members.map(m=>m.case),orders=unique(members.flatMap(m=>m.orders||[])),lines=unique(members.flatMap(m=>m.lines||[]));
   const primary=records.find(c=>c.source_lane==='case')||records.find(c=>c.id===entry.case_id)||records[0]||{},orderMap=new Map(orders.map(o=>[o.id,o]));
@@ -31,12 +38,13 @@
   }
   for(const m of messages)add(m.sent_at,m.entry_type==='event'?'Case activity':m.direction==='outbound'?'Our response':m.direction==='inbound'?'Buyer message':'eBay response / activity',m.message_body,`${m.channel} · case ${m.caseNumber}`,m.sender_username);
   const chronological=timeline.sort((a,b)=>(Date.parse(a.at)||Infinity)-(Date.parse(b.at)||Infinity));
-  const statuses=members.map(m=>{const c=m.case,d=c.raw_payload?.ebayDetail||{},reason=d.resolution?.reasonForClosure||d.closeInfo?.returnCloseReason||d.sellerOutcome;return {id:c.id,number:c.ebay_return_id,lane:nice(c.source_lane),status:nice(c.ebay_status),outcome:m.outcome,label:outcomes[m.outcome]||'Outcome not recorded',reason:nice(reason),claim:amount(d.claimAmount),refund:nice(m.refund_status),opened:date(c.opened_at),deadline:c.ebay_due_at?date(c.ebay_due_at):'No current deadline recorded',synced:date(c.synced_at),url:caseUrl(c)};});
-  const tracking=unique(members.flatMap(m=>[...(m.orders||[]).filter(o=>o.tracking_number).map(o=>({code:o.tracking_number,label:`Order ${o.order_number} tracking`,status:'Saved tracking; carrier delivery must be verified'})),...(m.packages||[]).filter(p=>p.tracking_code).map(p=>({code:p.tracking_code,label:'Package tracking',status:nice(p.status)}))]),t=>`${t.code}/${t.label}`);
+  const statusFor=m=>{const c=m.case,d=c.raw_payload?.ebayDetail||{},reason=d.resolution?.reasonForClosure||d.closeInfo?.returnCloseReason||d.sellerOutcome;return {id:c.id,number:c.ebay_return_id,lane:nice(c.source_lane),status:nice(c.ebay_status),outcome:m.outcome,label:outcomes[m.outcome]||'Outcome not recorded',reason:nice(reason),claim:amount(d.claimAmount),refund:nice(m.refund_status),opened:date(c.opened_at),deadline:c.ebay_due_at?date(c.ebay_due_at):'No current deadline recorded',synced:date(c.synced_at),url:caseUrl(c)};};
+  const statuses=currentCaseStages(members).map(({member,previous})=>({...statusFor(member),previous:previous.map(statusFor)}));
+  const tracking=root.OGIssueReviewTracking.build(members,items,baseUrl,packet.tracking_history||[]);
   const warnings=[];if(members.some(m=>m.case.sync_error||!m.case.synced_at||Date.now()-Date.parse(m.case.synced_at)>86400000))warnings.push('Some eBay information needs refreshing. Last successful sync is shown for each record.');
   if(!items.length)warnings.push('No exact order lines are linked. Review the original order before submitting this issue.');
   if(!messages.length)warnings.push('No written exchanges are saved for these case / order references.');
   return {id:entry.case_id,review:{...entry,...packet.review},buyer:primary.buyer_username||'Buyer not recorded',name:orders.map(o=>o.buyer_name).find(Boolean)||'',title:primary.item_title||items[0]?.title||'Item title not recorded',orderNumbers:[...new Set([...orders.map(o=>o.order_number),...records.map(c=>c.order_number)].filter(Boolean))],historyUrl,items,files,timeline:chronological,statuses,tracking,warnings,messages:messages.length,against:statuses.some(s=>s.outcome==='against_us'),members:records.length};
  }
- const api={esc,date,safe,nice,unique,caseUrl,outcomes,makeIssue};root.OGIssueReviewModel=api;if(typeof module!=='undefined')module.exports=api;
+ const api={esc,date,safe,nice,unique,caseUrl,outcomes,currentCaseStages,makeIssue};root.OGIssueReviewModel=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
