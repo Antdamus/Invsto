@@ -123,5 +123,16 @@ test('Whatnot order and line note buttons open the exact scope without selecting
   await page.locator('#wn-item-9002').getByRole('button',{name:'Add line note'}).click();
   await expect(page.locator('#mn-context')).toContainText('Gold bracelet · Line 9002');await expect(page.locator('#mn-feed')).toHaveText('No staff notes yet.');
   await expect(page.locator('[data-select-line]:checked')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Take photo'})).toBeVisible();await page.locator('#mn-close').click();
+  await page.locator('#wn-item-9002 [data-select-line]').check();await page.getByRole('button',{name:'Note selected lines'}).click();
+  const png=await page.evaluate(()=>{
+   const db=window.supabaseClient;db.auth.getSession=async()=>({data:{session:{user:{id:'user'}}}});
+   const orig=db.rpc;db.rpc=async(name,args)=>{if(name!=='add_marketplace_order_photo_note')return orig(name,args);calls.push({name,args});return {};};
+   return document.createElement('canvas').toDataURL().split(',')[1];
+  });
+  await page.locator('#wn-note-photos [data-file]').setInputFiles({name:'bracelet.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await page.locator('#wn-value').fill('Check the clasp');await page.locator('#wn-action-submit').click();await expect(page.locator('#wn-action-dialog')).toBeHidden();
+  const args=await page.evaluate(()=>calls.find(c=>c.name==='add_marketplace_order_photo_note').args);
+  assert.deepEqual(args._targets,[{order_id:'1484060355',line_id:'9002',revision:1}]);assert.equal(args._note,'Check the clasp');assert.equal(args._market,'whatnot');
  }finally{await page.close();}
 });

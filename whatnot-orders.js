@@ -27,6 +27,9 @@
  }
  function tags(l){const o=l.order_record,d=M.urgency(l.ship_by_date);return `<span class="wn-tag ${E(l.work_state)}">${E(l.work_state==='external_history'?'Imported marketplace history':l.work_state==='completed'?'Completed in Invsto':o.status==='cancelled'?'In Invsto history':o.status==='completed'?'Pending information to close':'Pending in Invsto')}</span>${l.scope!=='history'&&o.status!=='completed'?`<span class="wn-tag ${d.kind}">${E(d.text)}</span>`:''}${l.item_missing?'<span class="wn-tag missing">Item not found</span>':''}${l.watch_missing?'<span class="wn-tag missing">Missing watch</span>':''}${l.cancel_pending?'<span class="wn-tag review">Flagged to cancel in Invsto</span>':''}${l.cgl_pending?'<span class="wn-tag review">Pending CGL</span>':''}${l.holds?.map(h=>`<span class="wn-tag review">${E(h==='order_pending_cancellation'?'Cancellation requested on Whatnot':h.replaceAll('_',' '))}</span>`).join('')||''}${l.replacement_shipment_id?'<span class="wn-tag review">Shipment changed · awaiting exact new assignment</span>':''}`;}
  const noteControl=(o,l)=>window.MarketplaceOrderNotes?.control([o],l)||'';
+ const notePhotos=window.MarketplaceOrderNotes.photoPicker($('wn-note-photos'));
+ $('wn-action-dialog').addEventListener('close',()=>notePhotos.clear());
+ $('wn-action-dialog').addEventListener('cancel',event=>{if(action?.saving)event.preventDefault();});
  function lineHtml(l){const o=l.order_record;return `<article class="wn-line ${l.item_missing?'missing':''}" id="wn-item-${l.id}"><label aria-label="Select order ${E(o.id)} item ${l.id}"><input type="checkbox" data-select-line="${l.id}"></label><div><span class="mq-line-number">Line ${l.line_number} of ${l.order_lines}</span><h3 class="mq-item-title">${E(l.title||'Item title unavailable')}</h3><div class="wn-line-status">${l.order_lines>1?shownLabelBadge([l]):''}${window.PendingQueueCards.linePhoto(l.screenshot_count)}${tags(l)}</div><p>Purchased ${E(M.time(o.purchased_at))} · Qty ${l.quantity}${l.sku?' · SKU '+E(l.sku):''}</p>${o.show_title?`<p>Show: ${E(o.show_title)}</p>`:''}${noteControl(o,l)}<div class="wn-line-links">${link(M.url(o.url),'Whatnot order')}${o.show_id?link(M.receipt(l),l.receipt_url?'Saved receipt':'Video receipt'):''}${link(M.url(l.shipment_url),'Shipment / label')}${link(M.url(o.show_url),'Show')}</div><details class="wn-details" data-evidence="${l.id}"><summary>Photos, labels, notes & timeline</summary><div class="wn-evidence-body">Open to load saved evidence.</div></details></div><aside class="wn-line-side"><div class="wn-price">${E(M.money(Number(l.unit_price)*l.quantity,l.currency))}</div>${l.quantity>1?`<p>${E(M.money(l.unit_price,l.currency))} per item</p>`:''}<p><strong>${E((l.shipment_status||'No shipment assigned').replaceAll('_',' '))}</strong></p>${l.tracking_number?`<strong class="wn-track-caption">Assigned tracking</strong><div class="wn-tracking">${link(M.tracking(l.tracking_number,l.carrier),l.tracking_number)||E(l.tracking_number)}</div><p>${E(l.carrier||'Carrier not supplied')}</p>`:'<p>No tracking number yet</p>'}${l.last_mile_tracking&&l.last_mile_tracking!==l.tracking_number?`<p>Last-mile tracking: ${E(l.last_mile_tracking)}</p>`:''}${l.shipment_id?`<p>Package ${E(l.shipment_id)}</p>`:''}${M.ready(l)?`<button class="wn-pack-line" data-line-action="complete" data-line="${E(l.id)}">Photo &amp; close line</button>`:''}<button data-line-action="receipt" data-line="${l.id}">Save receipt link</button></aside></article>`;}
  function orderLabelBadge(l){
   return window.PendingQueueCards.shippingLabelBadge(l.order_label_pdfs,l.order_lines,'line',l.order_labels_issued_only,l.order_label_pdfs_to_check);
@@ -97,11 +100,13 @@
   const id=details.dataset.evidence,body=details.querySelector('.wn-evidence-body');body.textContent='Loading…';
   const [files,ev]=await Promise.all([filesFor([id]),db.from('whatnot_order_events').select('*').eq('line_id',id).order('created_at',{ascending:false}).limit(100)]);if(ev.error)throw Error(ev.error.message);
   const images=await Promise.all(files.map(async f=>({...f,url:await signed(f)})));
-  body.innerHTML=`<div class="wn-files">${images.map(f=>f.mime.startsWith('image/')?`<button data-photo="${E(f.url)}"><img src="${E(f.url)}" loading="lazy" alt="${E(f.kind.replaceAll('_',' '))}"><small>${E(f.kind.replaceAll('_',' '))} · ${E(f.actor_name)}<br>${E(M.time(f.created_at))}</small></button>`:`<div>${link(f.url,'Shipping-label PDF')}<small>${E(f.actor_name)} · ${E(M.time(f.created_at))}</small></div>`).join('')||'<p>No files saved yet.</p>'}</div>${ev.data.map(e=>`<div class="wn-event"><strong>${E(e.action.replaceAll('_',' '))}</strong>${e.details.note?'<br>'+E(e.details.note):''}<small>${E(e.actor_name)} · ${E(M.time(e.created_at))}</small></div>`).join('')||'<p>No staff updates yet.</p>'}`;
+  body.innerHTML=`<div class="wn-files">${images.map(f=>f.mime.startsWith('image/')?`<button data-photo="${E(f.url)}"><img src="${E(f.url)}" loading="lazy" alt="${E(f.kind.replaceAll('_',' '))}"><small>${E(f.kind.replaceAll('_',' '))} · ${E(f.actor_name)}<br>${E(M.time(f.created_at))}</small></button>`:`<div>${link(f.url,'Shipping-label PDF')}<small>${E(f.actor_name)} · ${E(M.time(f.created_at))}</small></div>`).join('')||'<p>No files saved yet.</p>'}</div>${ev.data.map(e=>`<div class="wn-event"><strong>${E(e.action.replaceAll('_',' '))}</strong>${e.details.note?'<br>'+E(e.details.note):''}${window.MarketplaceOrderNotes.photoButton(e.details.note_photo_path)}<small>${E(e.actor_name)} · ${E(M.time(e.created_at))}</small></div>`).join('')||'<p>No staff updates yet.</p>'}`;
   details.dataset.loaded='yes';
+  window.MarketplaceOrderNotes.photoThumbnails(body);
  }
  function beginAction(kind,lines){
   if(!lines.length){status('Select the exact order lines first.',true);return;}
+  notePhotos.clear();$('wn-note-photos').hidden=kind!=='note';
   action={kind,lines};const titles={complete:'Complete selected order lines',upload:'Attach evidence to selected items',note:'Add an internal note',watch_missing:'Mark selected watches missing',watch_found:'Mark selected watches found',cancel_pending:'Flag selected items for cancellation review',cancel_clear:'Clear internal cancellation mark',missing:'Mark selected items not found',found:'Mark selected items found',cgl:'Mark selected items Pending CGL',cgl_done:'Confirm CGL is ready',receipt:'Save this item’s receipt link',reopen:'Reopen selected items'};
   $('wn-action-title').textContent=titles[kind];$('wn-action-items').innerHTML=lines.map(l=>`<div class="wn-choice"><strong>Order #${E(l.order_id)} · ${E(l.title)}</strong><small>Qty ${l.quantity} · ${E(l.tracking_number||'No tracking')} · ${E(M.money(Number(l.unit_price)*l.quantity,l.currency))}</small></div>`).join('');
   $('wn-value-label').hidden=kind==='upload';$('wn-value-label').firstChild.textContent=kind==='receipt'?'Whatnot receipt / order URL':'Note';$('wn-value').value=kind==='receipt'?lines[0].receipt_url||'':'';
@@ -131,12 +136,16 @@
   await rpc('attach_whatnot_file',{_path:path,_kind:type,_name:file.name.slice(0,200),_mime:file.type,_lines:M.snapshot(lines)});
  }
  async function submitAction(event){event.preventDefault();if(!action||action.saving)return;const attempt=action,{kind,lines}=attempt;attempt.saving=true;$('wn-action-submit').disabled=true;
+  notePhotos.disable(true);$('wn-value').readOnly=true;
   try{
    if(['complete','upload','cgl_done'].includes(kind)&&!$('wn-confirm').checked)throw Error('Confirm the selected items and evidence first.');
    if(kind==='upload'){
     const files=[...$('wn-files').files],type=$('wn-kind').value;if(!files.length)throw Error('Choose at least one file.');if(files.length>20)throw Error('Choose up to 20 files at a time.');
     for(const f of files)validateFile(f,type);
     for(const f of files){$('wn-action-error').textContent='Saving '+f.name+'…';await attachFile(f,type,lines);}
+   }else if(kind==='note'&&notePhotos.photo){
+    $('wn-action-error').textContent='Saving note and photo…';
+    await window.MarketplaceOrderNotes.savePhotoNote(notePhotos.photo,lines.map(l=>({order_id:l.order_id,line_id:l.id,revision:l.revision})),$('wn-value').value.trim());
    }else{
     if(kind==='complete'&&attempt.photo&&!attempt.photoAttached){
      validateFile(attempt.photo,'completion_photo');
@@ -147,7 +156,7 @@
     await rpc('whatnot_work_action',{_action:kind,_lines:snapshot,_value:$('wn-value').value.trim()||null});
    }
    $('wn-action-dialog').close();action=null;await refresh();status('Saved successfully. Only the selected order lines were updated.');
-  }catch(e){$('wn-action-error').textContent=e.message;}finally{attempt.saving=false;$('wn-action-submit').disabled=false;}
+  }catch(e){$('wn-action-error').textContent=e.message;}finally{attempt.saving=false;$('wn-action-submit').disabled=false;notePhotos.disable(false);$('wn-value').readOnly=false;}
  }
  async function expandBuyer(g){
   const field=g.buyer_key.startsWith('order:')?'id':'buyer_id',value=field==='id'?g.lines[0].order_id:g.buyer_key;

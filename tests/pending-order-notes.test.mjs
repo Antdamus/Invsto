@@ -313,6 +313,25 @@ test('saving another user note refreshes the block without losing earlier notes'
   assert.match(await page.locator('.buyer-card-note-details').innerText(), /alex@example.com/);
 });
 
+test('phone camera evidence saves on its signed eBay item note without a caption',async t=>{
+  const page=await open(t,{mobile:true});
+  await page.evaluate(()=>{
+    $('save-line-note').onclick=null;setupListeners();
+    supabase.storage={from:()=>({upload:async()=>({error:null})})};
+    createAndUploadEvidenceDerivatives=async()=>({});
+    openLineNoteModal('line-a');
+  });
+  const camera=page.locator('#line-note-camera');
+  await expect(camera).toHaveAttribute('capture','environment');
+  const png=await page.evaluate(()=>document.createElement('canvas').toDataURL().split(',')[1]);
+  await camera.setInputFiles({name:'clasp.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await expect(page.locator('#line-note-photo-list img')).toBeVisible();await page.locator('#save-line-note').click();
+  await expect(page.locator('#line-note-modal')).toBeHidden();
+  const note=await page.evaluate(()=>events.at(-1));
+  assert.equal(note.notes,'Photo note');assert.equal(note.signed_by_email,'sam@example.com');
+  assert.equal(note.payload.order_line_id,'line-a');assert.match(note.photo_attachments[0].path,/^line-notes\//);
+});
+
 test('failed history reads do not expose unfiltered queue summaries and retry loads written notes', async t => {
   const page = await open(t, {render: false});
   await page.evaluate(() => { failNotes = true; renderOrders(); });

@@ -364,3 +364,44 @@ test('staff can sign one whole order or exact item from a phone, retry safely an
   await page.locator('#mn-close').click();await expect(buyer.locator('[data-tiktok-order="1"] .mn-preview').first()).toBeHidden();
  }finally{await page.close();}
 });
+
+test('a phone photo can be removed, saved without text, retried and opened from its signed note',async()=>{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await setup(page);
+ try{
+  const png=await page.evaluate(()=>{
+   const t=fixtureTables;
+   t.tiktok_orders.push({id:'1',order_number:'577623648796643331',buyer_username:'photo-buyer',stage:'pending',marketplace_status:'To ship',order_amount:12});
+   t.tiktok_order_lines.push({id:'item-1',order_id:'1',sku_id:'1732765489814737141',title:'Ring',quantity:1});t.marketplace_order_notes=[];
+   const original=supabase.rpc;window.photoWrites=[];window.noteWrites=[];let url;
+   supabase.storage={from:bucket=>({upload:async(path,blob,opts)=>{
+    photoWrites.push({bucket,path,mime:blob.type,upsert:opts.upsert});
+    if(photoWrites.length===1)return {error:{message:'Upload interrupted'}};
+    url=URL.createObjectURL(blob);return {};
+   },createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:url}))}),createSignedUrl:async()=>({data:{signedUrl:url}})})};
+   supabase.rpc=async(name,a)=>{
+    if(name!=='add_marketplace_order_photo_note')return original(name,a);noteWrites.push(a);
+    if(noteWrites.length===1){
+     t.marketplace_order_notes.push({market:'tiktok',order_id:'1',line_id:null,signer:'Fixture Staff',created_at:'2026-10-31T18:10:00Z',id:a._photo_id,body:'Photo note',photo_path:photoWrites[0].path});
+     return {error:{message:'Response interrupted'}};
+    }
+    return {};
+   };
+   return document.createElement('canvas').toDataURL().split(',')[1];
+  });
+  const file={name:'ring.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')};
+  await page.locator('#tk-phone-refresh').click();await page.getByRole('button',{name:'Add order note'}).click();
+  await page.locator('#mn-photos [data-file]').setInputFiles(file);await expect(page.getByAltText('Selected note photo')).toBeVisible();
+  await page.getByRole('button',{name:'Remove photo'}).click();await expect(page.locator('#mn-save')).toBeDisabled();
+  const camera=page.locator('#mn-photos [data-capture]');await expect(camera).toHaveAttribute('capture','environment');await camera.setInputFiles(file);
+  await page.locator('#mn-save').click();await expect(page.locator('#mn-status')).toContainText('Upload interrupted');
+  await page.locator('#mn-save').click();await expect(page.locator('#mn-status')).toContainText('Response interrupted');
+  await page.locator('#mn-save').click();await expect(page.locator('#mn-feed article')).toHaveCount(1);await expect(page.locator('#mn-feed')).toContainText('Signed by Fixture Staff');
+  await page.getByRole('button',{name:'View note photo'}).click();await expect(page.getByAltText('Photo attached to the signed staff note')).toBeVisible();
+  assert.equal(await page.evaluate(()=>document.querySelector('.mn-photo-viewer img').naturalWidth),300);
+  await page.getByRole('button',{name:'Close photo'}).click();
+  const writes=await page.evaluate(()=>({uploads:photoWrites,notes:noteWrites}));
+  assert.equal(writes.uploads.length,2);assert.deepEqual(writes.uploads[0],writes.uploads[1]);assert.equal(writes.uploads[0].mime,'image/jpeg');assert.equal(writes.uploads[0].upsert,false);
+  assert.deepEqual(writes.notes[0],writes.notes[1]);assert.deepEqual(writes.notes[0]._targets,[{order_id:'1',line_id:null}]);
+  await page.locator('#mn-close').click();await page.getByRole('button',{name:'Add order note'}).click();await expect(page.getByRole('button',{name:'View note photo'})).toBeVisible();
+ }finally{await page.close();}
+});

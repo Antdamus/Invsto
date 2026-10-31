@@ -77,3 +77,13 @@ button.mq-chip:hover{border-color:#a89569}button.mq-chip[aria-pressed=true]{colo
 #mn-dialog article{border-top:1px solid #3d4a3d;margin-top:.7rem;padding:.65rem 0}#mn-dialog article time,#mn-dialog article small{display:block}
 #mn-dialog article p{margin:.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#mn-dialog #mn-feed{margin-top:.55rem}
 @media(max-width:700px){.mn-control .mn-add,#mn-dialog button{min-height:44px}#mn-dialog textarea,#mn-dialog select{font-size:16px}}
+.mn-photo-picker{display:grid;gap:.5rem;padding:.7rem .8rem;border:1px dashed #637266;border-radius:9px}
+.mn-photo-picker[hidden],.mn-photo-picker [hidden],.mn-view-photo img[hidden],.mn-photo-viewer img[hidden]{display:none!important}
+.mn-photo-picker strong small{font-weight:400;color:#becac1}.mn-photo-picker small:empty{display:none}
+.mn-pick-actions,.mn-picked{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.mn-picked img,.mn-view-photo img{width:5rem;height:4rem;object-fit:contain;border-radius:5px;background:#101812}
+.mn-view-photo{display:inline-flex;align-items:center;gap:.6rem}
+.mn-photo-viewer{max-width:95vw;max-height:94dvh;box-sizing:border-box;padding:.8rem;border:1px solid #69786c;border-radius:12px;background:#141d18;color:#f7f3e8}
+.mn-photo-viewer::backdrop{background:#050a07ed}.mn-photo-viewer img{display:block;max-width:88vw;max-height:76dvh;object-fit:contain}
+.mn-photo-viewer button{min-height:44px;margin:0 0 .5rem;padding:.5rem .85rem;border:1px solid #8d7953;border-radius:8px;background:#302d22;color:#ffe3aa;cursor:pointer}
+.mn-photo-viewer p:empty{display:none}

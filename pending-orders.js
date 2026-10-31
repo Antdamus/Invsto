@@ -12497,8 +12497,8 @@ async function uploadLineNotePhoto(line = {}, photo = {}, index = 0, note = "") 
 async function saveLineNote() {
   const line = getLineNoteLine();
   if (!line?.id || !line.order_id) return setLineNoteError("This order line is no longer visible. Refresh pending orders and try again.");
-  const note = String($("line-note-text")?.value || "").trim();
-  if (!note) return setLineNoteError("Write a note before saving.");
+  const note = String($("line-note-text")?.value || "").trim() || (state.lineNotePhotos.length ? "Photo note" : "");
+  if (!note) return setLineNoteError("Write a note or add a photo before saving.");
   if (state.lineNoteBusy) return;
 
   const button = $("save-line-note");
@@ -13269,6 +13269,7 @@ function setupListeners() {
   $("save-line-note")?.addEventListener("click", saveLineNote);
   $("refresh-line-note-history")?.addEventListener("click", loadLineNoteHistory);
   $("line-note-photo-file")?.addEventListener("change", handleLineNoteFiles);
+  $("line-note-camera")?.addEventListener("change", handleLineNoteFiles);
   $("line-note-dropzone")?.addEventListener("paste", handleLineNotePaste);
   $("line-note-modal")?.addEventListener("paste", handleLineNotePaste);
   $("clear-line-note-photos")?.addEventListener("click", () => {
