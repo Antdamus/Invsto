@@ -31,6 +31,25 @@
  const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
  let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',returnCounts=null,disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  let historyPreview=null,historyReceipt='';
+ function caseHistoryAction(c,compact=false){
+  if(ctx.employee.role!=='admin')return '';
+  if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks)&&!['pending','changes_requested'].includes(c.final_review?.status))return compact?'':'<section class="issue-case-history"><div><strong>Saved in History · watching for updates</strong><p>New eBay activity or case work brings this record back to the active list.</p></div></section>';
+  const check=c.archive_check?.manual,allowed=check?.allowed===true;
+  const reason=allowed?(check.accept_decision?'Decided against us. If you accept the decision as fair, click Send to History to clear this issue.':'Closed on eBay with no remaining work on this issue.'):(check?.reason||'Checking whether this case can be archived…');
+  return `<section class="issue-case-history ${compact?'is-compact':''}" aria-label="Case History action"><div><strong>${allowed?'Send this issue to History':'Keep this case visible'}</strong><p>${escape(reason)}</p>${check?.case_count>1?`<p class="issue-history-scope">Includes all ${escape(check.case_count)} linked request / case records.</p>`:''}${check?.related_case_id?`<a href="ebay-returns.html?caseId=${encodeURIComponent(check.related_case_id)}">View escalated case ${escape(check.related_case_number||'')} ↗</a>`:''}<small>New updates bring it back automatically.</small></div><button type="button" class="primary-btn" data-send-history="${escape(c.id)}" ${allowed?'':'disabled'}>Send to History</button></section>`;
+ }
+ async function sendCaseToHistory(id){
+  const c=detail?.c.id===id?detail.c:rows.find(r=>r.id===id);if(!c||saving)return;
+  const position=captureListPosition(id);saving=true;
+  document.querySelectorAll('[data-send-history]').forEach(b=>b.disabled=true);
+  try{
+   const plan=c.archive_check?.manual;
+   const result=checked(await db.rpc('send_customer_issue_to_history',{_case_id:id,_expected_cases:plan?.cases||[],_accept_decision:plan?.accept_decision===true}));
+   historyReceipt=`${result.archived} record${result.archived===1?'':'s'} sent to History. `;clearBulk();await continueAfterClose(result.archived_ids||[id],position);
+   feedback('The issue was sent to History. New eBay information or case work brings it back for review.');
+  }catch(error){feedback(error.message||'Could not confirm the move. Refresh the case before trying again.',true);}
+  finally{saving=false;cards();if(detail)renderDetail();historyBanner();}
+ }
  function historyBanner(){
   const banner=$('issues-history-banner');if(!banner)return;
   banner.hidden=ctx.employee.role!=='admin';if(banner.hidden)return;
@@ -44,16 +63,16 @@
  async function archiveFinalized(){
   if(saving||!historyPreview?.ready_ids?.length)return;
   const ids=[...historyPreview.ready_ids],position=captureListPosition();saving=true;historyBanner();
-  let archived=0;
+  let archived=0,archivedIds=[];
   try{
    // Recheck every selected case in the database under locks. New work or a
    // changed eBay outcome makes that case stay active, even after this preview.
    for(let start=0;start<ids.length;start+=500){
     const result=checked(await db.rpc('archive_finalized_customer_issues',{_case_ids:ids.slice(start,start+500)}));
-    archived+=Number(result.archived||0);
+    archived+=Number(result.archived||0);archivedIds.push(...(result.results||[]).filter(r=>r.archived).map(r=>r.id));
    }
    historyReceipt=`${archived} moved to History. `;clearBulk();
-   await continueAfterClose(ids,position);
+   await continueAfterClose(archivedIds,position);
    feedback(`${archived} finalized case${archived===1?'':'s'} moved to History. Evidence and activity are preserved; unfinished cases and decisions against us stay active.`);
   }catch(error){historyReceipt='';feedback(`${archived?`${archived} moved. `:''}${error.message||'Could not confirm the move.'} Refresh to verify before trying again.`,true);}
   finally{saving=false;historyBanner();}
@@ -82,7 +101,7 @@
  async function continueAfterClose(ids,position){
   const removed=new Set(ids);rows=rows.filter(c=>!removed.has(c.id));
   ids.forEach(id=>bulkSelection.delete(id));
-  closeCase();
+  closeCase(true);
   await refresh({detail:false});
   restoreListPosition(position);
  }
@@ -185,6 +204,7 @@
   return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge issue-refund-badge is-${refund.tone}"><span>${escape(refund.label)}</span>${refundDate}</span>`:'');
  }
  function nextText(c){
+  if(c.archive_check?.update_pending||c.history_update_pending)return 'New update · review before archiving';
   if(closed(c)&&c.archive_check?.reason)return c.archive_check.reason;
   if(c.archive_check?.ready)return 'Fully finalized · ready for History';
   if(c.final_review?.status==='pending')return 'Awaiting final review';
@@ -215,7 +235,7 @@
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Review the current case status';
  }
- function providerBadge(c){return c.archive_check?.reason?.startsWith('Decided against us')?{kind:'lost',label:'Decided against us · stays active'}:root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
+ function providerBadge(c){return c.archive_check?.reason?.startsWith('Decided against us')?{kind:'lost',label:'Decided against us · review decision'}:root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
  function providerBadgeHtml(c){
   const badge=providerBadge(c),protection=root.OGDisputeResponse?.protection(c);
   return (badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'')+
@@ -234,7 +254,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${view==='final_review'?'':customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${view==='final_review'?`<div class="issue-review-card-deadline">${reviewDeadline(c)}</div><p class="issue-review-card-submitted">Work finished ${escape(date(c.final_review?.submitted_at))}</p>`:cardFacts(c)}
    <div class="issue-card-footer">${view==='final_review'?returnBadge(c)+`<span class="issue-tag">${escape(nextText(c))}</span>`:cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='final_review'?`return${total===1?'':'s'} awaiting review`:`${view==='history'?'finished':'active'} case${total===1?'':'s'}`}`;
   returnFilters();
@@ -444,6 +464,7 @@
   const reason=c.source_lane==='inquiry'?'Item not received':/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
+   ${caseHistoryAction({...c,open_tasks:summary.open_tasks})}
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
    ${reviewSection({...c,return_refund:summary.return_refund})}
@@ -573,7 +594,7 @@
    }
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
- function closeCase(){if(saving)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');$('issues-detail').innerHTML='<div class="issues-empty">Choose a case to see its order, evidence and next steps.</div>';const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
+ function closeCase(force=false){if(saving&&!force)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');$('issues-detail').innerHTML='<div class="issues-empty">Choose a case to see its order, evidence and next steps.</div>';const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
  function form(title,body,submit,slot='issue-form-slot'){
   $('issue-action-form')?.remove();
   $(slot).innerHTML=`<form id="issue-action-form" class="issue-form"><h3>${escape(title)}</h3>${body}<p class="issue-form-error" role="alert"></p><div class="issue-actions"><button class="primary-btn" type="submit">${escape(submit)}</button><button class="secondary-btn" type="button" data-cancel-form>Cancel</button></div></form>`;
@@ -657,6 +678,7 @@
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
    if(b.id==='issues-archive-finalized'){archiveFinalized();}
+   else if(b.dataset.sendHistory){sendCaseToHistory(b.dataset.sendHistory);}
    else if(b.id==='issues-open-history'){clearBulk();view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';resetSort();closeCase();refresh({detail:false});}
    else if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;resetSort();offset=0;closeCase();refresh({detail:false});}
    else if(b.hasAttribute('data-bulk-start')&&ctx.employee.role==='admin'){selecting=true;closeCase();cards();}

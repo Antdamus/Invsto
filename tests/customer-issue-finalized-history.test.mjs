@@ -85,6 +85,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261013100000_customer_issue_return_stage_counts.sql'));
  await db.exec(await sqlFile('20261014110000_customer_return_final_review.sql'));
  await db.exec(await sqlFile('20261031040000_customer_issue_finalized_history.sql'));
+ await db.exec(await sqlFile('20261031050000_customer_issue_history_button.sql'));
 
 
 });
@@ -99,6 +100,8 @@ beforeEach(async()=>{
 const preview=()=>scalar('select customer_issue_history_preview() v');
 const archive=()=>scalar('select archive_finalized_customer_issues($1) v',[[id(100)]]);
 const status=()=>scalar('select status v from ebay_return_cases where id=$1',[id(100)]);
+const manualPlan=async()=> (await preview()).checks[id(100)].manual;
+const manualArchive=async(accept=false,expected)=>scalar('select send_customer_issue_to_history($1,$2,$3) v',[id(100),JSON.stringify(expected||(await manualPlan()).cases),accept]);
 async function monitor(extra=''){
  await db.exec(`insert into ebay_return_tasks(id,return_case_id,task_type,title,status,metadata)
  values('${id(200)}','${id(100)}','return_review','Check eBay','open','{"source":"ebay_return_api"}');${extra}`);
@@ -179,5 +182,46 @@ test('older manual close APIs cannot bypass unfinished-work and adverse-outcome 
 test('only administrators can use bulk preview/archive; internal helpers are not callable',async()=>{
  await db.exec("select set_config('test.admin','no',false);set role authenticated");
  await assert.rejects(preview(),/Administrator/);await assert.rejects(archive(),/Administrator/);
+ await assert.rejects(scalar('select send_customer_issue_to_history($1,$2,true) v',[id(100),'[]']),/Administrator/);
  await assert.rejects(scalar('select archive_finalized_customer_issue_internal($1,true) v',[id(100)]),/permission denied/);
+});
+test('a decision against us can be explicitly accepted as fair without automatic bulk archiving',async()=>{
+ await monitor();await db.exec(`update ebay_return_cases set raw_payload='{"ebayDetail":{"paymentDisputeId":"D100","resolution":{"reasonForClosure":"SELLER_LOST"}}}'`);
+ assert.equal((await preview()).ready,0);assert.equal((await manualPlan()).allowed,true);assert.equal((await manualPlan()).accept_decision,true);
+ await assert.rejects(manualArchive(false),/Review and accept/);assert.equal(await status(),'open');
+ assert.equal((await manualArchive(true)).archived,1);assert.equal(await status(),'closed');
+ assert.equal(await scalar("select payload->>'decision_accepted_as_fair' v from ebay_return_events where payload->>'source'='customer_issue_manual_history'"),'true');
+ await db.exec('update ebay_return_cases set synced_at=now()');assert.equal(await status(),'closed','unchanged lost outcome stays in History after explicit acceptance');
+});
+test('one click archives the entire linked issue; an unrelated issue on the same order remains active',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='inquiry',issue_kind='request',raw_payload='{"ebayDetail":{"inquiryId":"D100","state":"CLOSED","inquiryDetails":{"escalationDate":{"value":"2026-10-29"}}}}';
+ insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values
+ ('${id(101)}','case','dispute','D100','open','CLOSED',now(),'{"ebayDetail":{"caseId":"D100","sellerOutcome":"LOSE"}}'),
+ ('${id(102)}','case','dispute','OTHER','open','CLOSED',now(),'{"ebayDetail":{"caseId":"OTHER","sellerOutcome":"LOSE"}}');`);
+ await db.exec(`update ebay_return_cases set order_id='${id(10)}'`);
+ const plan=await manualPlan();assert.equal(plan.case_count,2);assert.equal(plan.accept_decision,true);assert.equal(plan.allowed,true);
+ assert.equal((await manualArchive(true)).archived,2);assert.equal(await status(),'closed');
+ assert.equal(await scalar('select status v from ebay_return_cases where id=$1',[id(101)]),'closed');
+ assert.equal(await scalar('select status v from ebay_return_cases where id=$1',[id(102)]),'open');
+ await db.exec('update ebay_return_cases set synced_at=now()');assert.equal(await status(),'closed');
+});
+test('new information returns an archived closed case and remains visible until reviewed again',async()=>{
+ await manualArchive();await db.exec("update ebay_return_cases set raw_payload=raw_payload||'{\"syncedAt\":\"poll time changed\"}',synced_at=now()");
+ assert.equal(await status(),'closed','poll time alone is not new activity');
+ await db.exec(`update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,note}','"New evidence received"'),synced_at=now()`);
+ assert.equal(await status(),'open');assert.equal((await preview()).checks[id(100)].update_pending,true);
+ await db.exec('update ebay_return_cases set synced_at=now()');assert.equal(await status(),'open','automatic cleanup must not hide the new update');
+ await manualArchive();assert.equal(await status(),'closed');assert.equal(await scalar('select history_update_pending v from ebay_return_cases where id=$1',[id(100)]),false);
+});
+test('new case message returns the record immediately; historical message imports do not',async()=>{
+ await manualArchive();await db.exec(`insert into ebay_return_messages(return_case_id,direction,message_body,sent_at) values('${id(100)}','inbound','Old message',now()-interval '1 day')`);
+ assert.equal(await status(),'closed');
+ await db.exec(`insert into ebay_return_messages(return_case_id,direction,message_body,sent_at) values('${id(100)}','inbound','New buyer update',now()+interval '1 second')`);
+ assert.equal(await status(),'open');assert.equal(await scalar('select history_update_pending v from ebay_return_cases where id=$1',[id(100)]),true);
+});
+test('manual acceptance cannot discard employee work or a changed family snapshot',async()=>{
+ const plan=await manualPlan();await monitor("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"';");
+ await assert.rejects(manualArchive(true,plan.cases),/Internal work is unfinished/);
+ await db.exec("update ebay_return_tasks set assigned_to_user_id=null;update ebay_return_cases set item_title='Changed since preview'");
+ await assert.rejects(manualArchive(true,plan.cases),/This issue changed/);assert.equal(await status(),'open');
 });

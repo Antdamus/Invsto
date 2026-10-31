@@ -177,3 +177,11 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 .issues-history-actions button{white-space:normal;min-height:46px}
 .issue-response-badge.is-lost{color:#ffd1ce;background:#7c2929;border:1px solid #c06b66}
 @media(max-width:800px){.issues-history-banner{align-items:stretch;flex-direction:column;padding:19px;gap:16px}.issues-history-actions{width:100%}.issues-history-actions button{width:100%}}
+.issue-case-history{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px;margin:16px 0;border:1px solid #d8ba73;border-radius:16px;background:#d8ba7312}
+.issue-case-history strong{display:block;color:var(--gold,#f0d79e);line-height:1.4}
+.issue-case-history p{margin:6px 0;line-height:1.5}
+.issue-case-history small{display:block;line-height:1.4;margin-top:8px;color:var(--muted,#bdcbbf)}
+.issue-case-history a{display:inline-block;margin:4px 0;color:var(--gold,#f0d79e);text-underline-offset:4px}
+.issue-case-history button{min-height:46px;flex-shrink:0}
+.issue-case-history.is-compact{flex-direction:column;align-items:stretch;margin:0 18px 18px;padding:16px}
+@media(max-width:800px){.issue-case-history{flex-direction:column;align-items:stretch}.issue-case-history button{width:100%}}

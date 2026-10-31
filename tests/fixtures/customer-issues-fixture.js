@@ -40,9 +40,18 @@
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
  const db={storage:{from:()=>({download:async()=>({data:new Blob(['test evidence bytes'],{type:'image/png'})})})},auth:{getSession:async()=>({data:{session:{user:{id:'me'}}}})},from:query,functions:{invoke:async(name,args)=>{fixtureCalls.push({invoke:name,args});if(args?.body?.action==='dispute_evidence')return {data:{url:'https://antdamus.github.io/Invsto/StoreWebsite/OG_Logo.png',mime_type:'image/png',archived:true}};return {data:{message:'Refresh queued. You can keep working.'}};}},rpc:async(name,args={})=>{
+  if(name==='send_customer_issue_to_history'){
+   if(args._accept_decision!==true)return {error:{message:'Review and accept the decision'}};
+   fixtureWrites.push({name,args});for(const i of [0,2]){rows[i].status='closed';rows[i].open_tasks=0;}
+   tasks.forEach(t=>t.status='cancelled');return {data:{archived:2,archived_ids:['case-0','case-2']}};
+  }
   if(name==='customer_issue_history_preview'){
    if(window.fixtureHistoryFailure)return {error:{message:'Could not check eBay status'}};
    const checks={};if(location.search.includes('historyArchiveFixture'))for(const r of rows.filter(r=>r.status!=='closed'))checks[r.id]={ready:r.id==='case-1',reason:r.id==='case-1'?null:r.id==='case-2'?'Decided against us · keep for review':'Internal work is unfinished'};
+   if(location.search.includes('historyManualFixture'))for(const r of rows.filter(r=>r.status!=='closed')){
+    const allowed=['case-0','case-2'].includes(r.id);if(allowed)r.ebay_status='CLOSED';
+    checks[r.id]={ready:false,reason:allowed?'Decided against us · keep for review':'Still open on eBay',manual:{allowed,reason:allowed?null:'Still open on eBay',accept_decision:allowed,case_count:allowed?2:1,cases:[{id:'case-0',updated_at:now},{id:'case-2',updated_at:now}]}};
+   }
    const ready_ids=Object.keys(checks).filter(id=>checks[id].ready);return {data:{ready_ids,ready:ready_ids.length,kept:rows.filter(r=>r.status!=='closed').length-ready_ids.length,against_us:location.search.includes('historyArchiveFixture')?1:0,checks}};
   }
   if(name==='archive_finalized_customer_issues'){
