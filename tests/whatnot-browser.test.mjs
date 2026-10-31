@@ -51,10 +51,19 @@ test('report has buyer and item indexes, tracking and receipt links without inve
 });
 test('Whatnot shadow-player capture identifies the exact order and crops the visible video',async()=>{
  const page=await browser.newPage({viewport:{width:1000,height:800}});
- await page.route('https://www.whatnot.com/**',r=>r.fulfill({contentType:'text/html',body:'<section>Order #1484060355 <button aria-label="Close order details">Close</button></section><hls-video></hls-video>'}));
+ await page.route('https://www.whatnot.com/**',r=>r.fulfill({contentType:'text/html',body:'<section>Order #1484060355 <button aria-label="Close order details">Close</button></section><div class="react-tiny-popover-container" style="position:relative;width:300px;height:500px"><hls-video></hls-video></div>'}));
  await page.goto('https://www.whatnot.com/dashboard/orders/opaque#invsto-receipt=1484056123&order=1484060355');
- await page.evaluate(()=>{const h=document.querySelector('hls-video');h.attachShadow({mode:'open'}).innerHTML='<video style="display:block;width:250px;height:440px"></video>';const v=h.shadowRoot.querySelector('video');Object.defineProperty(v,'readyState',{get:()=>2});Object.defineProperty(v,'videoWidth',{get:()=>250});window.chrome={runtime:{sendMessage:async m=>{window.captureRequest=m;return {ok:true}}}};});
+ await page.evaluate(()=>{const h=document.querySelector('hls-video');h.attachShadow({mode:'open'}).innerHTML='<video style="display:block;width:250px;height:440px"></video>';const v=h.shadowRoot.querySelector('video');Object.defineProperty(v,'readyState',{get:()=>2});Object.defineProperty(v,'videoWidth',{get:()=>250});document.body.addEventListener('click',e=>{const popover=document.querySelector('.react-tiny-popover-container');if(popover&&!popover.contains(e.target))popover.remove();},true);window.chrome={runtime:{sendMessage:async m=>{window.captureRequest=m;return {ok:true}}}};});
  await page.addScriptTag({content:await readFile(new URL('../tools/ebay-og-order-link-extension/whatnot-receipt-capture.js',import.meta.url),'utf8')});
  await page.getByRole('button',{name:'Capture item photo → Invsto'}).click();await expect(page.getByText('Sent to Invsto.',{exact:false})).toBeVisible();
- const request=await page.evaluate(()=>captureRequest);assert.equal(request.itemId,'1484056123');assert.equal(request.orderNumber,'1484060355');assert.equal(request.rect.width,250);assert.equal(request.rect.height,440);await page.close();
+ const request=await page.evaluate(()=>captureRequest);assert.equal(request.itemId,'1484056123');assert.equal(request.orderNumber,'1484060355');assert.equal(request.rect.width,250);assert.equal(request.rect.height,440);await expect(page.locator('hls-video')).toHaveCount(1);await page.close();
+});
+test('receipt opening retries a server-rendered button before its handler is ready',async()=>{
+ const page=await browser.newPage();
+ await page.route('https://www.whatnot.com/**',r=>r.fulfill({contentType:'text/html',body:'<section>Order #1484060355 <button aria-label="Close order details">Close</button></section><button id="receipt">View Receipt</button>'}));
+ await page.goto('https://www.whatnot.com/dashboard/orders/opaque#invsto-receipt=1484056123&order=1484060355');
+ await page.addScriptTag({content:await readFile(new URL('../tools/ebay-og-order-link-extension/whatnot-receipt-capture.js',import.meta.url),'utf8')});
+ await page.evaluate(()=>{document.querySelector('#receipt').onclick=()=>{window.receiptOpens=(window.receiptOpens||0)+1;const v=document.createElement('video');v.style.cssText='width:200px;height:300px';document.body.append(v);};});
+ await expect(page.getByRole('button',{name:'Capture item photo → Invsto'})).toBeVisible({timeout:8000});
+ assert.equal(await page.evaluate(()=>receiptOpens),1);await page.close();
 });
