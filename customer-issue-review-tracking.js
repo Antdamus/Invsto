@@ -19,8 +19,8 @@
      const month=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(match[1].slice(0,3).toLowerCase());
      const day=Number(match[2]),year=Number(match[3]),hour=match[4]?Number(match[4]):0,minute=Number(match[5]||0),utc=Date.UTC(year,month,day,(hour%12)+(match[6]?.toUpperCase()==='PM'?12:0),minute);
      if(new Date(utc).getUTCDate()!==day||hour>12||(match[4]&&hour<1)||minute>59)break;
-     const zone=match[7]?.toUpperCase();
-     found[kind].push({value:rows[p],source:`${entry.history?.carrier||entry.carrier||'Carrier'} ${kind==='shipped'?'acceptance':'delivery'} scan · ${zone?'carrier time '+zone:'carrier local time (zone not supplied)'}`,event,location,sort:utc});break;
+     const zone=match[7]?.toUpperCase(),weekday=new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'long'}).format(new Date(utc));
+     found[kind].push({value:`${weekday}, ${rows[p]}`,source:`${entry.history?.carrier||entry.carrier||'Carrier'} ${kind==='shipped'?'acceptance':'delivery'} scan · ${zone?'carrier time '+zone:'carrier local time (zone not supplied)'}`,event,location,sort:utc});break;
     }
     // Only a location can intervene between a scan label and its timestamp.
     if(p!==n+1||!/[A-Z]{2}\s+\d{5}(?:-\d{4})?$/.test(rows[p]))break;

@@ -43,11 +43,11 @@
    }y=top-height-4;
    }
   }
-  async function sectionNav(i){await ensure(36);let x=40;for(const [label,key] of [['Order & tracking','purchase'],['Photos','photos'],['Timeline','timeline'],['Our position','position'],['Full records','records']]){const w=width(label,8,1);await text(page,label,x,y,8,1,color('235f64'));jumps.push({page,key:i.id+':'+key,box:[x,y-4,x+w,y+11]});x+=w+24;}y-=26;}
+  async function sectionNav(i){await ensure(24);let x=40;for(const [label,key] of [['Order & tracking','purchase'],['Photos','photos'],['Timeline','timeline'],['Our position','position'],['Full records','records']]){const w=width(label,8,1);await text(page,label,x,y,8,1,color('235f64'));jumps.push({page,key:i.id+':'+key,box:[x,y-4,x+w,y+11]});x+=w+24;}y-=26;}
   async function caseBrief(i){const o=M.overview(i);
    await write('01 / CASE AT A GLANCE',10,1,gold,6);await write(`Issue: ${i.reason}`,10,0,ink,12);
    await factGrid(o.facts);
-   for(const k of i.keyDates){await ensure(36);await write(`${k.label}: ${k.value}`,9,1,k.tone==='against'?rose:ink,2);await write(k.source,7,0,muted,7);}
+   for(const k of i.keyDates){await ensure(36);await write(`${k.label}: ${k.value}`,9,1,k.tone==='against'?rose:ink,2);await write(k.source,7,0,muted,4);}
    await write('LATEST SAVED BUYER MESSAGE',8,1,gold,5);
    await write(i.latestBuyer?M.excerpt(i.latestBuyer.message_body,260):'No buyer message is saved for these case / order references.',9,0,ink,5);
    if(i.latestBuyer)await write(`${M.date(i.latestBuyer.sent_at)} / ${i.latestBuyer.channel}. Full exchanges in the timeline.`,7,0,muted,10);
