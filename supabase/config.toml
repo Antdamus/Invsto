@@ -626,3 +626,9 @@ entrypoint = "./functions/ebay-order-map-history/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/whatnot-order-sync/index.ts"
+
+[functions.tiktok-messages]
+enabled = true
+# Validates active staff access or a single-use worker lease inside the handler.
+verify_jwt = false
+entrypoint = "./functions/tiktok-messages/index.ts"

@@ -22,6 +22,7 @@
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
     { href: "ebay-returns.html", label: "Customer issues", mark: "CI" },
     { href: "email-triage.html", label: "Email Triage", mark: "ET" },
+    { href: "tiktok-messages.html", label: "TikTok Messages", mark: "TM" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
   ];
 
@@ -39,6 +40,7 @@
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
     { href: "packaging.html", label: "Packaging", mark: "PK" },
     { href: "email-triage.html", label: "Email Triage", mark: "ET", requiresEmailTriageAccess: true },
+    { href: "tiktok-messages.html", label: "TikTok Messages", mark: "TM", requiresEmailTriageAccess: true },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
     { href: "ebay-returns.html", label: "Customer issues", mark: "CI", requiresPostOrderIssueAccess: true },
