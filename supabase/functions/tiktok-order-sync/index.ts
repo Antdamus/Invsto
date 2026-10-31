@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import {client, seal, unseal, sha256, chooseProductionShop, mapOrder, SHOPS_PATH, ORDER_PATH, TikTokError} from './tiktok.ts';
+import {client, seal, unseal, sha256, chooseProductionShop, SHOPS_PATH, TikTokError} from './tiktok.ts';
+import {syncOrderPage, syncInProgress} from './sync.ts';
 
 const APP_URL = 'https://antdamus.github.io/Invsto/pending-tiktok-orders.html';
 const ORIGIN = new URL(APP_URL).origin;
@@ -23,27 +24,7 @@ async function worker(db: any, workerToken: string) {
       const updated = check(await db.from('tiktok_api_connection').update({credentials:await seal(tokens, env('TIKTOK_TOKEN_ENCRYPTION_KEY')), access_expires_at:iso(tokens.access_token_expire_in),authorization_expires_at:iso(tokens.refresh_token_expire_in)}).eq('singleton',true).eq('dispatch_token',workerToken).select('singleton'));
       if (updated.length !== 1) throw Error('TikTok sync lease expired.');
     }
-    const query: Record<string,string> = {shop_cipher:c.shop_cipher,page_size:'50',sort_field:'update_time',sort_order:'ASC'};
-    if (c.page_token) query.page_token = c.page_token;
-    const page = await api.read(ORDER_PATH, tokens.access_token, query, {update_time_ge:Math.floor(Date.parse(c.window_from)/1000),update_time_lt:Math.floor(Date.parse(c.window_to)/1000)});
-    if (!Array.isArray(page.orders)) throw Error('TikTok returned an invalid order page.');
-    if (page.next_page_token && page.next_page_token === c.page_token) throw Error('TikTok repeated its page cursor. Retry shortly.');
-    const existing = page.orders.length ? check(await db.from('tiktok_orders').select('order_number,buyer_username,api_buyer_id').in('order_number',page.orders.map((o: any) => o.id))) : [];
-    const buyerIds = page.orders.map((o: any) => o.user_id).filter(Boolean);
-    const knownBuyers = buyerIds.length ? check(await db.from('tiktok_orders').select('buyer_username,api_buyer_id').in('api_buyer_id',buyerIds)) : [];
-    const names = new Map<string,string>(knownBuyers.map((o: any) => [o.api_buyer_id,o.buyer_username]));
-    for (const order of page.orders) { const old = existing.find((o: any) => o.order_number === order.id); if (old) names.set(order.user_id,old.buyer_username); }
-    // Validate the entire page before importing. A bad item never silently drops an order.
-    const batches = page.orders.map((order: any) => mapOrder(order,names.get(order.user_id)));
-    let saved = 0;
-    for (const rows of batches) {
-      const hash = await sha256(JSON.stringify({shop:c.shop_id,rows}));
-      check(await db.rpc('import_tiktok_api_order',{_token:workerToken,_rows:rows,_hash:hash})); saved++;
-    }
-    const more = Boolean(page.next_page_token);
-    const changes = more ? {page_token:page.next_page_token,next_sync_at:new Date().toISOString()} : {page_token:null,window_from:null,window_to:null,cursor_at:c.window_to,last_synced_at:new Date().toISOString(),next_sync_at:new Date(Date.now()+300000).toISOString()};
-    check(await db.from('tiktok_api_connection').update({...changes,last_error:null,dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',workerToken));
-    return json(200,{ok:true,orders_read:saved,more});
+    return json(200,await syncOrderPage(db,c,workerToken,api,tokens.access_token));
   } catch (error) {
     const message = safeError(error);
     await db.from('tiktok_api_connection').update({last_error:message,next_sync_at:new Date(Date.now()+300000).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',workerToken);
@@ -90,7 +71,7 @@ Deno.serve(async req => {
     if (body.action === 'status') {
       const c = check(await db.from('tiktok_api_connection').select('shop_name,shop_id,enabled,connected_at,last_synced_at,last_error,authorization_expires_at,lease_until,page_token').eq('singleton',true).maybeSingle());
       const configured = Boolean(Deno.env.get('TIKTOK_APP_KEY') && Deno.env.get('TIKTOK_APP_SECRET') && Deno.env.get('TIKTOK_TOKEN_ENCRYPTION_KEY'));
-      return json(200,{configured,admin,connection:c ? {...c,page_token:undefined,syncing:Boolean(c.page_token || c.lease_until && Date.parse(c.lease_until)>Date.now())} : null});
+      return json(200,{configured,admin,connection:c ? {...c,page_token:undefined,syncing:syncInProgress(c)} : null});
     }
     if (body.action === 'connect') {
       if (!admin || !check(await db.rpc('tiktok_api_authorizer_allowed',{_user:auth.data.user.id}))) return json(403,{error:'Only active staff administrators can connect TikTok.'});
