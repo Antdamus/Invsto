@@ -27,7 +27,8 @@
     const save=await db.rpc('attach_whatnot_file',{_path:path,_kind:'item_photo',_name:`Whatnot order ${p.orderNumber} receipt.jpg`,_mime:'image/jpeg',_lines:[{id:r.data.id,revision:r.data.revision}]});if(save.error)throw Error(save.error.message);
    }
    window.postMessage({type:'OG_WHATNOT_RECEIPT_DONE',transferId:p.transferId},location.origin);
-   document.querySelectorAll(`[data-evidence="${p.itemId}"]`).forEach(d=>{delete d.dataset.loaded;d.open=false;});tell(`Photo saved successfully · Whatnot order ${p.orderNumber}, item ${p.itemId}. Open its photos to review.`);
+   document.querySelectorAll(`[data-evidence="${p.itemId}"]`).forEach(d=>{delete d.dataset.loaded;d.open=false;});const message=`Photo saved successfully · Whatnot order ${p.orderNumber}, item ${p.itemId}. Open its photos to review.`;tell(message);
+   document.dispatchEvent(new CustomEvent('whatnot-item-photo-saved',{detail:message}));
   }catch(e){tell(e.message);}finally{saving.delete(p.transferId);document.documentElement.dataset.wnReceiptSaving=String(saving.size>0);}
  });
  window.postMessage({type:'OG_WHATNOT_RECEIPT_READY'},location.origin);

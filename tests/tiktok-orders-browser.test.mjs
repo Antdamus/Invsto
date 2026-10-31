@@ -131,7 +131,7 @@ test('shipping buttons prepare single buyers and selected batches, including sib
  await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Create combined label',exact:true})).toHaveCount(1);await expect(page.getByRole('button',{name:'Create shipping label',exact:true})).toHaveCount(1);
  await page.locator('#tk-search').fill('577620684385522369');await page.getByRole('button',{name:'Create combined label',exact:true}).click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(1);
  assert.equal(new URLSearchParams(new URL(await page.evaluate(()=>opened[0])).hash.slice(1)).get('ogLabels'),'577620684385522369;577620723998233281');
- await page.locator('#tk-search').fill('');await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');await page.locator('#tk-create-labels').click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(2);
+ await page.locator('#tk-search').fill('');await page.locator('#tk-label-batch>summary').click();await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');await page.locator('#tk-create-labels').click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(2);
  assert.equal(new URLSearchParams(new URL(await page.evaluate(()=>opened[1])).hash.slice(1)).get('ogLabels').split(';').length,3);
  await page.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(page.locator('#tk-create-labels')).toBeDisabled();
  await page.evaluate(()=>extensionVersion='1.0.19');await page.getByRole('button',{name:'Create shipping label',exact:true}).click();await expect(page.locator('#tk-status')).toContainText('v1.0.20');assert.equal(await page.evaluate(()=>opened.length),2);assert.equal(await page.evaluate(()=>closedPopups),1);await page.close();
@@ -147,7 +147,7 @@ test('missing saved PDFs offer retrieval or mixed creation and stop offering sav
   }
  });
  await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Get shipping label',exact:true})).toHaveCount(1);await expect(page.getByRole('button',{name:'Create / get labels',exact:true})).toHaveCount(1);
- await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');
+ await page.locator('#tk-label-batch>summary').click();await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');
  await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-label-recovery.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
  await page.evaluate(()=>fixtureTables.tiktok_order_documents.push({id:'doc-a',order_id:'a',kind:'label',path:'saved.pdf'}));await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Get shipping label',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Create / get labels',exact:true})).toHaveCount(1);await page.close();
 });
@@ -184,7 +184,7 @@ test('an already-open TikTok tab reveals repeated captures through filters and h
   supabase.storage={from:()=>({createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:photo}))})})};
   window.addEventListener('message',e=>{if(e.data?.type==='OG_TIKTOK_RECEIPT_READY'&&e.data.transferId){t.tiktok_order_receipt_photos[0].transfer_id=e.data.transferId;window.postMessage({type:'OG_TIKTOK_RECEIPT_DATA',payload:{transferId:e.data.transferId,orderNumber:'577620684385522369',skuId:'1732759903849189622',completed:true}},location.origin);}});
  });
- await page.locator('#tk-refresh').click();await page.locator('#tk-search').fill('different-buyer');await page.locator('#tk-stage-filter').selectOption('waiting');
+ await page.locator('#tk-refresh').click();await page.locator('#tk-search').fill('different-buyer');await page.locator('#tk-refine>summary').click();await page.locator('#tk-stage-filter').selectOption('waiting');
  await page.evaluate(()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:'00000000-0000-4000-8000-000000000003'},location.origin));
  await expect(page.locator('.tk-capture-saved img')).toBeVisible();await expect(page.locator('dialog[open]')).toHaveCount(0);await expect(page.locator('#tk-search')).toHaveValue('');await expect(page.locator('#tk-stage-filter')).toHaveValue('');
  await page.getByRole('button',{name:'Open order',exact:true}).click();await expect(page.locator('#tk-detail')).toBeVisible();
@@ -222,10 +222,10 @@ test('buyer cards filter deadlines without splitting a buyer and expose only the
   window.printCalls=[];window.shippingLabelPrint={printSaved:async value=>{window.printCalls.push(value);return {message:'Opened printer chooser'};}};
  });
  await page.locator('#tk-refresh').click();await expect(page.locator('#tk-orders .tk-buyer')).toHaveCount(3);
- await page.locator('.buyer-shipping-due-options [data-tk-due=overdue]').click();await expect(page.locator('.tk-buyer')).toHaveCount(1);const card=page.locator('.tk-buyer');await expect(card).toHaveClass(/is-overdue/);await expect(card).toContainText('2 orders');await expect(card).toContainText('1/2 orders with labels');
+ await page.locator('[data-mq-key=overdue]').click();await expect(page.locator('.tk-buyer')).toHaveCount(1);const card=page.locator('.tk-buyer');await expect(card).toHaveClass(/is-overdue/);await expect(card).toContainText('2 orders');await expect(card).toContainText('1/2 orders with labels');
  await card.locator('.tk-card-tools > summary').click();await expect(card).toHaveClass(/is-collapsed/);await card.getByRole('button',{name:'Open video receipts',exact:true}).click();await expect(card.locator('.tk-card-tools')).not.toHaveAttribute('open','');await expect(page.locator('#tk-buyer-tools a').filter({hasText:'Open video receipt'})).toHaveCount(2);const links=await page.locator('#tk-buyer-tools a').filter({hasText:'Open video receipt'}).evaluateAll(nodes=>nodes.map(n=>n.href));assert.ok(links.every(l=>l.includes('seller-us.tiktok.com/order/detail?order_no=57762364879664333')&&l.includes('ogReceipt=1')));await page.locator('#tk-close-buyer-tools').click();
  await card.getByRole('button',{name:'Shipping labels',exact:true}).click();await expect(page.locator('#tk-buyer-tools')).toContainText('Alice-order-2.pdf');await expect(page.locator('#tk-buyer-tools')).not.toContainText('Packing.pdf');await page.getByRole('button',{name:'Print shipping label',exact:true}).click();assert.deepEqual(await page.evaluate(()=>window.printCalls),[{path:'tiktok-orders/fixture/label.pdf',title:'TikTok shipping label'}]);await page.locator('#tk-close-buyer-tools').click();
- await page.locator('.buyer-shipping-due-options [data-tk-due=unknown]').click();await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-buyer')).toContainText('Carol');await expect(page.locator('.tk-buyer')).not.toHaveClass(/is-overdue/);
+ await page.locator('[data-mq-key=unknown]').click();await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-buyer')).toContainText('Carol');await expect(page.locator('.tk-buyer')).not.toHaveClass(/is-overdue/);
  await page.locator('.tk-buyer-meta [data-buyer-tool=dates]').click();await expect(page.locator('#tk-buyer-tools')).toContainText('Date needed');await page.getByRole('button',{name:'Edit ship-by date',exact:true}).click();await expect(page.locator('#tk-order-deadline')).toBeVisible();
  await page.close();
 });
@@ -233,9 +233,9 @@ test('buyer cards filter deadlines without splitting a buyer and expose only the
 test('purchase-date filter keeps whole buyer bundles on mobile and clear restores the queue',async()=>{
  const page=await browser.newPage({viewport:{width:1440,height:1000}});await setup(page);
  await page.evaluate(()=>{for(const [id,buyer,created_time] of [['1','Alice','10/16/2026 11:59:00 PM'],['2','alice','10/17/2026 12:01:00 AM'],['3','Alice','10/18/2026 12:01:00 AM'],['4','Bob','10/16/2026']]){fixtureTables.tiktok_orders.push({id,order_number:'57762364879664333'+id,buyer_username:buyer,created_time,marketplace_status:'To ship',stage:'pending',revision:1});fixtureTables.tiktok_order_lines.push({id:'line-'+id,order_id:id,sku_id:'173276548981473714'+id,title:'Ring '+id,quantity:1});}});
- await page.locator('#tk-refresh').click();await page.setViewportSize({width:390,height:844});await expect(page.locator('.tk-buyer')).toHaveCount(2);await page.locator('#tk-purchase-date').fill('2026-10-17');await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-buyer')).toContainText('3 orders');await page.getByRole('button',{name:'Open',exact:true}).click();await expect(page.locator('.tk-order-row')).toHaveCount(3);await expect(page.locator('.tk-order-item')).toHaveCount(3);
- await page.locator('#tk-clear-purchase-date').click();await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('#tk-purchase-date')).toHaveValue('');
- await page.locator('#tk-sync-orders').click();await expect(page.locator('#tk-import')).toHaveAttribute('open','');await expect(page.locator('#tk-import')).toContainText('All orders under current tab');assert.equal(await page.evaluate(()=>fixtureCalls.length),0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.close();
+ await page.locator('#tk-refresh').click();await page.setViewportSize({width:390,height:844});await expect(page.locator('.tk-buyer')).toHaveCount(2);await page.locator('#tk-refine>summary').click();await page.locator('#tk-purchase-date').fill('2026-10-17');await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-buyer')).toContainText('3 orders');await page.getByRole('button',{name:'Open',exact:true}).click();await expect(page.locator('.tk-order-row')).toHaveCount(3);await expect(page.locator('.tk-order-item')).toHaveCount(3);
+ await page.locator('#tk-reset-queue').click();await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('#tk-purchase-date')).toHaveValue('');
+ await page.locator('#tk-data-tools>summary').click();await page.locator('#tk-import-title').click();await expect(page.locator('#tk-import')).toHaveAttribute('open','');await expect(page.locator('#tk-import')).toContainText('All orders under current tab');assert.equal(await page.evaluate(()=>fixtureCalls.length),0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.close();
 });
 test('cancellation requires a valid password, survives save errors and signs only the chosen order once',async()=>{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await setup(page,{cancellations:true});
@@ -269,23 +269,23 @@ test('queue Cancellations button counts unsigned orders and opens all cancellati
   }
   fixtureTables.tiktok_order_lines.push({id:'active',order_id:'2',title:'Still available',quantity:1});
  });
- await page.locator('#tk-refresh').click();const toggle=page.locator('.tk-toolbar #tk-cancellation-toggle');
- await expect(toggle).toBeVisible();await expect(toggle).toHaveClass(/has-cancellations/);await expect(toggle).toHaveAttribute('aria-pressed','false');await expect(toggle.locator('strong')).toHaveText('2');
- await page.locator('#tk-search').fill('buyer-3');await page.locator('#tk-stage-filter').selectOption('waiting');await page.locator('#tk-work-filter').selectOption('missing');await page.locator('#tk-purchase-date').fill('2026-10-01');await page.locator('.buyer-due-filters [data-tk-due="overdue"]').click();await expect(page.locator('.tk-buyer')).toHaveCount(0);
- await toggle.click();await expect(toggle).toHaveAttribute('aria-pressed','true');await expect(toggle).toHaveClass(/is-active/);await expect(page).toHaveURL(/view=cancellations/);await expect(page.locator('#tk-queue-title')).toHaveText('Cancellations');
+ await page.locator('#tk-refresh').click();const toggle=page.locator('#tk-cancelled-link');
+ await expect(toggle).toBeVisible();await expect(toggle).toHaveClass(/has-cancellations/);await expect(toggle).not.toHaveAttribute('aria-current','page');await expect(toggle).toHaveText('Cancellations (2)');
+ await page.locator('#tk-search').fill('buyer-3');await page.locator('#tk-refine>summary').click();await page.locator('#tk-stage-filter').selectOption('waiting');await page.locator('[data-mq-key=missing_watch]').click();await page.locator('#tk-purchase-date').fill('2026-10-01');await page.locator('[data-mq-key="overdue"]').click();await expect(page.locator('.tk-buyer')).toHaveCount(0);
+ await toggle.click();await expect(toggle).toHaveAttribute('aria-current','page');await expect(page).toHaveURL(/view=cancellations/);await expect(page.locator('#tk-queue-title')).toHaveText('Cancellations');
  for(const id of ['tk-search','tk-stage-filter','tk-work-filter','tk-purchase-date'])await expect(page.locator('#'+id)).toHaveValue('');
  await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('#tk-orders')).toContainText('buyer-1');await expect(page.locator('#tk-orders')).toContainText('buyer-2');await expect(page.locator('#tk-orders')).not.toContainText('buyer-3');await expect(page.locator('#tk-orders')).not.toContainText('buyer-4');await expect(page.locator('#tk-label-batch')).toBeHidden();
  await page.locator('[data-tk-cancel-buyer="buyer-1"]').click();const dialog=page.locator('.tk-cancellation-dialog');await expect(dialog).toContainText('577623648796643331');await expect(dialog.locator('[name=password]')).toBeVisible();await dialog.locator('[data-close]').click();
  await toggle.scrollIntoViewIfNeeded();await page.screenshot({path:new URL('../outputs/tiktok-pipeline/cancellation-button-desktop.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1')});
  await page.setViewportSize({width:390,height:844});await expect(toggle).toBeVisible();await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)).toBe(false);await toggle.scrollIntoViewIfNeeded();await page.screenshot({path:new URL('../outputs/tiktok-pipeline/cancellation-button-mobile.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1')});
- await toggle.click();await expect(toggle).toHaveAttribute('aria-pressed','false');await expect(page).not.toHaveURL(/view=/);await expect(page.locator('#tk-queue-title')).toHaveText('Orders to Pack');await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('#tk-orders')).not.toContainText('buyer-1');await expect(page.locator('#tk-label-batch')).toBeVisible();await expect(page.locator('.buyer-due-filters [data-tk-due="all"]')).toHaveAttribute('aria-pressed','true');
- await toggle.click();await page.evaluate(()=>{for(const o of fixtureTables.tiktok_orders)o.cancellation_signed_at='2026-10-18';for(const l of fixtureTables.tiktok_order_lines)l.cancellation_signed_at='2026-10-18';});await page.locator('#tk-phone-refresh').click();await expect(toggle.locator('strong')).toHaveText('0');await expect(toggle).not.toHaveClass(/has-cancellations/);await expect(page.locator('.tk-buyer')).toHaveCount(0);await toggle.click();await expect(page.locator('#tk-queue-title')).toHaveText('Orders to Pack');assert.deepEqual(errors,[]);await page.close();
+ await page.locator('#tk-pending-link').click();await expect(toggle).not.toHaveAttribute('aria-current','page');await expect(page).not.toHaveURL(/view=/);await expect(page.locator('#tk-queue-title')).toHaveText('Orders to Pack');await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('#tk-orders')).not.toContainText('buyer-1');await expect(page.locator('#tk-label-batch')).toBeVisible();await expect(page.locator('[data-mq-type="due"][data-mq-key="all"]')).toHaveAttribute('aria-pressed','true');
+ await toggle.click();await page.evaluate(()=>{for(const o of fixtureTables.tiktok_orders)o.cancellation_signed_at='2026-10-18';for(const l of fixtureTables.tiktok_order_lines)l.cancellation_signed_at='2026-10-18';});await page.locator('#tk-phone-refresh').click();await expect(toggle).toHaveText('Cancellations (0)');await expect(toggle).not.toHaveClass(/has-cancellations/);await expect(page.locator('.tk-buyer')).toHaveCount(0);await page.locator('#tk-pending-link').click();await expect(page.locator('#tk-queue-title')).toHaveText('Orders to Pack');assert.deepEqual(errors,[]);await page.close();
 });
 
 test('Cancelled view highlights full and partial cancellations on desktop and mobile',async()=>{
  const page=await browser.newPage({viewport:{width:1440,height:1000}});await setup(page,{cancellations:true,view:'cancelled'});
  await page.evaluate(()=>{for(const id of ['1','2','3']){fixtureTables.tiktok_orders.push({id,order_number:'57762364879664333'+id,buyer_username:id==='1'?'cancelled-buyer':'mixed-buyer',marketplace_status:id==='1'?'Canceled':'To ship',stage:'pending',revision:1});fixtureTables.tiktok_order_lines.push({id:'line-'+id,order_id:id,sku_id:'173276548981473714'+id,title:'Jewelry '+id,quantity:1,cancelled_at:id==='2'?'2026-10-18':null});}fixtureTables.tiktok_order_lines.push({id:'active',order_id:'2',sku_id:'1732765489814737149',title:'Still available',quantity:1});});
- await page.locator('#tk-refresh').click();await expect(page.locator('#tk-title')).toHaveText('TikTok Cancellations');await expect(page.locator('#tk-cancelled-link')).toHaveAttribute('aria-current','page');await expect(page.locator('#tk-cancellation-toggle')).toHaveAttribute('aria-pressed','true');await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('.tk-buyer-overview .tk-cancelled-badge')).toHaveCount(2);await page.locator('[data-expand="cancelled-buyer"]').first().click();await expect(page.locator('[data-tiktok-order="1"] .tk-order-heading .tk-cancelled-badge')).toHaveText('Cancelled');await expect(page.locator('[data-tiktok-line="line-1"]')).toHaveClass(/is-cancelled/);await page.locator('[data-expand="mixed-buyer"]').first().click();await expect(page.locator('[data-tiktok-order="3"]')).toHaveCount(0);await expect(page.locator('[data-tiktok-line="active"]')).toHaveCount(0);await expect(page.locator('[data-tiktok-finish]:visible')).toHaveCount(0);await expect(page.locator('[data-tk-confirm-cancel="2"]')).toHaveCount(0);
+ await page.locator('#tk-refresh').click();await expect(page.locator('#tk-title')).toHaveText('TikTok Cancellations');await expect(page.locator('#tk-cancelled-link')).toHaveAttribute('aria-current','page');await expect(page.getByRole('link',{name:/^Cancellations/})).toHaveCount(1);await expect(page.locator('.tk-buyer')).toHaveCount(2);await expect(page.locator('.tk-buyer-overview .tk-cancelled-badge')).toHaveCount(2);await page.locator('[data-expand="cancelled-buyer"]').first().click();await expect(page.locator('[data-tiktok-order="1"] .tk-order-heading .tk-cancelled-badge')).toHaveText('Cancelled');await expect(page.locator('[data-tiktok-line="line-1"]')).toHaveClass(/is-cancelled/);await page.locator('[data-expand="mixed-buyer"]').first().click();await expect(page.locator('[data-tiktok-order="3"]')).toHaveCount(0);await expect(page.locator('[data-tiktok-line="active"]')).toHaveCount(0);await expect(page.locator('[data-tiktok-finish]:visible')).toHaveCount(0);await expect(page.locator('[data-tk-confirm-cancel="2"]')).toHaveCount(0);
  await page.screenshot({path:new URL('../outputs/tiktok-pipeline/cancellation-desktop.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});await page.setViewportSize({width:390,height:844});await page.screenshot({path:new URL('../outputs/tiktok-pipeline/cancellation-mobile.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)).toBe(false);await page.screenshot({path:new URL('../outputs/tiktok-pipeline/cancellation-mobile.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});await page.close();
 });
 
@@ -294,14 +294,34 @@ test('work cards show line values, allocated fees and shipping, and limit a buye
  await page.evaluate(()=>{
   const o={id:'demo',order_number:'577600000000009001',buyer_username:'demo.buyer',stage:'pending',marketplace_status:'To ship',ship_by_date:'2020-10-01',order_amount:33,buyer_shipping:3,referral_basis:33};
   fixtureTables.tiktok_orders.push(o);
+  fixtureTables.tiktok_order_receipt_photos.push(...['p1','p2'].map(id=>({id,line_id:'two',path:id})),{id:'old',line_id:'one',removed_at:'2026-10-01',files_deleted_at:'2026-10-01'});
   for(const [id,title,price] of [['one','Watch',20],['two','Earrings',10]])fixtureTables.tiktok_order_lines.push({id,order_id:o.id,title,line_amount:price,quantity:1});
  });
  await page.locator('#tk-phone-refresh').click();
- const watches=page.locator('[data-mq-key="watches"]');await expect(watches).toContainText('$20.00');await watches.click();
+ const watches=page.locator('[data-mq-key="watches"]');await expect(watches).toContainText('$20.00');
+ for(const width of [390,1366]){
+  await page.setViewportSize({width,height:850});await page.evaluate(()=>scrollTo(0,0));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await expect(page.locator('.mq-deadline-grid button')).toHaveCount(4);
+  await expect(page.locator('[data-mq-key=tomorrow]')).toBeInViewport({ratio:1});
+  await expect(page.locator('.mq-metrics:visible')).toHaveCount(1);
+  await expect(page.locator('#tk-work-filter')).toBeHidden();
+  await page.screenshot({path:'outputs/tiktok-pipeline/order-queue-'+width+'.png',animations:'disabled',fullPage:true});
+ }
+ await page.setViewportSize({width:390,height:844});
+ await page.locator('[data-mq-key=no_screenshot]').click();
+ await expect(page.locator('.tk-order-item')).toHaveCount(1);
+ await expect(page.locator('.tk-order-item h4')).toHaveText('Watch');
+ await expect(page.locator('.mq-order-summary')).toContainText('2 order lines · 2 items · Showing 1 of 2');
+ await expect(page.locator('.mq-order-summary')).toContainText('1 line needs a screenshot');
+ await expect(page.locator('.tk-order-item .mq-coverage')).toHaveText('Needs screenshot');
+ assert.ok((await page.locator('.tk-order-item h4').boundingBox()).y<(await page.locator('.tk-item-media').boundingBox()).y);
+ await page.locator('.tk-order-row').screenshot({path:'outputs/tiktok-pipeline/queue-line-phone.png'});
+ await watches.click();
  await expect(page.locator('.tk-order-item')).toHaveCount(1);await expect(page.locator('.tk-order-item')).toContainText('Watch');
- await expect(page.locator('#tk-selection-totals')).toContainText('Shipping collected: $2.00');await expect(page.locator('#tk-selection-totals')).toContainText('Est. fees: $1.32');
+ await expect(page.locator('.mq-metrics div').filter({hasText:'Shipping collected'}).locator('dd')).toHaveText('$2.00');await expect(page.locator('.mq-metrics div').filter({hasText:'Est. fees'}).locator('dd')).toHaveText('$1.32');await expect(page.locator('.mq-metrics')).toHaveCount(1);await expect(page.locator('#tk-money-cards')).not.toContainText('Shipping collected');
  await page.locator('[data-mq-key="overdue"]').click();await expect(page.locator('[data-mq-key="overdue"]')).toHaveAttribute('aria-pressed','true');
- await page.locator('[data-context]').click();await expect(page.locator('.tk-order-item')).toHaveCount(2);await expect(page.locator('#tk-selection-totals')).toContainText('1 order line');
+ await page.locator('[data-context]').click();await expect(page.locator('.tk-order-item')).toHaveCount(2);await expect(page.locator('#tk-selection-totals')).toContainText('1 item line');
  await page.locator('#tk-reset-queue').click();await expect(page.locator('#tk-selection-totals')).toContainText('$30.00');
  await page.close();
 });

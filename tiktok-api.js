@@ -1,7 +1,7 @@
 (function(){
  'use strict';
  window.TikTokApi={start};
- async function start({db,refresh}){
+ async function start({db}){
   const panel=document.getElementById('tk-api'),status=document.getElementById('tk-api-status'),connect=document.getElementById('tk-api-connect'),sync=document.getElementById('tk-api-sync'),pause=document.getElementById('tk-api-pause');
   if(!panel)return;
   let connection=null,working=false;
@@ -12,6 +12,9 @@
   }
   async function load(){
    const result=await call('status');connection=result.connection;
+   const health=document.getElementById('tk-tools-health');
+   health.dataset.alert=String(!connection?.enabled||Boolean(connection?.last_error));
+   health.textContent=!connection?'Setup needed':connection.last_error?'Needs attention':!connection.enabled?'Paused':connection.syncing?'Syncing':'Connected';
    panel.hidden=false;connect.hidden=!result.admin;connect.disabled=!result.configured;
    connect.textContent=connection?'Reconnect shop':'Connect TikTok Shop';
    sync.hidden=!connection;sync.disabled=!connection?.enabled||connection?.syncing;
@@ -27,8 +30,16 @@
   connect.onclick=()=>act(async()=>{const result=await call('connect');const url=new URL(result.url);if(url.origin!=='https://services.tiktokshops.us'||url.pathname!=='/open/authorize')throw Error('Unexpected TikTok authorization destination.');location.assign(url.href);});
   sync.onclick=()=>act(async()=>{await call('sync');status.textContent='TikTok sync queued. You can keep working.';});
   pause.onclick=()=>act(async()=>{await call(connection?.enabled?'pause':'resume');});
-  document.getElementById('tk-api-reload').onclick=()=>act(async()=>{await load();await refresh();});
-  try{await load();}catch(error){panel.hidden=false;status.textContent=error.message;connect.hidden=true;sync.hidden=true;pause.hidden=true;}
-  setInterval(()=>{if(!document.hidden&&!working)load().catch(()=>{});},60000);
+  async function reload(){
+   if(working)return;
+   try{await load();}catch(error){
+    const health=document.getElementById('tk-tools-health');
+    health.textContent='Needs attention';health.dataset.alert='true';
+    panel.hidden=false;status.textContent=error.message;
+   }
+  }
+  window.TikTokApi.reload=reload;
+  await reload();
+  setInterval(()=>{if(!document.hidden)reload();},60000);
  }
 })();

@@ -107,6 +107,7 @@
     const url=new URL(location.href);if(url.searchParams.get('tiktokReceipt')===p.transfer_id){url.searchParams.delete('tiktokReceipt');history.replaceState(null,'',url);}
     for(const panel of document.querySelectorAll('.tk-receipt-transfer'))if(panel.dataset.transferId===p.transfer_id)panel.remove();
     await finishRemoval(db,p);
+    document.dispatchEvent(new CustomEvent('tiktok-item-photo-removed',{detail:{lineId:p.line_id,photoId:p.id}}));
    }catch(e){text.textContent=e.message||'Could not remove the capture. Try again.';confirm.disabled=cancel.disabled=false;}
   };
   return controls;

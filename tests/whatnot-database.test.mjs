@@ -13,6 +13,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261031171000_whatnot_api_connection.sql',import.meta.url),'utf8'));
  await db.exec('create table tiktok_orders(id uuid primary key)');
  await db.exec(await readFile(new URL('../supabase/migrations/20261031230000_marketplace_pending_summaries.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261031234500_whatnot_queue_screenshots.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('all historical orders import; missing filters show only matching lines and counts',async()=>{
@@ -77,4 +78,22 @@ test('queue totals precede paging and charge each checkout once across its origi
  assert.equal(first.facets.shown.lines,43);assert.equal(first.facets.shown.amounts.USD.sales,516);
  const scanned=await summary('missing_watch',']C14200000009400111000000000001234');assert.equal(scanned.visible_lines,1);
  await db.exec("set test.allowed='no'");await assert.rejects(summary(),/access/);await db.exec("set test.allowed='yes'");
+});
+
+test('only item screenshots cover a line and original order totals survive filtering',async()=>{
+ const order=record('4000');order.username='screenshotBuyer';
+ order.lines.push({...order.lines[0],id:'400002',quantity:1});await save(order);
+ for(const [i,kind,id] of [[1,'item_photo','400001'],[2,'item_photo','400001'],[3,'completion_photo','400002'],[4,'label','400002']]){
+  await run("insert into whatnot_order_files(path,kind,name,mime,line_ids,snapshot,actor,actor_name) values($1,$2,'file',$3,array[$4::text],'[]',$5,'Staff')",
+   ['photo-test-'+i,kind,kind==='label'?'application/pdf':'image/jpeg',id,actor]);
+ }
+ const fetch=async filter=>(await run("select whatnot_queue_summary('pending','screenshotBuyer',$1,0,'all',null,'due','all') as result",[filter]))[0].result;
+ const all=await fetch('all'),remaining=await fetch('no_screenshot');
+ assert.equal(all.facets['work:no_screenshot'].lines,1);
+ assert.equal(all.groups[0].lines[0].screenshot_count,2);
+ assert.equal(remaining.groups[0].lines.length,1);
+ const line=remaining.groups[0].lines[0];
+ assert.deepEqual([line.id,line.order_lines,line.line_number,line.order_units,line.order_missing_screenshots],['400002',2,2,3,1]);
+ await run("update whatnot_order_files set line_ids=array['400001','400002'] where path='photo-test-1'");
+ assert.equal((await fetch('no_screenshot')).visible_lines,0);
 });

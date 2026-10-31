@@ -36,6 +36,9 @@
    for(let i=0;i<orders.length;i+=100){const cancellations=await rows(()=>db.from('tiktok_order_cancellations').select('*').in('order_id',orders.slice(i,i+100).map(o=>o.id)).order('order_id'));for(const c of cancellations){const o=orders.find(o=>o.id===c.order_id);if(o)o.cancellation=c;}}
   }
   if(seq!==state.loadSequence)return;state.photos=photos;
+  const captures=new Map();
+  for(const p of photos)if(!p.removed_at)captures.set(p.line_id,(captures.get(p.line_id)||0)+1);
+  for(const ls of grouped.values())ls.forEach((l,i)=>{l.screenshot_count=captures.get(l.id)||0;l.line_number=i+1;});
   state.orders=orders.map(o=>({...o,lines:grouped.get(o.id)||[],documents:documents.filter(d=>d.order_id===o.id)}));render();
   const {data,error}=await db.from('tiktok_order_imports').select('filename,imported_at,snapshot_at,result,source').order('imported_at',{ascending:false}).limit(1);
   if(error)throw error;
@@ -43,7 +46,7 @@
   status(last?.source==='api'?`Latest TikTok API update: ${date(last.imported_at)}. Automatic sync runs on the server.`:last?`Latest export: ${date(last.snapshot_at)}. Imports are snapshots; refresh from TikTok to update shipping status.`:'Import your first TikTok export to begin.');
  }
  const contextBuyers=new Set(), collapsedMatches=new Set();
- const workKeys={ready:'ready',waiting:'waiting',cgl:'cgl',missing_watch:'missing',cancel:'cancel',missing:'not_found',watches:'watches',no_tracking:'no_tracking'};
+ const workKeys={ready:'ready',waiting:'waiting',cgl:'cgl',missing_watch:'missing',cancel:'cancel',missing:'not_found',watches:'watches',no_tracking:'no_tracking',no_screenshot:'no_screenshot'};
  function options(){
   const search=$('tk-search').value.trim(), exact=state.orders.some(o=>o.order_number===search);
   return {history:historyView,cancelledOnly:cancellationView,term:exact?search:(window.OGTrackingSearch?.needle(search)||search),stage:$('tk-stage-filter').value,work:$('tk-work-filter').value,due:state.due,purchase:$('tk-purchase-date').value,sort:$('tk-sort').value,buyerHistory:$('tk-buyer-history').value};
@@ -55,18 +58,27 @@
   return {orders:f.orders,buyers:f.buyers,lines:f.lines,units:f.units,amounts:f.lines?{USD:{sales:f.sales/100,shipping:f.shipping/100,fees:f.fees/100,actual:f.actual,estimated:f.est,unknown_sales:f.missingPrice,unknown_ship:f.missingShip,unknown_fees:f.missingFee}}:{}};
  }
  function renderPendingCards(visible){
-  for(const id of ['tk-money-cards','tk-money-notes','tk-selection-totals','tk-extra-filters'])$(id).hidden=historyView;
-  $('tk-summary').hidden=!historyView;
-  if(historyView)return;
+  for(const id of ['tk-money-cards','tk-money-notes','tk-extra-filters'])$(id).hidden=historyView;
+  $('tk-history-work').hidden=!historyView;
+  const opts=options();
+  const refined=[opts.purchase,opts.stage,opts.buyerHistory!=='all',opts.sort!=='oldest',historyView&&!cancellationView&&opts.work].filter(Boolean).length;
+  $('tk-refine-count').textContent=refined?' · '+refined+' active':'';
+  const filtered=opts.purchase||opts.stage||opts.buyerHistory!=='all'||opts.work||opts.term||opts.due!=='all';
+  $('tk-reset-queue').disabled=!filtered&&opts.sort==='oldest';
+  const title=filtered?'Filtered totals':cancellationView?'Cancellation overview':historyView?'History overview':'Queue overview';
+  if(historyView){
+   const orders=visible.reduce((n,g)=>n+g.orders.length,0),lines=visible.reduce((n,g)=>n+g.lines.length,0),units=visible.reduce((n,g)=>n+g.quantity,0);
+   window.PendingQueueCards.shown($('tk-selection-totals'),{orders,lines,units,buyers:visible.length},{title,target:'tk-orders'});return;
+  }
+  window.PendingQueueCards.shown($('tk-selection-totals'),summary(visible),{title,target:'tk-orders'});
   const checked=state.orders.reduce((latest,o)=>o.finance_checked_at&&(!latest||o.finance_checked_at>latest.finance_checked_at)?o:latest,null);
   $('tk-fee-source').textContent=checked?(checked.finance_scope?'This shop has authorized TikTok Finance.':'This shop has authorized order access. Actual statements require TikTok Finance access.'):'';
-  const opts=options(),facets={};
+  const facets={};
   const dates=opts.due==='all'?visible:queue.pendingGroups(state.orders,{...opts,due:'all'});
   facets['due:all']=summary(dates);
   for(const k of ['overdue','today','tomorrow','unknown'])facets['due:'+k]=summary(dates.filter(g=>k==='unknown'?g.whole.unknown:g.urgency.level===k));
   for(const [key,work] of Object.entries(workKeys))facets['work:'+key]=summary(work===opts.work?visible:queue.pendingGroups(state.orders,{...opts,work}));
   window.PendingQueueCards.render($('tk-money-cards'),facets,state.due,Object.keys(workKeys).find(k=>workKeys[k]===opts.work)||'all');
-  window.PendingQueueCards.shown($('tk-selection-totals'),summary(visible));
  }
  function setWork(key){
   $('tk-work-filter').value=key;
@@ -76,11 +88,28 @@
   resetContext();render();
  }
  function resetContext(){contextBuyers.clear();collapsedMatches.clear();}
+ document.addEventListener('tiktok-item-photo-removed',event=>{
+  const {lineId,photoId}=event.detail;
+  const order=state.orders.find(o=>o.lines.some(l=>l.id===lineId));
+  if(!order)return;
+  const line=order.lines.find(l=>l.id===lineId);
+  line.screenshot_count=state.photos.filter(p=>p.line_id===lineId&&!p.removed_at&&p.id!==photoId).length;
+  // Keep the removal receipt and its storage-cleanup retry button through the queue redraw.
+  const notice=$('tk-orders').querySelector('[data-photo-id="'+CSS.escape(photoId)+'"]');
+  render();
+  if(notice)$('tk-orders').querySelector('[data-tk-photo-line="'+CSS.escape(lineId)+'"]')?.append(notice);
+  const badge=$('tk-detail-body').querySelector('[data-tiktok-line="'+CSS.escape(lineId)+'"] .mq-coverage');
+  if(badge){
+   badge.outerHTML=window.PendingQueueCards.linePhoto(line.screenshot_count);
+   const totals=$('tk-detail-body').querySelector('.mq-order-summary');
+   if(totals)totals.outerHTML=orderSummary(order,viewLines(order));
+  }
+ });
  function packingOrders(key){return narrowWork()?groups().find(g=>g.key===key)?.orders||[]:state.orders.filter(o=>o.buyer_username.toLowerCase()===key&&inView(o));}
  $('tk-money-cards').onclick=e=>{
   const b=e.target.closest('[data-mq-key]');if(!b)return;
   if(b.dataset.mqType==='due'){state.due=state.due===b.dataset.mqKey?'all':b.dataset.mqKey;resetContext();render();}
-  else{const work=workKeys[b.dataset.mqKey];setWork($('tk-work-filter').value===work?'':work);}
+  else{const work=workKeys[b.dataset.mqKey]||'';setWork($('tk-work-filter').value===work?'':work);}
  };
  $('tk-buyer-history').onchange=()=>{resetContext();render();};
  $('tk-reset-queue').onclick=()=>{for(const id of ['tk-work-filter','tk-search','tk-stage-filter','tk-purchase-date'])$(id).value='';$('tk-buyer-history').value='all';$('tk-sort').value='oldest';state.due='all';resetContext();render();};
@@ -96,6 +125,8 @@
   for(const key of state.labelBuyers)if(!visible.has(key))state.labelBuyers.delete(key);
   const count=[...state.labelBuyers].reduce((n,key)=>n+window.TikTokShipping.buyerOrders(state.orders,key).length,0);
   $('tk-label-batch').hidden=historyView||narrowWork();
+  $('tk-batch-count').textContent=count?' · '+count+' selected':'';
+  $('tk-clear-labels').disabled=!count;
   $('tk-create-labels').disabled=!count;$('tk-create-labels').textContent=`Create / get shipping labels${count?' ('+count+')':''}`;
   $('tk-label-selection').textContent=count?`${state.labelBuyers.size} buyers · ${count} orders selected`:'Select buyers for a bulk label batch (up to 50 orders).';
   for(const box of $('tk-orders').querySelectorAll('[data-label-buyer]'))box.checked=state.labelBuyers.has(box.dataset.labelBuyer);
@@ -133,22 +164,32 @@
  }
  function dueBadge(order){const u=queue.urgency(order.ship_by_date);return `<span class="tk-date ${u.level}">${esc(historyView?'Ship '+queue.shortDate(order.ship_by_date):u.label)}</span>`;}
  const cardIcon=name=>`<svg class="tk-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{chevron:'<path d="m6 9 6 6 6-6"/>',phone:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',check:'<path d="m5 12 4 4L19 6"/>',tools:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',play:'<path d="m9 5 11 7-11 7z"/>'}[name]||''}</svg>`;
- function customerIdentity(o){return `<div class="tk-customer-identity"><span><small>Customer</small><strong>${esc(queue.customerName(o))}</strong></span><span><small>TikTok username</small><strong>@${esc(o.buyer_username.replace(/^@/,''))}</strong></span></div>`;}
+ function displayName(o){
+  const name=queue.customerName(o);
+  return name.replace(/^@/,'').toLowerCase()===o.buyer_username.replace(/^@/,'').toLowerCase()?'':name;
+ }
+ function customerIdentity(o){const name=displayName(o);return `<div class="tk-customer-identity">${name?`<span><small>Customer</small><strong>${esc(name)}</strong></span>`:''}<span><small>TikTok username</small><strong>@${esc(o.buyer_username.replace(/^@/,''))}</strong></span></div>`;}
  function itemRow(l,o){
   return `<div class="tk-order-item ${queue.lineCancelled(l,o)?'is-cancelled':''}" data-tiktok-line="${esc(l.id)}">
-   <div class="tk-item-media"><span class="tk-section-label">Receipt capture</span>${window.TikTokReceiptPhotos.placeholder(l)}<a class="tk-line-receipt-link" href="${adapter.orderUrl(o.order_number,true,l.sku_id)}" target="_blank" rel="noopener">${cardIcon('play')}<span>Open item video receipt</span></a></div>
-   <div class="tk-item-content">${customerIdentity(o)}<div class="tk-item-title"><div><h4>${esc(l.title)}</h4>${window.TikTokCancellations?.badge(o,l)||''}<p>Seller SKU ${esc(l.seller_sku||'—')}${l.variation?' · '+esc(l.variation):''}</p></div><span class="tk-item-quantity">Qty <strong>${l.quantity}</strong></span></div>
+   <div class="tk-item-title"><div><span class="mq-line-number">Line ${l.line_number} of ${(o.sourceLines||o.lines).length}</span><h4>${esc(l.title||'Item title unavailable')}</h4>${window.TikTokCancellations?.badge(o,l)||''}<p>Seller SKU ${esc(l.seller_sku||'—')}${l.variation?' · '+esc(l.variation):''}</p></div><span class="tk-item-quantity">Qty <strong>${l.quantity}</strong></span></div>
+   <div class="tk-item-media">${window.PendingQueueCards.linePhoto(l.screenshot_count)}${window.TikTokReceiptPhotos.placeholder(l)}<a class="tk-line-receipt-link" href="${adapter.orderUrl(o.order_number,true,l.sku_id)}" target="_blank" rel="noopener">${cardIcon('play')}<span>Open item video receipt</span></a></div>
+   <div class="tk-item-content">${customerIdentity(o)}
     <div class="tk-item-task-actions"><a class="tk-card-button" data-tk-chat-orders="${esc(o.id)}" href="tiktok-messages.html?order=${encodeURIComponent(o.id)}">Buyer chat & reply</a><button type="button" class="tk-card-button tk-create-task" data-tk-task-order="${esc(o.id)}" data-tk-task-line="${esc(l.id)}">Create task</button>${historyView||queue.lineCancelled(l,o)?'':`<button type="button" class="tk-card-button tk-complete-button" data-tk-line-finish="${esc(o.id)}">Complete order</button>`}${window.TikTokCancellations?.lineButton(l,o)||''}</div>
     ${cancellationView?'':(window.TikTokWork?.line(l,o)||'')+(window.TikTokInventory?.button(l)||'')}
     <details class="tk-item-identifiers"><summary>SKU &amp; shipping details</summary><dl><div><dt>SKU ID</dt><dd>${esc(l.sku_id||'Unavailable')}</dd></div><div><dt>Package</dt><dd>${esc(l.package_id||'Not assigned')}</dd></div><div><dt>Tracking</dt><dd>${esc(l.tracking_number||'Not available yet')}</dd></div></dl></details>
    </div></div>`;
  }
+ function orderSummary(o,visible){
+  const original=o.sourceLines||o.lines;
+  return `<div class="mq-order-summary"><strong>${window.PendingQueueCards.orderCounts(original.length,original.reduce((n,l)=>n+l.quantity,0),visible.length)}</strong>${window.PendingQueueCards.screenshotBadge(original.filter(l=>!l.screenshot_count).length)}</div>`;
+ }
  function orderRow(o){
-  const labels=o.documents.filter(d=>d.kind==='label');
+  const labels=o.documents.filter(d=>d.kind==='label'),visible=viewLines(o);
   return `<article class="tk-order-row ${historyView&&queue.hasCancellation(o)?'has-cancellation':''}" data-tiktok-order="${esc(o.id)}">
    <header class="tk-order-heading"><div class="tk-order-identity"><span class="tk-section-label">Order</span><strong>${esc(o.order_number)}</strong>${historyView?window.TikTokCancellations?.badge(o)||'':''}${queue.cancelled(o)?'':`<span class="tk-stage ${esc(o.stage)}">${esc(stages[o.stage])}</span>`}</div><div class="tk-order-deadline" ${queue.cancelled(o)?'hidden':''}>${dueBadge(o)}<button type="button" class="tk-text-action" data-order="${esc(o.id)}" data-section="preparation">${o.ship_by_date?'Edit ship-by date':'Add ship-by date'}</button></div></header>
+   ${orderSummary(o,visible)}
    <div class="tk-order-task-actions"><button type="button" class="tk-card-button tk-create-task" data-tk-task-order="${esc(o.id)}">Create order task</button>${!historyView||queue.cancelled(o)||cancellationView&&queue.cancellationReview(o)?window.TikTokCancellations?.button(o)||'':''}</div>
-   <div class="tk-order-items">${viewLines(o).map(l=>itemRow(l,o)).join('')}</div>
+   <div class="tk-order-items">${visible.map(l=>itemRow(l,o)).join('')}</div>
    <footer class="tk-order-footer"><div class="tk-order-links"><button type="button" class="tk-card-button" data-order="${esc(o.id)}">Open order</button><button type="button" class="tk-text-action" data-order="${esc(o.id)}" data-section="labels">Shipping labels${labels.length?' · '+labels.length:''}</button>${window.TikTokReversal?.button(o)||''}<span class="tk-market-status">${esc(o.marketplace_substatus||o.marketplace_status)}</span></div><div class="tk-order-cancel"></div></footer>
    ${o.cancel_return?'<p class="tk-warning">Cancellation reported by TikTok</p>':''}${o.notes?`<p class="tk-note">${esc(o.notes)}</p>`:''}
   </article>`;
@@ -156,13 +197,13 @@
  function buyerCard(g,index){
   const narrow=narrowWork(), context=narrow&&contextBuyers.has(g.key), displayed=context?g.whole:g, open=narrow?!collapsedMatches.has(g.key):state.expanded.has(g.key),u=g.urgency,urgencyClass=historyView?'':u.level==='today'?'is-due-today':u.level==='tomorrow'?'is-due-tomorrow':u.level==='overdue'?'is-overdue':'';
   const matchedMoney=narrow?summary([g]).amounts.USD:null;
-  const names=[...new Set(g.orders.map(queue.customerName))].join(' · '),canLabel=!historyView&&!narrow&&window.TikTokShipping.buyerOrders(state.orders,g.key).length;
+  const names=[...new Set(g.orders.map(displayName).filter(Boolean))].join(' · '),canLabel=!historyView&&!narrow&&window.TikTokShipping.buyerOrders(state.orders,g.key).length;
   return `<section class="tk-buyer buyer-order-card ${open?'is-expanded':'is-collapsed'} ${urgencyClass} ${historyView&&g.orders.some(queue.hasCancellation)?'has-cancellation':''} ${index%2?'is-alt-group':''}" data-buyer-key="${esc(g.key)}">
-   <div class="tk-buyer-header"><div class="tk-buyer-identity">${canLabel?`<label class="tk-label-select"><input type="checkbox" data-label-buyer="${esc(g.key)}" aria-label="Select ${esc(g.buyer)} for shipping labels"><span class="tk-sr-only">Select for labels</span></label>`:''}<span class="tk-buyer-avatar" aria-hidden="true">${esc(g.buyer.slice(0,2).toUpperCase())}</span><div class="tk-buyer-name"><span class="tk-buyer-customer"><small>Customer</small><strong>${esc(names)}</strong></span><span class="tk-section-label">TikTok username</span><button type="button" class="buyer-card-buyer-name" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}">${esc(g.buyer)}</button><span class="buyer-card-compact-count">${g.orders.length} ${g.orders.length===1?'order':'orders'} · ${g.quantity} ${g.quantity===1?'item':'items'}</span></div></div>
+   <div class="tk-buyer-header"><div class="tk-buyer-identity">${canLabel?`<label class="tk-label-select"><input type="checkbox" data-label-buyer="${esc(g.key)}" aria-label="Select ${esc(g.buyer)} for shipping labels"><span class="tk-sr-only">Select for labels</span></label>`:''}<span class="tk-buyer-avatar" aria-hidden="true">${esc(g.buyer.slice(0,2).toUpperCase())}</span><div class="tk-buyer-name">${names?`<span class="tk-buyer-customer"><small>Customer</small><strong>${esc(names)}</strong></span>`:''}<span class="tk-section-label">TikTok username</span><button type="button" class="buyer-card-buyer-name" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}">${esc(g.buyer)}</button><span class="buyer-card-compact-count">${narrow?'Matching · ':''}${g.orders.length} ${g.orders.length===1?'order':'orders'} · ${window.PendingQueueCards.orderCounts(g.lines.length,g.quantity)}</span></div></div>
     <div class="tk-buyer-overview">${historyView?window.TikTokCancellations?.summary(g)||'':''}${historyView?'':`<span class="tk-buyer-due tk-date ${u.level}">${esc(u.label)}</span>`}${g.waiting&&!cancellationView?`<span class="tk-stage waiting">${g.waiting} waiting</span>`:''}<span class="buyer-card-value">${narrow?(matchedMoney.unknown_sales?'Item value incomplete':money(matchedMoney.sales)+' item sales'):money(g.total)}</span><button type="button" class="tk-card-button tk-expand-button" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}"><span>${open?'Hide':'Open'}</span>${cardIcon('chevron')}</button></div></div>
-   <div class="buyer-card-meta tk-buyer-meta"><span>Placed ${esc(placed(g))}</span><button type="button" class="tk-text-action" data-buyer-tool="dates" data-buyer="${esc(g.key)}">${g.shipBy?'Ship by '+esc(queue.shortDate(g.shipBy)):'Set shipping date'}${g.unknown&&g.shipBy?` · ${g.unknown} dates needed`:''}</button><span class="${g.labelCount?'tk-label-saved':'tk-label-missing'}">${g.labelCount?`${g.labelCount}/${g.orders.length} orders with labels`:'No labels saved'}</span>${window.TikTokWork?.summary(g)||''}</div>
+   <div class="buyer-card-meta tk-buyer-meta"><span>Placed ${esc(placed(g))}</span><button type="button" class="tk-text-action" data-buyer-tool="dates" data-buyer="${esc(g.key)}">${g.shipBy?'Ship by '+esc(queue.shortDate(g.shipBy)):'Set shipping date'}${g.unknown&&g.shipBy?` · ${g.unknown} dates needed`:''}</button><span class="${g.labelCount?'tk-label-saved':'tk-label-missing'}">${g.labelCount?`${g.labelCount}/${g.orders.length} orders with labels`:'No labels saved'}</span>${window.PendingQueueCards.screenshotBadge(g.lines.filter(l=>!l.screenshot_count).length)}${window.TikTokWork?.summary(g)||''}</div>
    <div class="tk-buyer-workflow"><div class="tk-workflow-group"><span class="tk-section-label">Order actions</span><div><a class="tk-card-button" data-tk-chat-orders="${esc(g.orders.map(o=>o.id).join(','))}" href="tiktok-messages.html?order=${encodeURIComponent(g.orders[0].id)}">Buyer chat & reply</a><button type="button" class="tk-card-button tk-create-task" data-tk-task-buyer="${esc(g.key)}">Create task</button>${historyView&&!cancellationView?'':window.TikTokCancellations?.groupButton(g,cancellationView)||''}</div></div><div class="tk-workflow-group"><span class="tk-section-label">Shipping</span><div>${createLabelButton(g.key)}<button type="button" class="tk-card-button" data-buyer-tool="labels" data-buyer="${esc(g.key)}">Shipping labels</button></div></div><div class="tk-workflow-group tk-packing-actions" ${cancellationView?'hidden':''}><span class="tk-section-label">${historyView?'Order evidence':'Packing'}</span><div><button type="button" class="tk-card-button" data-tiktok-phone="${esc(g.key)}">${cardIcon('phone')}Use my phone</button><button type="button" class="tk-card-button tk-complete-button" data-tiktok-finish="${esc(g.key)}">${cardIcon('check')}${historyView?'Completion photos':'Complete order'}</button></div></div>
-    <details class="tk-card-tools"><summary>${cardIcon('tools')}<span>Order tools</span></summary><div class="tk-tools-list">${receiptAction(g)}<button type="button" data-buyer-packet="${esc(g.key)}">Buyer packet PDF</button><button type="button" data-buyer-tool="dates" data-buyer="${esc(g.key)}">Shipping dates</button><button type="button" data-buyer-tool="preparation" data-buyer="${esc(g.key)}">Preparation &amp; notes</button></div></details>
+    <details class="tk-card-tools"><summary>${cardIcon('tools')}<span>Order tools</span></summary><div class="tk-tools-list">${receiptAction(g)}<button type="button" data-buyer-packet="${esc(g.key)}">Buyer packet PDF</button><button type="button" data-buyer-tool="preparation" data-buyer="${esc(g.key)}">Preparation &amp; notes</button></div></details>
    </div>
    ${open?`<div class="buyer-card-expanded" id="tk-lines-${index}"><div class="tk-items-heading"><h3>${historyView?'Order items':'Items to prepare'}</h3><span>${displayed.lines.length} ${displayed.lines.length===1?'line':'lines'}</span>${narrow&&g.whole.lines.length>g.lines.length?`<button type="button" class="tk-card-button" data-context="${esc(g.key)}">${context?'Show matching lines':'Show buyer’s other open items'}</button>`:''}</div><div class="buyer-line-list">${displayed.orders.map(orderRow).join('')}</div></div>`:`<div id="tk-lines-${index}" hidden></div>`}
   </section>`;
@@ -170,18 +211,11 @@
  function render(){
   const cancellationCount=state.orders.filter(o=>queue.inView(o,{cancelledOnly:true})).length;
   $('tk-cancelled-link').textContent='Cancellations ('+cancellationCount+')';
-  $('tk-cancellation-count').textContent=cancellationCount;
-  $('tk-cancellation-toggle').classList.toggle('has-cancellations',cancellationCount>0);
-  $('tk-clear-purchase-date').hidden=!$('tk-purchase-date').value;
-  const all=queue.select(state.orders,viewOptions()),visible=groups(),list=visible.flatMap(g=>g.orders);
+  $('tk-cancelled-link').classList.toggle('has-cancellations',cancellationCount>0);
+  const visible=groups(),list=visible.flatMap(g=>g.orders);
   renderPendingCards(visible);
-  const total=all.reduce((n,g)=>n+g.orders.length,0),items=all.reduce((n,g)=>n+g.quantity,0),unknown=all.reduce((n,g)=>n+g.unknown,0);
-  const tile=(title,count,help,filter='',tone='')=>`<div class="summary-urgency ${tone}"><button type="button" class="tk-summary-button" ${filter?`data-tk-due="${filter}" aria-pressed="${state.due===filter}"`:''}><span>${title}</span><strong>${count}</strong><small>${help}</small></button></div>`;
-  $('tk-summary').innerHTML=tile(cancellationView?'Cancellations':historyView?'TikTok history':'Open queue',`${total} orders`,`${items} items · ${all.length} buyer groups`,'all')+(historyView?tile('Buyers',all.length,'TikTok only')+tile('Items',items,'Saved order items'):['overdue','today','tomorrow'].map((level,i)=>{const g=all.filter(g=>g.urgency.level===level);return tile(['Overdue','Due today','Due tomorrow'][i],`${g.length} groups`,`${g.reduce((n,g)=>n+g.orders.length,0)} orders · ${g.filter(g=>g.waiting).length} waiting`,level,'is-'+level);}).join('')+tile('Date needed',`${unknown} orders`,'Verify the ship-by date in TikTok','unknown','is-unknown'))+(cancellationView?'':tile('Waiting',`${all.filter(g=>g.waiting).length} groups`,`${all.reduce((n,g)=>n+g.waiting,0)} orders`));
-  $('tk-deadline-help').textContent=cancellationView?'Cancelled orders and items stay out of packing. Click Cancel, sign with your password, and the signed record moves to TikTok history.':historyView?'Historical TikTok orders and their saved documents stay in this workflow.':unknown?`${unknown} orders need a verified ship-by date. TikTok’s CSV omits deadlines. Open Shipping dates on a buyer card to check and save them; unverified dates are not counted as overdue.`:'Deadlines are verified calendar dates from TikTok or staff. Overdue starts on the next calendar day in America/New_York.';
-  $('tk-queue-count').textContent=`${list.length} orders · ${visible.length} buyers · ${visible.reduce((n,g)=>n+g.quantity,0)} items`;
-  document.querySelectorAll('[data-tk-due]').forEach(b=>{b.setAttribute('aria-pressed',String(state.due===b.dataset.tkDue));b.onclick=()=>{state.due=b.dataset.tkDue;render();};});
-  if(!cancellationView){const waitingButton=$('tk-summary').lastElementChild.querySelector('button');waitingButton.setAttribute('aria-pressed',String($('tk-work-filter').value==='waiting'));waitingButton.onclick=()=>{$('tk-work-filter').value=$('tk-work-filter').value==='waiting'?'':'waiting';state.due='all';render();};}
+  $('tk-deadline-help').hidden=!cancellationView;
+  $('tk-deadline-help').textContent=cancellationView?'Review each cancellation and sign to move the record to history.':'';
   $('tk-orders').innerHTML=visible.length?visible.map(buyerCard).join(''):`<div class="tk-empty">${state.orders.length?'No TikTok orders match this view.':'No TikTok orders imported yet.'}</div>`;
   $('tk-orders').querySelectorAll('[data-context]').forEach(b=>b.onclick=()=>{const k=b.dataset.context;if(contextBuyers.has(k))contextBuyers.delete(k);else contextBuyers.add(k);render();});
   $('tk-orders').querySelectorAll('[data-expand]').forEach(b=>b.onclick=()=>toggleBuyer(b.dataset.expand));
@@ -192,7 +226,7 @@
   window.TikTokReceiptPhotos.hydrate($('tk-orders'),db,state.photos);
   bindOrderButtons($('tk-orders'));
   $('tk-orders').querySelectorAll('[data-create-labels]').forEach(b=>b.onclick=()=>busy(()=>openLabels([b.dataset.createLabels])));
-  $('tk-orders').querySelectorAll('[data-label-buyer]').forEach(b=>b.onchange=()=>{if(b.checked)state.labelBuyers.add(b.dataset.labelBuyer);else state.labelBuyers.delete(b.dataset.labelBuyer);updateLabelSelection();});
+  $('tk-orders').querySelectorAll('[data-label-buyer]').forEach(b=>b.onchange=()=>{if(b.checked){state.labelBuyers.add(b.dataset.labelBuyer);$('tk-label-batch').open=true;}else state.labelBuyers.delete(b.dataset.labelBuyer);updateLabelSelection();});
   updateLabelSelection();
   $('tk-orders').querySelectorAll('[data-tiktok-finish]').forEach(b=>b.onclick=()=>window.TikTokFulfillment.open(packingOrders(b.dataset.tiktokFinish)));
   bindLineCompletion($('tk-orders'));
@@ -202,8 +236,6 @@
   window.TikTokOrderChats?.rendered();
  }
  $('tk-purchase-date').onchange=render;
- $('tk-clear-purchase-date').onclick=()=>{$('tk-purchase-date').value='';render();};
- $('tk-sync-orders').onclick=()=>{$('tk-import').open=true;$('tk-import').scrollIntoView({block:'start'});};
  $('tk-create-labels').onclick=()=>busy(()=>openLabels([...state.labelBuyers]));
  $('tk-select-labels').onclick=()=>{for(const g of groups())if(window.TikTokShipping.buyerOrders(state.orders,g.key).length)state.labelBuyers.add(g.key);updateLabelSelection();};
  $('tk-clear-labels').onclick=()=>{state.labelBuyers.clear();updateLabelSelection();};
@@ -237,7 +269,7 @@
   const parsed=adapter.parse(text),hash=await sha(new TextEncoder().encode(text));
   for(const row of parsed.rows){const due=metadata.deadlines?.[row.order_number];if(typeof due==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(due))row.ship_by_date=due;}
   state.preview={...parsed,hash,filename};state.transferId=metadata.transferId||null;
-  $('tk-import').open=true;$('tk-snapshot').value=fileTime(filename)||localTimeInput(metadata.modifiedAt||Date.now());
+  $('tk-data-tools').open=true;$('tk-import').open=true;$('tk-snapshot').value=fileTime(filename)||localTimeInput(metadata.modifiedAt||Date.now());
   $('tk-preview').hidden=false;$('tk-import-confirm').hidden=false;$('tk-import-cancel').hidden=false;
   $('tk-preview').innerHTML=`<h3>Review before importing</h3><p><strong>${parsed.orderCount} orders · ${parsed.buyerCount} buyers · ${parsed.rows.length} item rows</strong></p><p>${parsed.awaitingShipment} awaiting shipment · ${parsed.awaitingCollection} awaiting collection · ${parsed.cancelledCount} cancelled · ${parsed.historyCount-parsed.cancelledCount} other-status orders</p><p class="tk-help">${parsed.duplicateRows} identical duplicate rows removed. Verify the export time above. Order IDs are preserved as text. Known cancelled orders move to Cancellations. An order missing from a report is never assumed cancelled. New cancelled orders are saved in Cancellations; other new historical/unpaid orders are skipped.</p><div class="tk-preview-scroll"><table><thead><tr><th>Order</th><th>Buyer</th><th>TikTok status</th><th>Item / SKU</th><th>Qty</th></tr></thead><tbody>${parsed.rows.slice(0,50).map(r=>`<tr class="${['Canceled','Cancelled'].includes(r.marketplace_status)?'is-cancelled':''}"><td>${esc(r.order_number)}</td><td>${esc(r.buyer_username)}</td><td><span class="${['Canceled','Cancelled'].includes(r.marketplace_status)?'tk-cancelled-badge':''}">${esc(r.marketplace_status)}</span></td><td>${esc(r.title)} / ${esc(r.seller_sku)}</td><td>${r.quantity}</td></tr>`).join('')}</tbody></table></div>${parsed.rows.length>50?'<p>Showing the first 50 rows. All validated rows will be imported.</p>':''}`;
   status(`Preview ready: ${filename}. Confirm to save these orders in TikTok only.`);
@@ -264,7 +296,7 @@
   const [docs,events]=await Promise.all([db.from('tiktok_order_documents').select('*').eq('order_id',id).order('created_at',{ascending:false}),db.from('tiktok_order_events').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(50)]);
   if(docs.error||events.error)throw docs.error||events.error;
   order.documents=docs.data;render();
-  $('tk-detail-body').innerHTML=`<p class="tk-eyebrow">TIKTOK ORDER</p><h2 id="tk-detail-title">${esc(order.buyer_username)} · ${esc(order.order_number)}</h2>${historyView?window.TikTokCancellations?.badge(order)||'':''}<div class="tk-order-task-actions">${!historyView||queue.cancelled(order)||cancellationView&&queue.cancellationReview(order)?window.TikTokCancellations?.button(order)||'':''}</div><p>TikTok: <strong>${esc(order.marketplace_status)} / ${esc(order.marketplace_substatus)}</strong><br>Latest export: ${esc(date(order.source_snapshot_at))}</p>${order.cancel_return?`<p class="tk-warning">Review ${esc(order.cancel_return)} in TikTok before packing.</p>`:''}<div class="tk-actions"><a class="tk-action" href="${adapter.orderUrl(order.order_number,true)}" target="_blank" rel="noopener">Watch full receipt in TikTok</a><a class="tk-action" href="${adapter.orderUrl(order.order_number)}" target="_blank" rel="noopener">Open TikTok order</a><button id="tk-one-packet" type="button">Download order PDF</button><button id="tk-print-packet" type="button">Print order packet</button></div><p class="tk-help">With the updated extension, Watch receipt opens the video panel automatically. Otherwise, click Video receipt on the TikTok order.</p><div class="tk-detail-items">${viewLines(order).map(l=>itemRow(l,order)).join('')}</div>${order.buyer_message?`<p>Buyer message: ${esc(order.buyer_message)}</p>`:''}${order.seller_note?`<p>Seller note: ${esc(order.seller_note)}</p>`:''}${window.TikTokReversal?.button(order)||''}<section id="tk-preparation-section"><h3>OG preparation</h3><div class="tk-fields"><label>Stage<select id="tk-order-stage">${Object.entries(stages).map(([v,l])=>`<option value="${v}" ${order.stage===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Ship-by date from TikTok<input id="tk-order-deadline" type="date" value="${esc(order.ship_by_date||'')}"><small>Leave blank if unverified. TikTok’s CSV omits this date.</small></label></div><label>Notes / waiting reason<textarea id="tk-order-notes" maxlength="4000">${esc(order.notes)}</textarea></label><label class="tk-confirm"><input id="tk-work-confirm" type="checkbox">For Packed, I checked every item and quantity in this order. For Dispatched, I confirm the parcel was handed to the carrier.</label><button id="tk-save-work" type="button">Save preparation</button><p class="tk-help">Preparation tracking is separate from inventory checkout and from TikTok’s status. A printed label alone does not confirm dispatch.</p></section><section id="tk-labels-section"><h3>Shipping labels &amp; order PDFs</h3><p>Download the shipping label from TikTok, then attach it here. Confirm it covers this order, including any combined-package contents.</p><label>Shipping-label PDF<input id="tk-label-file" type="file" accept="application/pdf,.pdf"></label><label class="tk-confirm"><input id="tk-label-confirm" type="checkbox">I checked the recipient and order number(s) on this PDF.</label><button id="tk-save-label" type="button">Attach shipping label</button><div id="tk-docs">${docs.data.map(d=>`<div class="tk-doc"><span>${d.kind==='label'?'Shipping label':'Order packet'} · ${esc(d.filename)}<small> · ${esc(date(d.created_at))}</small>${d.tracking_number?`<br>Attached tracking: ${esc(d.tracking_number)}`:''}</span><button type="button" data-doc-preview="${esc(d.id)}">Preview</button><button type="button" data-doc-print="${esc(d.id)}">Choose printer</button></div>`).join('')||'<p class="tk-muted">No PDFs attached yet.</p>'}</div></section><section><h3>TikTok order history</h3><ol class="tk-history">${events.data.map(e=>`<li><strong>${esc(e.action.replaceAll('_',' '))}</strong> · ${esc(date(e.created_at))}${e.details.to?`<br>${esc(e.details.from)} → ${esc(e.details.to)}`:''}${e.details.notes?`<br>${esc(e.details.notes)}`:''}${window.TikTokReversal?.audit(e)||''}${window.TikTokCancellations?.audit(e)||''}${e.details.snapshot_at?`<br>Source export: ${esc(date(e.details.snapshot_at))}`:''}</li>`).join('')}</ol></section><p id="tk-detail-status" role="status"></p>`;
+  $('tk-detail-body').innerHTML=`<p class="tk-eyebrow">TIKTOK ORDER</p><h2 id="tk-detail-title">${esc(order.buyer_username)} · ${esc(order.order_number)}</h2>${historyView?window.TikTokCancellations?.badge(order)||'':''}<div class="tk-order-task-actions">${!historyView||queue.cancelled(order)||cancellationView&&queue.cancellationReview(order)?window.TikTokCancellations?.button(order)||'':''}</div><p>TikTok: <strong>${esc(order.marketplace_status)} / ${esc(order.marketplace_substatus)}</strong><br>Latest export: ${esc(date(order.source_snapshot_at))}</p>${order.cancel_return?`<p class="tk-warning">Review ${esc(order.cancel_return)} in TikTok before packing.</p>`:''}<div class="tk-actions"><a class="tk-action" href="${adapter.orderUrl(order.order_number,true)}" target="_blank" rel="noopener">Watch full receipt in TikTok</a><a class="tk-action" href="${adapter.orderUrl(order.order_number)}" target="_blank" rel="noopener">Open TikTok order</a><button id="tk-one-packet" type="button">Download order PDF</button><button id="tk-print-packet" type="button">Print order packet</button></div><p class="tk-help">With the updated extension, Watch receipt opens the video panel automatically. Otherwise, click Video receipt on the TikTok order.</p>${orderSummary(order,viewLines(order))}<div class="tk-detail-items">${viewLines(order).map(l=>itemRow(l,order)).join('')}</div>${order.buyer_message?`<p>Buyer message: ${esc(order.buyer_message)}</p>`:''}${order.seller_note?`<p>Seller note: ${esc(order.seller_note)}</p>`:''}${window.TikTokReversal?.button(order)||''}<section id="tk-preparation-section"><h3>OG preparation</h3><div class="tk-fields"><label>Stage<select id="tk-order-stage">${Object.entries(stages).map(([v,l])=>`<option value="${v}" ${order.stage===v?'selected':''}>${l}</option>`).join('')}</select></label><label>Ship-by date from TikTok<input id="tk-order-deadline" type="date" value="${esc(order.ship_by_date||'')}"><small>Leave blank if unverified. TikTok’s CSV omits this date.</small></label></div><label>Notes / waiting reason<textarea id="tk-order-notes" maxlength="4000">${esc(order.notes)}</textarea></label><label class="tk-confirm"><input id="tk-work-confirm" type="checkbox">For Packed, I checked every item and quantity in this order. For Dispatched, I confirm the parcel was handed to the carrier.</label><button id="tk-save-work" type="button">Save preparation</button><p class="tk-help">Preparation tracking is separate from inventory checkout and from TikTok’s status. A printed label alone does not confirm dispatch.</p></section><section id="tk-labels-section"><h3>Shipping labels &amp; order PDFs</h3><p>Download the shipping label from TikTok, then attach it here. Confirm it covers this order, including any combined-package contents.</p><label>Shipping-label PDF<input id="tk-label-file" type="file" accept="application/pdf,.pdf"></label><label class="tk-confirm"><input id="tk-label-confirm" type="checkbox">I checked the recipient and order number(s) on this PDF.</label><button id="tk-save-label" type="button">Attach shipping label</button><div id="tk-docs">${docs.data.map(d=>`<div class="tk-doc"><span>${d.kind==='label'?'Shipping label':'Order packet'} · ${esc(d.filename)}<small> · ${esc(date(d.created_at))}</small>${d.tracking_number?`<br>Attached tracking: ${esc(d.tracking_number)}`:''}</span><button type="button" data-doc-preview="${esc(d.id)}">Preview</button><button type="button" data-doc-print="${esc(d.id)}">Choose printer</button></div>`).join('')||'<p class="tk-muted">No PDFs attached yet.</p>'}</div></section><section><h3>TikTok order history</h3><ol class="tk-history">${events.data.map(e=>`<li><strong>${esc(e.action.replaceAll('_',' '))}</strong> · ${esc(date(e.created_at))}${e.details.to?`<br>${esc(e.details.from)} → ${esc(e.details.to)}`:''}${e.details.notes?`<br>${esc(e.details.notes)}`:''}${window.TikTokReversal?.audit(e)||''}${window.TikTokCancellations?.audit(e)||''}${e.details.snapshot_at?`<br>Source export: ${esc(date(e.details.snapshot_at))}`:''}</li>`).join('')}</ol></section><p id="tk-detail-status" role="status"></p>`;
   window.TikTokReceiptPhotos.hydrate($('tk-detail-body'),db,state.photos);bindLineCompletion($('tk-detail-body'));
   if(!$('tk-detail').open)$('tk-detail').showModal();window.TikTokOrderChats?.rendered();
   if(section)$('tk-'+section+'-section')?.scrollIntoView({block:'start'});
@@ -276,24 +308,23 @@
   $('tk-docs').querySelectorAll('[data-doc-preview]').forEach(b=>b.onclick=()=>busy(async()=>{const d=docs.data.find(x=>x.id===b.dataset.docPreview),{data,error}=await db.storage.from('ebay-labels').createSignedUrl(d.path,120);if(error)throw error;const a=document.createElement('a');a.href=data.signedUrl;a.target='_blank';a.rel='noopener';a.click();}));
  }
  function exportView(){const list=filtered().map(o=>({...o,lines:viewLines(o)}));if(!list.length)throw Error('No orders in this view.');const quote=v=>'"'+String(v??'').replace(/^\s*[=+@-]/,"'$&").replaceAll('"','""')+'"';const data=[['Marketplace','Order ID','Buyer Username','TikTok Status','TikTok Substatus','OG Stage','SKU ID','Seller SKU','Product','Quantity','Package ID','Tracking ID','Ship By','Notes','Export Snapshot','Item Search','Watch','Watch Missing','CGL Required','CGL Confirmed','Pending Cancellation','Inventory Barcode','Inventory Linked Qty','Inventory Deducted Qty']];for(const o of list)for(const l of o.lines)data.push(['TikTok',o.order_number,o.buyer_username,o.marketplace_status,o.marketplace_substatus,o.stage,l.sku_id,l.seller_sku,l.title,l.quantity,l.package_id,l.tracking_number,o.ship_by_date,o.notes,o.source_snapshot_at,l.work?.item_search,l.work?.is_watch,l.work?.watch_missing,l.work?.cgl_required,Boolean(l.work?.certificate_id),o.cancellation?.pending,l.inventory?.display_snapshot?.barcode,l.inventory?.quantity,l.inventory?.consumed_quantity]);download('\uFEFF'+data.map(r=>r.map(quote).join(',')).join('\r\n'),'OG-TikTok-'+(historyView?'history':'pending')+'.csv','text/csv');status('Exported this TikTok view. This tracking export is not a TikTok import file.');}
- $('tk-close-detail').onclick=()=>$('tk-detail').close();$('tk-close-buyer-tools').onclick=()=>$('tk-buyer-tools').close();$('tk-search').oninput=render;$('tk-stage-filter').onchange=render;$('tk-work-filter').onchange=()=>setWork($('tk-work-filter').value);$('tk-sort').onchange=render;$('tk-phone-refresh').onclick=()=>busy(refresh);
- $('tk-refresh').onclick=()=>busy(refresh);$('tk-packet').onclick=()=>busy(()=>packet(filtered()));$('tk-export').onclick=()=>busy(exportView);
+ $('tk-close-detail').onclick=()=>$('tk-detail').close();$('tk-close-buyer-tools').onclick=()=>$('tk-buyer-tools').close();$('tk-search').oninput=render;$('tk-stage-filter').onchange=render;$('tk-work-filter').onchange=()=>setWork($('tk-work-filter').value);$('tk-sort').onchange=render;
+ $('tk-phone-refresh').onclick=$('tk-refresh').onclick=()=>busy(()=>Promise.all([refresh(),window.TikTokApi?.reload?.()]));$('tk-packet').onclick=()=>busy(()=>packet(filtered()));$('tk-export').onclick=()=>busy(exportView);
  $('tk-file').onchange=()=>busy(async()=>{const f=$('tk-file').files[0];if(!f)return;if(f.size>adapter.MAX_BYTES)throw Error('Choose a CSV smaller than 10 MB.');await preview(await f.text(),f.name,{modifiedAt:f.lastModified});});
  $('tk-import-confirm').onclick=()=>busy(confirmImport);$('tk-import-cancel').onclick=discard;
- $('tk-cancellation-toggle').onclick=()=>{
-  cancellationView=!cancellationView;historyView=cancellationView;
-  // Open the entire cancellation queue, even when packing was filtered to another buyer or date.
+ for(const id of ['tk-cancelled-link','tk-pending-link','tk-history-link'])$(id).onclick=event=>{
+  if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  event.preventDefault();
+  cancellationView=id==='tk-cancelled-link';historyView=id!=='tk-pending-link';
+  // Each workflow tab opens its complete queue.
   $('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';$('tk-buyer-history').value='all';resetContext();state.labelBuyers.clear();
   const url=new URL(location.href);url.searchParams.delete('buyer');
-  if(cancellationView)url.searchParams.set('view','cancellations');else url.searchParams.delete('view');
+  if(historyView)url.searchParams.set('view',cancellationView?'cancellations':'history');else url.searchParams.delete('view');
   history.replaceState(null,'',url);updateView();marketplaceNavigation();render();
  };
  function updateView(){
-  $('tk-cancellation-toggle').setAttribute('aria-pressed',String(cancellationView));
-  $('tk-cancellation-toggle').classList.toggle('is-active',cancellationView);
-  $('tk-cancellation-toggle').title=cancellationView?'Return to pending orders':'Show all orders and items awaiting cancellation';
-  $('tk-work-filter').querySelector('[value=cancel]').hidden=historyView;
-  document.body.classList.toggle('tiktok-cancelled-view',cancellationView);$('tk-title').textContent=cancellationView?'TikTok Cancellations':historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-greeting').textContent=$('tk-title').textContent;$('tk-phone-title').textContent=cancellationView?'Cancellations':historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=cancellationView?'Cancellations':historyView?'TikTok order history':'Orders to Pack';document.querySelector('.buyer-due-filters').hidden=historyView;
+  $('tk-work-filter').querySelector('[value=cancel]').hidden=!cancellationView;
+  document.body.classList.toggle('tiktok-cancelled-view',cancellationView);$('tk-title').textContent=cancellationView?'TikTok Cancellations':historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-phone-title').textContent=cancellationView?'Cancellations':historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=cancellationView?'Cancellations':historyView?'TikTok order history':'Orders to Pack';
   $('tk-cancelled-link').removeAttribute('aria-current');$('tk-history-link').removeAttribute('aria-current');$('tk-pending-link').removeAttribute('aria-current');$(cancellationView?'tk-cancelled-link':historyView?'tk-history-link':'tk-pending-link').setAttribute('aria-current','page');$('ebay-tab').href=historyView?'ebay-order-history.html':'pending-orders.html';
  }
  $('tk-search').value=new URLSearchParams(location.search).get('buyer')||'';

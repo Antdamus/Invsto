@@ -39,8 +39,8 @@
   return groups.sort((a,b)=>compare(a,b)||a.buyer.localeCompare(b.buyer));
  }
  const watch=l=>Boolean(l.work?.is_watch||l.work?.watch_missing||/\b(?:wrist|smart)?watch(?:es)?\b/i.test(l.title||''));
- const matchWork=(l,key)=>key==='watches'?watch(l):key==='missing'?Boolean(l.work?.watch_missing||watch(l)&&l.work?.item_search==='not_found'):key==='not_found'?l.work?.item_search==='not_found':key==='cgl'?Boolean(l.work?.cgl_required&&!l.work?.certificate_id):key==='no_tracking'?!String(l.tracking_number||'').trim():true;
- const lineWork=k=>['watches','missing','not_found','cgl','no_tracking'].includes(k);
+ const matchWork=(l,key)=>key==='no_screenshot'?!l.screenshot_count:key==='watches'?watch(l):key==='missing'?Boolean(l.work?.watch_missing||watch(l)&&l.work?.item_search==='not_found'):key==='not_found'?l.work?.item_search==='not_found':key==='cgl'?Boolean(l.work?.cgl_required&&!l.work?.certificate_id):key==='no_tracking'?!String(l.tracking_number||'').trim():true;
+ const lineWork=k=>['watches','missing','not_found','cgl','no_tracking','no_screenshot'].includes(k);
  function pendingGroups(orders,opts={}){
   const history=new Set(orders.filter(o=>hasCancellation(o)||cancellationReview(o)).map(o=>o.buyer_username.toLowerCase()));
   const cancel=opts.work==='cancel';
