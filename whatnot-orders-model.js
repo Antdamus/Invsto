@@ -12,7 +12,7 @@
  }
  function tracking(number,carrier=''){
   const code=String(number||'').replace(/\s/g,'');if(!code)return '';
-  const enc=encodeURIComponent(code),name=carrier.toLowerCase();
+  const enc=encodeURIComponent(code),name=(carrier||'').toLowerCase();
   if(name.includes('usps')||/^9\d{19,25}$/.test(code))return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${enc}`;
   if(name.includes('ups')||/^1Z/i.test(code))return `https://www.ups.com/track?tracknum=${enc}`;
   if(name.includes('fedex'))return `https://www.fedex.com/fedextrack/?trknbr=${enc}`;
@@ -22,7 +22,7 @@
  const snapshot=lines=>lines.map(l=>({id:l.id,revision:l.revision}));
  function scope(l,o=l.order_record){return o.status==='cancelled'||l.work_state!=='pending'?'history':['pending','failed'].includes(o.status)||l.holds?.length||l.replacement_shipment_id?'review':'pending';}
  function deadline(l){return scope(l)==='history'?(l.ship_by_date?'Scheduled due day · '+l.ship_by_date:'Due date not provided'):urgency(l.ship_by_date).text;}
- const ready=l=>l.work_state==='pending'&&l.order_record.status==='pending_fulfillment'&&!l.item_missing&&!l.watch_missing&&!l.cancel_pending&&!l.cgl_pending&&!l.holds?.length&&!l.replacement_shipment_id&&Boolean(l.tracking_number);
+ const ready=l=>l.work_state==='pending'&&['pending_fulfillment','completed'].includes(l.order_record.status)&&!l.item_missing&&!l.watch_missing&&!l.cancel_pending&&!l.cgl_pending&&!l.holds?.length&&!l.replacement_shipment_id&&Boolean(l.tracking_number);
  function receipt(l){const direct=url(l.receipt_url);if(direct)return direct;const order=url(l.order_record?.url);return order?order+'#invsto-receipt='+encodeURIComponent(l.id)+'&order='+encodeURIComponent(l.order_id):'';}
  return {escape,url,money,time,calendar,urgency,tracking,snapshot,ready,receipt,scope,deadline};
 });

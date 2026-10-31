@@ -14,6 +14,7 @@ before(async()=>{
  await db.exec('create table tiktok_orders(id uuid primary key)');
  await db.exec(await readFile(new URL('../supabase/migrations/20261031230000_marketplace_pending_summaries.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261031234500_whatnot_queue_screenshots.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261101000500_whatnot_marketplace_status.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('all historical orders import; missing filters show only matching lines and counts',async()=>{
@@ -96,4 +97,46 @@ test('only item screenshots cover a line and original order totals survive filte
  assert.deepEqual([line.id,line.order_lines,line.line_number,line.order_units,line.order_missing_screenshots],['400002',2,2,3,1]);
  await run("update whatnot_order_files set line_ids=array['400001','400002'] where path='photo-test-1'");
  assert.equal((await fetch('no_screenshot')).visible_lines,0);
+});
+
+test('Whatnot status views preserve order identity and separate shipping, failures and completion review at Eastern midnight',async()=>{
+ const boundary=(await run("select date_trunc('day',now() at time zone 'America/New_York') at time zone 'America/New_York' as t"))[0].t;
+ const day=new Date(boundary).getTime(),before=new Date(day-1).toISOString(),after=new Date(day+1).toISOString();
+ async function put(id,status,stamp,ship,holds=[]){
+  const r=record(id);r.username='coverage88';r.source_updated_at=stamp;r.status=status;r.lines[0].shipment_status=ship;r.lines[0].holds=holds;await save(r);
+ }
+ const visible=async view=>(await run("select whatnot_queue_summary($1,'coverage88','all',0,'all',null,'due','all') as r",[view]))[0].r.groups.flatMap(g=>g.lines.map(l=>l.order_id)).sort();
+ await put('8801','pending_fulfillment',before,'label_generated');await put('8802','pending_fulfillment',before,'in_transit');
+ await put('8803','failed',before,'created');await put('8804','cancelled',before,'created');
+ await put('8805','pending_fulfillment',before,'label_generated');await put('8805','completed',after,'delivered');
+ await put('8806','completed',before,'delivered');await put('8807','completed',null,'delivered');
+ await put('8808','pending_fulfillment',before,'created',['order_pending_cancellation']);
+ assert.deepEqual(await visible('market_open'),['8801','8802','8808']);assert.deepEqual(await visible('unfulfilled'),['8801']);
+ assert.deepEqual(await visible('market_failed'),['8803']);assert.deepEqual(await visible('market_cancelled'),['8804']);
+ assert.deepEqual(await visible('pending'),['8801','8805','8807']);assert.deepEqual(await visible('closeout'),['8805','8807']);
+ assert.deepEqual(await visible('history'),['8802','8804','8806']);
+ await put('8805','completed',after,'delivered');assert.deepEqual(await visible('closeout'),['8805','8807']);
+ await put('8801','completed',before,'delivered');assert.ok((await visible('history')).includes('8801'));
+ await db.exec("update whatnot_order_lines set work_state='completed' where order_id='8805'");
+ await put('8805','completed',after,'delivered');assert.deepEqual(await visible('closeout'),['8807']);
+});
+
+test('physical label completion checks the current exact number and requires a photo of that package',async()=>{
+ const r=record('734501');const tracking='9300120762602631700001';
+ r.lines[0].tracking_number=tracking;r.lines[0].last_mile_tracking='LM-12345670';await save(r);
+ const unrelated=record('734502');unrelated.lines[0].title='Jewelry 63000001';await save(unrelated);
+ const search=async scan=>(await run("select whatnot_queue_summary('all',$1,'all',0,'all',null,'due','all') as res",['!scan:'+scan]))[0].res.groups.flatMap(g=>g.lines.map(l=>l.order_id));
+ assert.deepEqual(await search('42033131'+tracking),[r.id]);assert.deepEqual(await search('700001'),[r.id]);
+ assert.deepEqual(await search('12345670'),[r.id]);assert.deepEqual(await search(unrelated.id),[]);
+ const row={id:r.lines[0].id,revision:1,verified_tracking_number:tracking};
+ const close=sel=>run("select whatnot_work_action('complete',$1,null)",[JSON.stringify([sel])]);
+ await assert.rejects(close({...row,verified_tracking_number:'700001'}),/label/);
+ await assert.rejects(close(row),/packing photo/);
+ const attach=async(suffix,selection)=>{const path=actor+'/parcel-'+suffix+'.jpg';await run('insert into storage.objects values($1,$2,$3)',['whatnot-order-evidence',path,JSON.stringify({mimetype:'image/jpeg'})]);await run("select attach_whatnot_file($1,'completion_photo','parcel.jpg','image/jpeg',$2)",[path,JSON.stringify([selection])]);};
+ await attach('first',row);r.lines[0].tracking_number=tracking+'2';await save(r);
+ await assert.rejects(close(row),/changed/);
+ const next={...row,revision:2,verified_tracking_number:r.lines[0].tracking_number};await assert.rejects(close(next),/packing photo/);
+ await attach('second',next);await close(next);
+ assert.equal((await run("select details->>'label_source' as src from whatnot_order_events where line_id=$1 and action='complete'",[row.id]))[0].src,'Whatnot tracking verified by staff');
+ assert.equal((await run('select work_state from whatnot_order_lines where id=$1',[unrelated.lines[0].id]))[0].work_state,'pending');
 });

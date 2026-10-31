@@ -1,8 +1,11 @@
 (function(){
  'use strict';
  const M=window.WhatnotOrdersModel,E=M.escape,$=id=>document.getElementById(id);
- let db,groups=[],view=new URLSearchParams(location.search).get('view')||'pending',filter='all',due='all',offset=0,totalBuyers=0,connection=null,admin=false,loading=false,action=null,generation=0;
- const knownViews={pending:'Pending',review:'Review',history:'History',all:'All orders'};
+ let db,groups=[],view=new URLSearchParams(location.search).get('view')||'pending',filter='all',due='all',offset=0,totalBuyers=0,connection=null,admin=false,loading=false,action=null,generation=0,scannedTracking=null;
+ const workflowViews={pending:'Pending',review:'Review',closeout:'Pending information to close',history:'History',all:'All orders'};
+ const marketViews={market_open:'Open',unfulfilled:'Unfulfilled',market_completed:'Completed',market_cancelled:'Cancelled',market_failed:'Failed'};
+ const knownViews={...workflowViews,...marketViews};
+ const marketStatus=status=>({pending:'Pending confirmation',pending_fulfillment:'Open · awaiting fulfillment',completed:'Completed',cancelled:'Cancelled',failed:'Failed'}[status]||status||'Unknown');
  if(!knownViews[view])view='pending';
  const status=(text,error=false)=>{$('wn-status').textContent=text;$('wn-status').classList.toggle('wn-error',error);};
  const link=(href,label)=>href?`<a href="${E(href)}" target="_blank" rel="noopener">${E(label)} ↗</a>`:'';
@@ -20,10 +23,10 @@
   health.dataset.alert=String(!c?.enabled||Boolean(c?.last_error));
   health.textContent=!c?'Setup needed':c.last_error?'Needs attention':!c.enabled?'Paused':c.full_in_progress?'Importing':'Connected';
   $('wn-connection-status').textContent=!r.configured?'Server setup is being completed.':!c?'Connect ogjewelers to import all available order history.':`${c.seller_name} · ${c.enabled?'Automatic sync enabled':'Sync paused'} · ${c.full_in_progress?`Importing full history · ${c.orders_processed} orders processed`:`Last update ${M.time(c.last_synced_at)}`} · ${c.last_full_sync_at?`Full history checked ${M.time(c.last_full_sync_at)}`:'Initial history import not finished'}${c.expires_at?` · Token expires on ${c.expires_at.slice(0,10)} (Whatnot)`:''}${c.last_error?' · '+c.last_error:''}`;
-  if(c?.last_synced_at&&c.last_synced_at!==previousSync&&!loading){if(!document.querySelector('dialog[open],[data-select-line]:checked,details[data-evidence][open],html[data-wn-receipt-saving="true"]'))await refresh();else status('New Whatnot updates are available. Finish reviewing or editing, then reload saved orders.');}
+  if(c?.last_synced_at&&c.last_synced_at!==previousSync&&!loading){if(!document.querySelector('dialog[open],[data-select-line]:checked,details[data-evidence][open],details[data-market-timeline][open],html[data-wn-receipt-saving="true"]'))await refresh();else status('New Whatnot updates are available. Finish reviewing or editing, then reload saved orders.');}
  }
- function tags(l){const o=l.order_record,d=M.urgency(l.ship_by_date);return `<span class="wn-tag">${E(o.status.replaceAll('_',' '))}</span><span class="wn-tag ${E(l.work_state)}">${E(l.work_state==='external_history'?'Imported marketplace history':l.work_state==='completed'?'Completed in Invsto':'Pending in Invsto')}</span>${l.scope!=='history'?`<span class="wn-tag ${d.kind}">${E(d.text)}</span>`:''}${l.item_missing?'<span class="wn-tag missing">Item not found</span>':''}${l.watch_missing?'<span class="wn-tag missing">Missing watch</span>':''}${l.cancel_pending?'<span class="wn-tag review">Pending to cancel</span>':''}${l.cgl_pending?'<span class="wn-tag review">Pending CGL</span>':''}${l.holds?.map(h=>`<span class="wn-tag review">${E(h.replaceAll('_',' '))}</span>`).join('')||''}${l.replacement_shipment_id?'<span class="wn-tag review">Shipment changed · awaiting exact new assignment</span>':''}`;}
- function lineHtml(l){const o=l.order_record;return `<article class="wn-line ${l.item_missing?'missing':''}" id="wn-item-${l.id}"><label aria-label="Select order ${E(o.id)} item ${l.id}"><input type="checkbox" data-select-line="${l.id}"></label><div><span class="mq-line-number">Line ${l.line_number} of ${l.order_lines}</span><h3 class="mq-item-title">${E(l.title||'Item title unavailable')}</h3><div class="wn-line-status">${window.PendingQueueCards.linePhoto(l.screenshot_count)}${tags(l)}</div><p>Purchased ${E(M.time(o.purchased_at))} · Qty ${l.quantity}${l.sku?' · SKU '+E(l.sku):''}</p>${o.show_title?`<p>Show: ${E(o.show_title)}</p>`:''}<div class="wn-line-links">${link(M.url(o.url),'Whatnot order')}${o.show_id?link(M.receipt(l),l.receipt_url?'Saved receipt':'Video receipt'):''}${link(M.url(l.shipment_url),'Shipment / label')}${link(M.url(o.show_url),'Show')}</div><details class="wn-details" data-evidence="${l.id}"><summary>Photos, labels, notes & timeline</summary><div class="wn-evidence-body">Open to load saved evidence.</div></details></div><aside class="wn-line-side"><div class="wn-price">${E(M.money(Number(l.unit_price)*l.quantity,l.currency))}</div>${l.quantity>1?`<p>${E(M.money(l.unit_price,l.currency))} per item</p>`:''}<p><strong>${E((l.shipment_status||'No shipment assigned').replaceAll('_',' '))}</strong></p>${l.tracking_number?`<div class="wn-tracking">${link(M.tracking(l.tracking_number,l.carrier),l.tracking_number)||E(l.tracking_number)}</div><p>${E(l.carrier||'Carrier not supplied')}</p>`:'<p>No tracking number yet</p>'}${l.last_mile_tracking&&l.last_mile_tracking!==l.tracking_number?`<p>Last-mile tracking: ${E(l.last_mile_tracking)}</p>`:''}${l.shipment_id?`<p>Package ${E(l.shipment_id)}</p>`:''}<button data-line-action="receipt" data-line="${l.id}">Save receipt link</button></aside></article>`;}
+ function tags(l){const o=l.order_record,d=M.urgency(l.ship_by_date);return `<span class="wn-tag ${E(l.work_state)}">${E(l.work_state==='external_history'?'Imported marketplace history':l.work_state==='completed'?'Completed in Invsto':o.status==='cancelled'?'In Invsto history':o.status==='completed'?'Pending information to close':'Pending in Invsto')}</span>${l.scope!=='history'&&o.status!=='completed'?`<span class="wn-tag ${d.kind}">${E(d.text)}</span>`:''}${l.item_missing?'<span class="wn-tag missing">Item not found</span>':''}${l.watch_missing?'<span class="wn-tag missing">Missing watch</span>':''}${l.cancel_pending?'<span class="wn-tag review">Flagged to cancel in Invsto</span>':''}${l.cgl_pending?'<span class="wn-tag review">Pending CGL</span>':''}${l.holds?.map(h=>`<span class="wn-tag review">${E(h==='order_pending_cancellation'?'Cancellation requested on Whatnot':h.replaceAll('_',' '))}</span>`).join('')||''}${l.replacement_shipment_id?'<span class="wn-tag review">Shipment changed · awaiting exact new assignment</span>':''}`;}
+ function lineHtml(l){const o=l.order_record;return `<article class="wn-line ${l.item_missing?'missing':''}" id="wn-item-${l.id}"><label aria-label="Select order ${E(o.id)} item ${l.id}"><input type="checkbox" data-select-line="${l.id}"></label><div><span class="mq-line-number">Line ${l.line_number} of ${l.order_lines}</span><h3 class="mq-item-title">${E(l.title||'Item title unavailable')}</h3><div class="wn-line-status">${window.PendingQueueCards.linePhoto(l.screenshot_count)}${tags(l)}</div><p>Purchased ${E(M.time(o.purchased_at))} · Qty ${l.quantity}${l.sku?' · SKU '+E(l.sku):''}</p>${o.show_title?`<p>Show: ${E(o.show_title)}</p>`:''}<div class="wn-line-links">${link(M.url(o.url),'Whatnot order')}${o.show_id?link(M.receipt(l),l.receipt_url?'Saved receipt':'Video receipt'):''}${link(M.url(l.shipment_url),'Shipment / label')}${link(M.url(o.show_url),'Show')}</div><details class="wn-details" data-evidence="${l.id}"><summary>Photos, labels, notes & timeline</summary><div class="wn-evidence-body">Open to load saved evidence.</div></details></div><aside class="wn-line-side"><div class="wn-price">${E(M.money(Number(l.unit_price)*l.quantity,l.currency))}</div>${l.quantity>1?`<p>${E(M.money(l.unit_price,l.currency))} per item</p>`:''}<p><strong>${E((l.shipment_status||'No shipment assigned').replaceAll('_',' '))}</strong></p>${l.tracking_number?`<strong class="wn-track-caption">Assigned tracking</strong><div class="wn-tracking">${link(M.tracking(l.tracking_number,l.carrier),l.tracking_number)||E(l.tracking_number)}</div><p>${E(l.carrier||'Carrier not supplied')}</p>`:'<p>No tracking number yet</p>'}${l.last_mile_tracking&&l.last_mile_tracking!==l.tracking_number?`<p>Last-mile tracking: ${E(l.last_mile_tracking)}</p>`:''}${l.shipment_id?`<p>Package ${E(l.shipment_id)}</p>`:''}${M.ready(l)?`<button class="wn-pack-line" data-line-action="complete" data-line="${E(l.id)}">Photo &amp; close line</button>`:''}<button data-line-action="receipt" data-line="${l.id}">Save receipt link</button></aside></article>`;}
  function orderBlocks(lines){
   const orders=new Map();
   for(const l of lines){
@@ -32,21 +35,35 @@
   }
   return [...orders.values()].map(items=>{
    const order=items[0];
-   return `<section class="wn-order-block"><header><strong>Order #${E(order.order_id)}</strong><div class="mq-order-summary"><span>${window.PendingQueueCards.orderCounts(order.order_lines,order.order_units,items.length)}</span>${window.PendingQueueCards.screenshotBadge(order.order_missing_screenshots)}</div></header>${items.map(lineHtml).join('')}</section>`;
+   return `<section class="wn-order-block"><header><div class="wn-order-status-head"><strong>Order #${E(order.order_id)}</strong><span class="wn-tag ${E(order.order_record.status)}">Whatnot · ${E(marketStatus(order.order_record.status))}</span></div>${order.order_record.cancelled_at?`<small>Cancelled ${E(M.time(order.order_record.cancelled_at))}</small>`:order.order_record.status==='completed'&&order.order_record.source_updated_at?`<small>Whatnot last updated ${E(M.time(order.order_record.source_updated_at))}</small>`:''}${items.some(l=>l.order_record.status==='completed'&&l.work_state==='pending')?'<p class="wn-closeout-alert"><strong>Pending information to close</strong> · Check the shipping label, tracking and packing photo, then complete the selected lines in Invsto.</p>':''}<div class="mq-order-summary"><span>${window.PendingQueueCards.orderCounts(order.order_lines,order.order_units,items.length)}</span>${window.PendingQueueCards.screenshotBadge(order.order_missing_screenshots)}</div></header>${items.map(lineHtml).join('')}<details class="wn-market-timeline" data-market-timeline="${E(order.order_id)}"><summary>Whatnot status history</summary><div></div></details></section>`;
   }).join('');
  }
  function render(){
   $('wn-orders').innerHTML=groups.length?groups.map(g=>`<section class="wn-buyer" data-buyer="${E(g.buyer_key)}"><header><div><span class="eyebrow">BUYER</span><h2>${E(g.buyer)}</h2>${g.customer&&g.customer.toLowerCase()!==g.buyer.toLowerCase()?`<p>${E(g.customer)}</p>`:''}</div><div>${filter!=='all'||due!=='all'||$('wn-search').value.trim()?'Shown · ':''}<strong>${counted(new Set(g.lines.map(l=>l.order_id)).size,'order')}</strong> · ${window.PendingQueueCards.orderCounts(g.lines.length,g.lines.reduce((n,l)=>n+l.quantity,0))}<div>${window.PendingQueueCards.screenshotBadge(g.lines.filter(l=>!l.screenshot_count).length)}</div></div></header><div class="wn-actions"><button data-group-action="select">Select shown items</button><button data-group-action="complete">Complete selected</button><button data-group-action="upload">Add photos / label</button><button data-group-action="note">Add note</button><details class="mq-actions"><summary>Item status</summary><div><button data-group-action="missing">Item not found</button><button data-group-action="found">Item found</button><button data-group-action="cgl">Pending CGL</button><button data-group-action="cgl_done">CGL ready</button><button data-group-action="watch_missing">Watch missing</button><button data-group-action="watch_found">Watch found</button><button data-group-action="cancel_pending">Mark pending to cancel</button><button data-group-action="cancel_clear">Clear cancellation mark</button></div></details><details class="mq-actions"><summary>Buyer reports</summary><div><button data-group-action="report">Shown items report / PDF</button><button data-group-action="full_report">Full buyer history / PDF</button></div></details><button data-group-action="expand">${g.matched?'Show matching items':'Show buyer’s other items'}</button>${admin?'<button data-group-action="reopen">Reopen selected</button>':''}</div>${orderBlocks(g.lines)}</section>`).join(''):'<div class="wn-empty">No matching items in this view.</div>';
   $('wn-page').textContent=totalBuyers?`Buyers ${offset+1}–${Math.min(offset+groups.length,totalBuyers)} of ${totalBuyers}`:'No buyers';$('wn-prev').disabled=offset===0;$('wn-next').disabled=offset+groups.length>=totalBuyers;
+  for(const details of document.querySelectorAll('[data-market-timeline]'))details.ontoggle=async()=>{
+   if(!details.open||details.dataset.loaded||details.dataset.loading)return;
+   details.dataset.loading='true';const body=details.querySelector('div');body.textContent='Loading status changes…';
+   try{
+    const events=[];for(let start=0;;start+=100){
+     const r=await db.from('whatnot_order_events').select('id,action,details,created_at').eq('order_id',details.dataset.marketTimeline).is('line_id',null).in('action',['order_imported','status_updated']).order('created_at').order('id').range(start,start+99);
+     if(r.error)throw r.error;events.push(...r.data);if(r.data.length<100)break;
+    }
+    body.innerHTML=events.map(e=>`<p><strong>${e.details.previous_status?E(marketStatus(e.details.previous_status))+' → ':'First seen as '}${E(marketStatus(e.details.status))}</strong> · Observed by Invsto ${E(M.time(e.created_at))}</p>`).join('')||'No recorded status changes.';
+    details.dataset.loaded='yes';
+   }catch(e){body.textContent=e.message||'Could not read the status history. Close and reopen to retry.';}finally{delete details.dataset.loading;}
+  };
   for(const details of document.querySelectorAll('[data-evidence]'))details.addEventListener('toggle',()=>{if(details.open&&!details.dataset.loaded)loadEvidence(details).catch(e=>{details.querySelector('.wn-evidence-body').textContent=e.message;});});
  }
  async function refresh(){
   const seq=++generation;loading=true;$('wn-orders').inert=true;$('wn-report').disabled=true;status('Loading saved Whatnot orders…');
-  try{const r=await rpc('whatnot_queue_summary',{_view:view,_search:$('wn-search').value.trim(),_filter:filter,_due:due,_purchase:$('wn-purchase').value||null,_sort:$('wn-sort').value,_buyer_history:$('wn-buyer-history').value,_offset:offset});
+  try{const r=await rpc('whatnot_queue_summary',{_view:view,_search:scannedTracking?'!scan:'+scannedTracking:$('wn-search').value.trim(),_filter:filter,_due:due,_purchase:$('wn-purchase').value||null,_sort:$('wn-sort').value,_buyer_history:$('wn-buyer-history').value,_offset:offset});
    if(seq!==generation)return;
    groups=r.groups;totalBuyers=r.buyers;
-   $('wn-views').innerHTML=Object.entries(knownViews).map(([v,label])=>`<button data-view="${v}" ${view===v?'aria-current="page"':''}>${label}<strong>${r.counts[v]}</strong></button>`).join('');
-   const pending=view==='pending'||view==='review';
+   $('wn-views').innerHTML=Object.entries(workflowViews).map(([v,label])=>`<button data-view="${v}" ${view===v?'aria-current="page"':''}>${label}<strong>${r.counts[v]||0}</strong></button>`).join('');
+   $('wn-market-status').hidden=false;
+   $('wn-market-views').innerHTML=Object.entries(marketViews).map(([v,label])=>`<button data-view="${v}" aria-pressed="${v===view}">${label} <strong>${r.market_counts?.[v]||0}</strong></button>`).join('');
+   const pending=view==='pending'||view==='review'||view==='unfulfilled';
    $('wn-money-cards').hidden=!pending;$('wn-money-notes').hidden=!r.facets.shown?.lines;
    $('wn-filters').hidden=pending;
    if(pending)window.PendingQueueCards.render($('wn-money-cards'),r.facets,due,filter);
@@ -58,11 +75,11 @@
    $('wn-refine-count').textContent=extra?' · '+extra+' active':'';
    const filtered=$('wn-search').value.trim()||$('wn-purchase').value||$('wn-buyer-history').value!=='all'||due!=='all'||filter!=='all';
    $('wn-reset-filters').disabled=!filtered&&$('wn-sort').value==='due';
-   const title=filtered?'Filtered totals':view==='history'?'History overview':view==='review'?'Review overview':view==='all'?'All order totals':'Queue overview';
+   const title=filtered?'Filtered totals':marketViews[view]?marketViews[view]+' on Whatnot':view==='closeout'?'Pending information to close':view==='history'?'History overview':view==='review'?'Review overview':view==='all'?'All order totals':'Queue overview';
    window.PendingQueueCards.shown($('wn-selection-totals'),r.facets.shown,{title,target:'wn-orders'});
    $('wn-orders').inert=false;$('wn-report').disabled=false;
-   render();status('');
-  }catch(e){if(seq===generation){groups=[];totalBuyers=0;render();for(const id of ['wn-money-cards','wn-selection-totals','wn-filters'])$(id).replaceChildren();status(e.message,true);}}finally{if(seq===generation)loading=false;}
+   render();status(scannedTracking?(r.visible_lines?counted(r.visible_lines,'matching order line')+'. Check the full tracking number before taking the packing photo.':'No order lines match that tracking barcode.'):'');
+  }catch(e){if(seq===generation){groups=[];totalBuyers=0;render();$('wn-market-status').hidden=true;for(const id of ['wn-money-cards','wn-selection-totals','wn-filters'])$(id).replaceChildren();status(e.message,true);}}finally{if(seq===generation)loading=false;}
  }
  async function filesFor(ids){const r=await db.from('whatnot_order_files').select('*').overlaps('line_ids',ids).order('created_at');if(r.error)throw Error(r.error.message);return r.data;}
  async function signed(file){const r=await db.storage.from('whatnot-order-evidence').createSignedUrl(file.path,1800);if(r.error)throw Error('Could not open this saved file.');return r.data.signedUrl;}
@@ -78,21 +95,49 @@
   action={kind,lines};const titles={complete:'Complete selected order lines',upload:'Attach evidence to selected items',note:'Add an internal note',watch_missing:'Mark selected watches missing',watch_found:'Mark selected watches found',cancel_pending:'Flag selected items for cancellation review',cancel_clear:'Clear internal cancellation mark',missing:'Mark selected items not found',found:'Mark selected items found',cgl:'Mark selected items Pending CGL',cgl_done:'Confirm CGL is ready',receipt:'Save this item’s receipt link',reopen:'Reopen selected items'};
   $('wn-action-title').textContent=titles[kind];$('wn-action-items').innerHTML=lines.map(l=>`<div class="wn-choice"><strong>Order #${E(l.order_id)} · ${E(l.title)}</strong><small>Qty ${l.quantity} · ${E(l.tracking_number||'No tracking')} · ${E(M.money(Number(l.unit_price)*l.quantity,l.currency))}</small></div>`).join('');
   $('wn-value-label').hidden=kind==='upload';$('wn-value-label').firstChild.textContent=kind==='receipt'?'Whatnot receipt / order URL':'Note';$('wn-value').value=kind==='receipt'?lines[0].receipt_url||'':'';
+  $('wn-pack-photo').hidden=kind!=='complete';$('wn-pack-filename').textContent='';
+  $('wn-pack-camera').value='';$('wn-pack-gallery').value='';
   $('wn-upload-fields').hidden=kind!=='upload';$('wn-files').value='';$('wn-confirm-label').hidden=!['complete','upload','cgl_done'].includes(kind);$('wn-confirm').checked=false;$('wn-action-error').textContent='';$('wn-action-submit').disabled=false;$('wn-action-dialog').showModal();
  }
- async function submitAction(event){event.preventDefault();if(!action)return;const {kind,lines}=action;$('wn-action-submit').disabled=true;
+ for(const id of ['wn-pack-camera','wn-pack-gallery'])$(id).onchange=()=>{
+  if(!action||action.saving||!$(id).files.length)return;
+  action.photo=$(id).files[0];action.photoAttached=false;action.photoPath=null;
+  $(id==='wn-pack-camera'?'wn-pack-gallery':'wn-pack-camera').value='';
+  $('wn-pack-filename').textContent='Selected: '+action.photo.name;
+ };
+ function validateFile(file,type){
+  if(file.size>15*1024*1024)throw Error('Each file must be 15 MB or smaller.');
+  if(type==='label'?file.type!=='application/pdf':!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error(type==='label'?'Choose a PDF shipping label.':'Use a JPG, PNG or WebP packing photo.');
+ }
+ async function attachFile(file,type,lines,attempt){
+  const ext=file.type==='application/pdf'?'pdf':file.type==='image/png'?'png':file.type==='image/webp'?'webp':'jpg';
+  let path=attempt?.photoPath;
+  if(!path){
+   path=(await db.auth.getUser()).data.user.id+'/'+crypto.randomUUID()+'.'+ext;
+   const uploaded=await db.storage.from('whatnot-order-evidence').upload(path,file,{contentType:file.type,upsert:false});
+   if(uploaded.error)throw Error(uploaded.error.message);
+   if(attempt)attempt.photoPath=path;
+  }
+  await rpc('attach_whatnot_file',{_path:path,_kind:type,_name:file.name.slice(0,200),_mime:file.type,_lines:M.snapshot(lines)});
+ }
+ async function submitAction(event){event.preventDefault();if(!action||action.saving)return;const attempt=action,{kind,lines}=attempt;attempt.saving=true;$('wn-action-submit').disabled=true;
   try{
    if(['complete','upload','cgl_done'].includes(kind)&&!$('wn-confirm').checked)throw Error('Confirm the selected items and evidence first.');
    if(kind==='upload'){
     const files=[...$('wn-files').files],type=$('wn-kind').value;if(!files.length)throw Error('Choose at least one file.');if(files.length>20)throw Error('Choose up to 20 files at a time.');
-    for(const f of files){if(f.size>15*1024*1024)throw Error('Each file must be 15 MB or smaller.');if(type==='label'?f.type!=='application/pdf':!['image/jpeg','image/png','image/webp'].includes(f.type))throw Error(type==='label'?'Choose PDF shipping labels.':'Choose JPG, PNG or WebP photos.');}
-    for(const f of files){const ext=f.type==='application/pdf'?'pdf':f.type==='image/png'?'png':f.type==='image/webp'?'webp':'jpg';const path=`${(await db.auth.getUser()).data.user.id}/${crypto.randomUUID()}.${ext}`;
-     $('wn-action-error').textContent=`Saving ${f.name}…`;const uploaded=await db.storage.from('whatnot-order-evidence').upload(path,f,{contentType:f.type,upsert:false});if(uploaded.error)throw Error(uploaded.error.message);
-     await rpc('attach_whatnot_file',{_path:path,_kind:type,_name:f.name.slice(0,200),_mime:f.type,_lines:M.snapshot(lines)});
+    for(const f of files)validateFile(f,type);
+    for(const f of files){$('wn-action-error').textContent='Saving '+f.name+'…';await attachFile(f,type,lines);}
+   }else{
+    if(kind==='complete'&&attempt.photo&&!attempt.photoAttached){
+     validateFile(attempt.photo,'completion_photo');
+     $('wn-action-error').textContent='Saving packing photo…';await attachFile(attempt.photo,'completion_photo',lines,attempt);attempt.photoAttached=true;
     }
-   }else await rpc('whatnot_work_action',{_action:kind,_lines:M.snapshot(lines),_value:$('wn-value').value.trim()||null});
+    const snapshot=M.snapshot(lines);
+    if(kind==='complete')snapshot.forEach((row,i)=>{row.verified_tracking_number=lines[i].tracking_number;});
+    await rpc('whatnot_work_action',{_action:kind,_lines:snapshot,_value:$('wn-value').value.trim()||null});
+   }
    $('wn-action-dialog').close();action=null;await refresh();status('Saved successfully. Only the selected order lines were updated.');
-  }catch(e){$('wn-action-error').textContent=e.message;}finally{$('wn-action-submit').disabled=false;}
+  }catch(e){$('wn-action-error').textContent=e.message;}finally{attempt.saving=false;$('wn-action-submit').disabled=false;}
  }
  async function expandBuyer(g){
   const field=g.buyer_key.startsWith('order:')?'id':'buyer_id',value=field==='id'?g.lines[0].order_id:g.buyer_key;
@@ -135,23 +180,31 @@
  $('wn-connect').onclick=()=>{$('wn-token').value='';$('wn-connect-dialog').showModal();};
  $('wn-connect-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{const token=$('wn-token').value.trim();await api('connect',{token,expiresAt:$('wn-expires').value||null});$('wn-token').value='';$('wn-connect-dialog').close();await loadConnection();await refresh();}catch(e){$('wn-connect-error').textContent=e.message;}finally{button.disabled=false;}};
  $('wn-connect-dialog').addEventListener('close',()=>{$('wn-token').value='';});
+ $('wn-action-dialog').addEventListener('cancel',e=>{if(action?.saving)e.preventDefault();});
  $('wn-action-form').onsubmit=submitAction;
- let searchTimer;$('wn-search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{offset=0;refresh();},300);});
- $('wn-search').addEventListener('change',()=>{offset=0;refresh();});
+ let searchTimer;$('wn-search').addEventListener('input',()=>{scannedTracking=null;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{offset=0;refresh();},300);});
+ $('wn-search').addEventListener('change',()=>{clearTimeout(searchTimer);offset=0;refresh();});
+ $('wn-find-package').onclick=()=>{
+  clearTimeout(searchTimer);const code=window.OGTrackingSearch.normalize($('wn-search').value);
+  if(!/^[a-z0-9]{6,128}$/.test(code)){status('Scan the shipping tracking barcode again, or enter the printed tracking number.',true);return;}
+  scannedTracking=code;view='all';offset=0;filter='all';due='all';$('wn-purchase').value='';$('wn-buyer-history').value='all';
+  const url=new URL(location.href);url.searchParams.set('view',view);history.replaceState(null,'',url);
+  refresh();
+ };
  for(const id of ['wn-sort','wn-purchase','wn-buyer-history'])$(id).onchange=()=>{offset=0;refresh();};
- $('wn-reset-filters').onclick=()=>{filter='all';due='all';offset=0;$('wn-purchase').value='';$('wn-search').value='';$('wn-sort').value='due';$('wn-buyer-history').value='all';refresh();};
+ $('wn-reset-filters').onclick=()=>{scannedTracking=null;filter='all';due='all';offset=0;$('wn-purchase').value='';$('wn-search').value='';$('wn-sort').value='due';$('wn-buyer-history').value='all';refresh();};
  $('wn-prev').onclick=()=>{offset=Math.max(0,offset-40);refresh();};$('wn-next').onclick=()=>{offset+=40;refresh();};
  $('wn-report').onclick=()=>report(allLines(),'Whatnot order review · displayed buyers').catch(e=>status(e.message,true));
  document.addEventListener('click',async event=>{
-  const close=event.target.closest('[data-close]');if(close){$(close.dataset.close).close();return;}
-  const v=event.target.closest('[data-view]');if(v){view=v.dataset.view;offset=0;filter='all';due='all';history.replaceState(null,'',`?view=${view}`);refresh();return;}
+  const close=event.target.closest('[data-close]');if(close){if(close.dataset.close!=='wn-action-dialog'||!action?.saving)$(close.dataset.close).close();return;}
+  const v=event.target.closest('[data-view]');if(v){view=v.dataset.view;offset=0;filter='all';due='all';const url=new URL(location.href);url.searchParams.set('view',view);history.replaceState(null,'',url);refresh();return;}
   const card=event.target.closest('[data-mq-key]');if(card){const key=card.dataset.mqKey;if(card.dataset.mqType==='due')due=due===key?'all':key;else filter=filter===key?'all':key;offset=0;refresh();return;}
   const f=event.target.closest('[data-filter]');if(f){filter=f.dataset.filter;offset=0;refresh();return;}
   const photo=event.target.closest('[data-photo]');if(photo){$('wn-expanded-photo').src=photo.dataset.photo;$('wn-photo-dialog').showModal();return;}
   const one=event.target.closest('[data-line-action]');if(one){beginAction(one.dataset.lineAction,allLines().filter(l=>l.id===one.dataset.line));return;}
   const button=event.target.closest('[data-group-action]');if(!button)return;const g=groups.find(g=>g.buyer_key===button.closest('[data-buyer]').dataset.buyer),kind=button.dataset.groupAction;
   try{if(kind==='select'){const nodes=button.closest('[data-buyer]').querySelectorAll('[data-select-line]'),checked=[...nodes].every(n=>n.checked);for(const n of nodes)n.checked=!checked;return;}
-   if(kind==='expand'){if(g.matched){g.lines=g.matched;delete g.matched;}else{button.disabled=true;const expanded=await expandBuyer(g);if(!groups.includes(g))return;g.matched=g.lines;g.lines=expanded.filter(l=>view==='all'||(view==='pending'?l.scope!=='history':l.scope===view));}render();return;}
+   if(kind==='expand'){if(g.matched){g.lines=g.matched;delete g.matched;}else{button.disabled=true;const expanded=await expandBuyer(g);if(!groups.includes(g))return;g.matched=g.lines;g.lines=expanded.filter(l=>l.queue_views.includes(view));}render();return;}
    if(kind==='report'){await report(g.lines,`${g.buyer} · Whatnot items in this view`);return;}
    if(kind==='full_report'){await report(await expandBuyer(g),`${g.buyer} · Full Whatnot purchase history`);return;}
    beginAction(kind,selected(g));

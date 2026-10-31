@@ -17,8 +17,8 @@ async function fixture(page){
  const lines=[1,2].map(n=>({id:'900'+n,order_id:order.id,title:n===1?'925 Silver Earrings — exact purchased item':'Gold bracelet',quantity:1,unit_price:25,currency:'USD',ship_by_date:'2026-10-29',tracking_number:'9400111000000000001234',shipment_status:'label_generated',carrier:'USPS',work_state:'pending',revision:1,holds:[],item_missing:n===1,line_number:n,order_lines:2,order_units:2,order_missing_screenshots:1,screenshot_count:n===1?0:2,scope:'pending',order_record:order}));
  window.calls=[];window.fixtureLines=lines;
  return {auth:{getUser:async()=>({data:{user:{id:'user'}}})},functions:{invoke:async(name,{body})=>{calls.push({name,body});return {data:{admin:true,configured:true,connection:{seller_name:'ogjewelers',enabled:true,last_synced_at:'2026-10-31T16:00:00Z',last_full_sync_at:'2026-10-31T16:00:00Z'}}}}},
- rpc:async(name,args)=>{calls.push({name,args});if(name==='can_manage_inventory')return {data:true};if(name==='whatnot_queue_summary'){const ls=['missing','no_screenshot'].includes(args._filter)?lines.filter(l=>l.item_missing):lines;const totals=n=>({lines:n,orders:n?1:0,buyers:n?1:0,units:n,amounts:n?{USD:{sales:n*25,shipping:n*2,fees:n*1.5}}:{}});return {data:{groups:[{buyer_key:'9',buyer:'fixture_buyer',customer:'Fixture Customer',lines:ls}],buyers:1,visible_lines:ls.length,visible_items:ls.length,counts:{pending:2,review:0,history:0,all:2},facets:{'due:all':totals(ls.length),'due:overdue':totals(ls.length),'work:no_screenshot':totals(1),'work:missing':totals(1),'work:ready':totals(1),'work:waiting':totals(1),shown:totals(ls.length)},filters:{all:2,missing:1,cgl:0,overdue:2,today:0,tomorrow:0,no_tracking:0,unknown:0}}};}if(name==='whatnot_work_action')return {data:{updated:args._lines.length}};throw Error('Unexpected RPC '+name);},
- from(name){if(!name.startsWith('whatnot_'))throw Error('Cross marketplace query');const q={select(){return q},overlaps(){return q},in(){return q},eq(){return q},order(){return q},limit:async()=>({data:[]}),range:async()=>({data:[]}),then(r){return Promise.resolve({data:[]}).then(r)}};return q;}};
+ rpc:async(name,args)=>{calls.push({name,args});if(name==='can_manage_inventory')return {data:true};if(name==='whatnot_queue_summary'){const ls=['missing','no_screenshot'].includes(args._filter)?lines.filter(l=>l.item_missing):lines;const totals=n=>({lines:n,orders:n?1:0,buyers:n?1:0,units:n,amounts:n?{USD:{sales:n*25,shipping:n*2,fees:n*1.5}}:{}});return {data:{groups:[{buyer_key:'9',buyer:'fixture_buyer',customer:'Fixture Customer',lines:ls}],buyers:1,visible_lines:ls.length,visible_items:ls.length,counts:{pending:2,review:0,history:0,all:2},market_counts:{market_open:1,unfulfilled:1},facets:{'due:all':totals(ls.length),'due:overdue':totals(ls.length),'work:no_screenshot':totals(1),'work:missing':totals(1),'work:ready':totals(1),'work:waiting':totals(1),shown:totals(ls.length)},filters:{all:2,missing:1,cgl:0,overdue:2,today:0,tomorrow:0,no_tracking:0,unknown:0}}};}if(name==='attach_whatnot_file')return {data:'fixture-file-id'};if(name==='whatnot_work_action')return {data:{updated:args._lines.length}};throw Error('Unexpected RPC '+name);},
+ storage:{from(){return {upload:async(path,file)=>{calls.push({name:'upload',path,filename:file.name});return {error:null};}}}},from(name){if(!name.startsWith('whatnot_'))throw Error('Cross marketplace query');const q={select(){return q},overlaps(){return q},in(){return q},eq(){return q},is(){return q},order(){return q},limit:async()=>({data:[]}),range:async()=>({data:[]}),then(r){return Promise.resolve({data:[]}).then(r)}};return q;}};
  }}` }));
  await page.goto(origin+'/pending-whatnot-orders.html');await expect(page.locator('#wn-selection-totals h2')).toHaveText('Queue overview');
 }
@@ -48,7 +48,7 @@ test('completion needs explicit physical check and receipt links retain exact it
  const page=await browser.newPage();await fixture(page);const href=await page.getByRole('link',{name:'Video receipt ↗'}).first().getAttribute('href');assert.match(href,/#invsto-receipt=9001&order=1484060355$/);
  await page.locator('[data-select-line="9002"]').check();await page.getByRole('button',{name:'Complete selected'}).click();await page.locator('#wn-action-submit').click();await expect(page.locator('#wn-action-error')).toContainText('Confirm');
  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='whatnot_work_action').length),0);
- await page.locator('#wn-confirm').check();await page.locator('#wn-action-submit').click();assert.deepEqual(await page.evaluate(()=>calls.find(c=>c.name==='whatnot_work_action').args._lines),[{id:'9002',revision:1}]);await page.close();
+ await page.locator('#wn-confirm').check();await page.locator('#wn-action-submit').click();assert.deepEqual(await page.evaluate(()=>calls.find(c=>c.name==='whatnot_work_action').args._lines),[{id:'9002',revision:1,verified_tracking_number:'9400111000000000001234'}]);await page.close();
 });
 test('token form sends only to authenticated edge connection and clears on close',async()=>{
  const page=await browser.newPage();await fixture(page);await page.locator('#wn-connection>summary').click();await page.getByRole('button',{name:'Reconnect Whatnot'}).click();await page.locator('#wn-token').fill('test-only-token');await page.getByRole('button',{name:'Connect account & start sync'}).click();await expect(page.locator('#wn-token')).toHaveValue('');
@@ -78,4 +78,37 @@ test('receipt opening retries a server-rendered button before its handler is rea
  await page.evaluate(()=>{document.querySelector('#receipt').onclick=()=>{window.receiptOpens=(window.receiptOpens||0)+1;const v=document.createElement('video');v.style.cssText='width:200px;height:300px';document.body.append(v);};});
  await expect(page.getByRole('button',{name:'Capture item photo → Invsto'})).toBeVisible({timeout:8000});
  assert.equal(await page.evaluate(()=>receiptOpens),1);await page.close();
+});
+
+test('marketplace filters show order counts, a separate closing checklist and accessible status history',async()=>{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await fixture(page);
+ await expect(page.locator('[data-view="unfulfilled"]')).toContainText('1');await page.locator('[data-view="unfulfilled"]').click();
+ await expect(page.locator('#wn-selection-totals h2')).toHaveText('Unfulfilled on Whatnot');
+ await page.evaluate(()=>{for(const l of fixtureLines){l.order_record.status='completed';l.order_record.source_updated_at='2026-10-31T15:00:00Z';}});
+ await page.locator('[data-view="closeout"]').click();await expect(page.locator('.wn-closeout-alert')).toContainText('Pending information to close');
+ await expect(page.locator('.wn-order-status-head')).toContainText('Whatnot · Completed');
+ await page.getByText('Whatnot status history',{exact:true}).click();await expect(page.locator('.wn-market-timeline')).toContainText('No recorded status changes.');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.close();
+});
+
+test('phone scans a routed physical barcode across queues then takes a packing photo for one verified line',async()=>{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await fixture(page);
+ try{
+  await page.locator('[data-view="closeout"]').click();await page.getByRole('button',{name:'Scan tracking'}).click();
+  await expect(page.locator('#camera-scanner-title')).toHaveText('Scan a shipping label');
+  await page.addScriptTag({url:origin+'/node_modules/jsbarcode/dist/JsBarcode.all.min.js'});
+  const image=await page.evaluate(()=>{const c=document.createElement('canvas');JsBarcode(c,'420331319400111000000000001234',{format:'CODE128',height:140,width:3,margin:30,displayValue:false});return c.toDataURL('image/png').split(',')[1];});
+  const photo={name:'test.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')};
+  await page.locator('[data-camera="photo"]').setInputFiles(photo);await page.locator('[data-camera="use"]').click();
+  await expect(page.locator('#wn-status')).toContainText('2 matching order lines');
+  const lookup=await page.evaluate(()=>calls.filter(c=>c.name==='whatnot_queue_summary').at(-1).args);
+  assert.equal(lookup._view,'all');assert.equal(lookup._search,'!scan:420331319400111000000000001234');
+  await page.getByRole('button',{name:'Photo & close line'}).click();await expect(page.locator('#wn-pack-camera')).toHaveAttribute('capture','environment');
+  await page.locator('#wn-pack-camera').setInputFiles(photo);await page.locator('#wn-confirm').check();await page.locator('#wn-action-submit').click();
+  await expect(page.locator('#wn-action-dialog')).not.toBeVisible();
+  const writes=await page.evaluate(()=>calls.filter(c=>c.name==='attach_whatnot_file'||c.name==='whatnot_work_action'));
+  assert.deepEqual(writes.map(c=>c.name),['attach_whatnot_file','whatnot_work_action']);
+  assert.equal(writes[0].args._kind,'completion_photo');assert.deepEqual(writes[0].args._lines,[{id:'9002',revision:1}]);
+  assert.deepEqual(writes[1].args._lines,[{id:'9002',revision:1,verified_tracking_number:'9400111000000000001234'}]);
+ }finally{await page.close();}
 });

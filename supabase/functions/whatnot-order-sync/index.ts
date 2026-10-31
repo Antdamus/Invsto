@@ -23,11 +23,12 @@ async function worker(db:any,token:string){
   for(const o of p.data)await importOrder(o);
   // While a backfill is running, periodically revisit the newest orders too.
   if(c.full_in_progress&&c.page_cursor){const recent=await api.page('/orders',null,5);for(const o of recent.data)if(!p.data.some((x:any)=>x.id===o.id))await importOrder(o);}
-  if(!c.full_in_progress){
-   // Shipment changes can occur without changing an order's list position.
-   // Revisit all open work in oldest-sync order; full history is reconciled every six hours.
-   const pending=check(await db.from('whatnot_order_lines').select('order_id,synced_at').eq('work_state','pending').order('synced_at').limit(50));
-   const ids=[...new Set(pending.map((l:any)=>l.order_id))].filter(id=>!p.data.some((x:any)=>x.id===id)).slice(0,20);
+  {
+   // Labels can change hours after a sale while the first history import is still paging.
+   let work=db.from('whatnot_order_lines').select('order_id,synced_at,whatnot_orders!inner(status)').eq('work_state','pending');
+   if(c.full_in_progress)work=work.in('whatnot_orders.status',['pending','pending_fulfillment','completed']);
+   const pending=check(await work.order('synced_at').order('id').limit(50));
+   const ids=[...new Set(pending.map((l:any)=>l.order_id))].filter(id=>!p.data.some((x:any)=>x.id===id)).slice(0,c.full_in_progress?10:20);
    for(const id of ids)await importOrder(await api.read(`/orders/${id}`));
   }
   const more=c.full_in_progress&&Boolean(p.next_cursor);
@@ -57,7 +58,7 @@ Deno.serve(async req=>{
    const api=client(body.token),seller=await api.read('/users/me');
    if(seller.username?.toLowerCase()!=='ogjewelers')throw new WhatnotError('Use a token from the ogjewelers Whatnot account.');
    await api.page('/orders',null,1);
-   const expires=body.expiresAt?new Date(body.expiresAt):null;if(expires&&(!Number.isFinite(+expires)||+expires<Date.now()))throw new WhatnotError('Choose the token’s actual future expiration date.');
+   const expires=body.expiresAt?new Date(body.expiresAt):null;if(expires&&(!Number.isFinite(+expires)||+expires<Date.now()))throw new WhatnotError('Choose the tokenâ€™s actual future expiration date.');
    check(await db.rpc('install_whatnot_connection',{_seller:seller.id,_name:seller.username,_credentials:await seal(body.token,env('WHATNOT_TOKEN_ENCRYPTION_KEY')),_actor:auth.data.user.id,_expires:expires?.toISOString()||null}));
    check(await db.rpc('dispatch_whatnot_worker'));return reply(200,{ok:true,seller:seller.username});
   }

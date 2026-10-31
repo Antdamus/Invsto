@@ -37,7 +37,7 @@ export function mapOrder(order, items, shipments, show = null) {
     return {id:item.id,order_id:id,title:item.purchased_item?.title || 'Title not provided',sku:item.purchased_item?.sku || null,
       product_id:item.product_id || null,quantity:item.quantity,unit_price:unit.amount,currency:unit.currency,
       shipment_id:item.shipment_id || null,shipment_url:safeUrl(shipment?.url),shipment_status:shipment?.status || null,
-      tracking_number:current ? shipment.tracking?.tracking_code || null : null,
+      tracking_number:current ? shipment.tracking?.tracking_code || shipment.tracking?.last_mile_tracking_code || null : null,
       last_mile_tracking:current ? shipment.tracking?.last_mile_tracking_code || null : null,carrier:current ? shipment.tracking?.carrier || null : null,
       // API defines dropoff_due as the due calendar day at seller-local midnight, not a cutoff instant.
       ship_by_date:due?.slice(0,10) || null,dropoff_due:due,
