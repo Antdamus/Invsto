@@ -11,6 +11,8 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261031170000_whatnot_workspace.sql',import.meta.url),'utf8'));
  await db.exec(`alter table employees add column role text default 'admin';alter table employees add column active boolean default true;create schema net;create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds int) returns bigint language sql as $$select 1::bigint$$;create schema cron;create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261031171000_whatnot_api_connection.sql',import.meta.url),'utf8'));
+ await db.exec('create table tiktok_orders(id uuid primary key)');
+ await db.exec(await readFile(new URL('../supabase/migrations/20261031230000_marketplace_pending_summaries.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('all historical orders import; missing filters show only matching lines and counts',async()=>{
@@ -56,4 +58,23 @@ test('connection pins the seller, hides encrypted credentials, and claims single
  assert.ok((await run('select claim_whatnot_worker($1) as c',[token]))[0].c);assert.equal((await run('select claim_whatnot_worker($1) as c',[token]))[0].c,null);
  await assert.rejects(run('select import_whatnot_worker_order($1,$2)',['00000000-0000-4000-8000-000000000099',JSON.stringify(record('7'))]),/expired/);
  await run('select import_whatnot_worker_order($1,$2)',[token,JSON.stringify(record('7'))]);assert.equal((await run("select count(*)::int as n from whatnot_orders where id='7'"))[0].n,1);
+});
+
+test('queue totals precede paging and charge each checkout once across its original lines',async()=>{
+ const make=(n)=>{const r=record(String(n));r.buyer_id=r.id;r.username='facetBuyer'+n;return r;};
+ const r=make(1000);r.lines.push({...r.lines[0],id:'100002',title:'Watch',quantity:1,unit_price:12});r.subtotal=24;r.total=28;await save(r);
+ await run("select whatnot_work_action('watch_missing',$1,'Checked')",[JSON.stringify([{id:'100002',revision:1}])]);
+ const summary=async(filter='all',search='facetBuyer',offset=0)=> (await run("select whatnot_queue_summary('pending',$1,$2,$3,'all',null,'due','all') as d",[search,filter,offset]))[0].d;
+ let s=await summary('missing_watch');
+ assert.equal(s.visible_lines,1);assert.equal(s.groups[0].lines[0].id,'100002');
+ assert.deepEqual(s.facets.shown.amounts.USD,{lines:1,sales:12,shipping:1.5,fees:1.51,unknown_ship:0,unknown_fees:0});
+ s=await summary();assert.equal(s.facets.shown.amounts.USD.fees,3.03);assert.equal(s.facets.shown.amounts.USD.shipping,3);
+ await assert.rejects(run("select whatnot_work_action('complete',$1,null)",[JSON.stringify([{id:'100002',revision:2}])]),/Resolve/);
+ await run("select whatnot_work_action('cancel_pending',$1,null)",[JSON.stringify([{id:'100001',revision:1}])]);assert.equal((await summary('cancel')).visible_lines,1);
+ for(let n=1001;n<=1041;n++)await save(make(n));
+ const first=await summary(),second=await summary('all','facetBuyer',40);
+ assert.equal(first.groups.length,40);assert.equal(second.groups.length,2);assert.deepEqual(first.facets,second.facets);
+ assert.equal(first.facets.shown.lines,43);assert.equal(first.facets.shown.amounts.USD.sales,516);
+ const scanned=await summary('missing_watch',']C14200000009400111000000000001234');assert.equal(scanned.visible_lines,1);
+ await db.exec("set test.allowed='no'");await assert.rejects(summary(),/access/);await db.exec("set test.allowed='yes'");
 });

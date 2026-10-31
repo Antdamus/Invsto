@@ -50,7 +50,7 @@ async function tiktok(t,width=1366,allowed=true){
   };
   window.TikTokReceiptPhotos={placeholder:()=>'',hydrate(){},start(){}};
  },allowed);
- for(const file of ['tiktok-order-import.js','tiktok-order-queue.js','tiktok-shipping.js','tiktok-reversal.js','tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+file});
+ for(const file of ['tiktok-order-import.js','marketplace-queue-cards.js','tiktok-order-queue.js','tiktok-shipping.js','tiktok-reversal.js','tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+file});
  await expect(page.locator('.tk-expand-button')).toHaveCount(1);await page.locator('.tk-expand-button').click();return page;
 }
 

@@ -65,7 +65,7 @@ export function client(appKey: string, appSecret: string, request: typeof fetch 
       catch (error) { if (error instanceof TikTokError || error instanceof Error && !/fetch|network|https?:/i.test(error.message)) throw error; throw Error('TikTok authorization request could not finish. Retry the connection.'); }
     },
     async read(path: string, token: string, query: Record<string, string> = {}, body?: Record<string, unknown>) {
-      if (path !== ORDER_PATH && path !== SHOPS_PATH) throw Error('Unsupported TikTok read endpoint');
+      if (path !== ORDER_PATH && path !== SHOPS_PATH && path !== '/order/202507/orders' && path !== '/finance/202507/orders/unsettled' && !/^\/finance\/202501\/orders\/\d{10,24}\/statement_transactions$/.test(path)) throw Error('Unsupported TikTok read endpoint');
       const params = {...query, app_key:appKey, timestamp:String(Math.floor(Date.now() / 1000))};
       const payload = body === undefined ? '' : JSON.stringify(body);
       const url = new URL(path, API_ORIGIN);

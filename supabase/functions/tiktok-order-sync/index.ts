@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {client, seal, unseal, sha256, chooseProductionShop, SHOPS_PATH, TikTokError} from './tiktok.ts';
 import {syncOrderPage, syncInProgress} from './sync.ts';
+import {refreshQueueMoney} from './queue-money.ts';
 
 const APP_URL = 'https://antdamus.github.io/Invsto/pending-tiktok-orders.html';
 const ORIGIN = new URL(APP_URL).origin;
@@ -24,7 +25,9 @@ async function worker(db: any, workerToken: string) {
       const updated = check(await db.from('tiktok_api_connection').update({credentials:await seal(tokens, env('TIKTOK_TOKEN_ENCRYPTION_KEY')), access_expires_at:iso(tokens.access_token_expire_in),authorization_expires_at:iso(tokens.refresh_token_expire_in)}).eq('singleton',true).eq('dispatch_token',workerToken).select('singleton'));
       if (updated.length !== 1) throw Error('TikTok sync lease expired.');
     }
-    return json(200,await syncOrderPage(db,c,workerToken,api,tokens.access_token));
+    const result=await syncOrderPage(db,c,workerToken,api,tokens.access_token);
+    if(!result.more){try{await refreshQueueMoney(db,c,api,tokens);}catch{console.warn('TikTok queue financial data could not refresh; order sync succeeded.');}}
+    return json(200,result);
   } catch (error) {
     const message = safeError(error);
     await db.from('tiktok_api_connection').update({last_error:message,next_sync_at:new Date(Date.now()+300000).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',workerToken);

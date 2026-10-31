@@ -85,3 +85,16 @@ test('signatures move cancelled work into history while keeping unsigned cancell
  o.cancellation_signed_at='2026-10-18';o.lines[0].cancellation_signed_at='2026-10-18';assert.equal(q.select([o],{cancelledOnly:true}).length,0);assert.equal(q.select([o],{history:true})[0].quantity,1);assert.equal(q.select([o]).length,0);
  const mixed=order('2','Alice',null,{lines:[{id:'cancelled',cancelled_at:'2026-10-18',cancellation_signed_at:'2026-10-18',quantity:1},{id:'active',quantity:2}]});assert.equal(q.select([mixed],{cancelledOnly:true}).length,0);assert.deepEqual(q.select([mixed],{history:true})[0].lines.map(l=>l.id),['cancelled']);assert.deepEqual(q.select([mixed])[0].lines.map(l=>l.id),['active']);
 });
+
+test('matching open lines retain their share of checkout and exclude completed or cancelled siblings',()=>{
+ const lines=['a','b','c'].map(id=>({id,title:id==='c'?'Watches':'Silver ring',quantity:1,line_amount:'10.00',work:{item_search:'not_found'}}));
+ lines[0].fulfilled_at='2026-10-17';lines[1].cancelled_at='2026-10-17';
+ const source=order('1','buyer','2026-10-17',{lines,buyer_shipping:5,referral_basis:35});
+ let g=q.pendingGroups([source],{work:'missing',now});assert.deepEqual(g[0].lines.map(l=>l.id),['c']);
+ let f=q.financials(g);assert.equal(f.sales,1000);assert.equal(f.shipping,167);assert.equal(f.fees,70);assert.equal(f.est,1);
+ source.statement_deductions=2.13;f=q.financials(q.pendingGroups([source],{work:'not_found',now}));assert.equal(f.fees,71);assert.equal(f.actual,1);
+ source.buyer_shipping=null;source.statement_deductions=null;source.referral_basis=null;
+ f=q.financials(q.pendingGroups([source],{now}));assert.equal(f.missingShip,1);assert.equal(f.missingFee,1);
+ assert.equal(q.pendingGroups([source],{due:'tomorrow',work:'watches',now}).length,0);
+ assert.equal(q.pendingGroups([source],{buyerHistory:'none',now}).length,0);
+});

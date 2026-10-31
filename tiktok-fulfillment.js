@@ -93,7 +93,13 @@
  }
  function syncReview(){
   if(!activeOrders.length||!context.getOrders)return;
-  activeOrders=activeOrders.map(o=>context.getOrders().find(current=>current.id===o.id)).filter(Boolean);
+  const fresh=new Map(context.getOrders().map(o=>[o.id,o]));
+  activeOrders=activeOrders.map(o=>{
+   const current=fresh.get(o.id);
+   if(!current||!o.sourceLines)return current;
+   const visible=new Set(o.lines.map(l=>l.id));
+   return {...current,sourceLines:current.lines,lines:current.lines.filter(l=>visible.has(l.id))};
+  }).filter(Boolean);
   if($('tk-completion-finish'))updateSelection();
  }
  function focusReview(){const title=$('completion-photos-title');title.tabIndex=-1;title.focus({preventScroll:true});title.closest('.packing-modal-card').scrollTop=0;}

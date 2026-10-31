@@ -42,11 +42,52 @@
   const last=data?.[0];$('tk-last-import').textContent=last?'Last import '+date(last.imported_at):'No imports yet';
   status(last?.source==='api'?`Latest TikTok API update: ${date(last.imported_at)}. Automatic sync runs on the server.`:last?`Latest export: ${date(last.snapshot_at)}. Imports are snapshots; refresh from TikTok to update shipping status.`:'Import your first TikTok export to begin.');
  }
- function groups(){return queue.select(state.orders,{history:historyView,cancelledOnly:cancellationView,term:$('tk-search').value,stage:$('tk-stage-filter').value,work:$('tk-work-filter').value,due:state.due,purchase:$('tk-purchase-date').value,sort:$('tk-sort').value});}
+ const contextBuyers=new Set(), collapsedMatches=new Set();
+ const workKeys={ready:'ready',waiting:'waiting',cgl:'cgl',missing_watch:'missing',cancel:'cancel',missing:'not_found',watches:'watches',no_tracking:'no_tracking'};
+ function options(){
+  const search=$('tk-search').value.trim(), exact=state.orders.some(o=>o.order_number===search);
+  return {history:historyView,cancelledOnly:cancellationView,term:exact?search:(window.OGTrackingSearch?.needle(search)||search),stage:$('tk-stage-filter').value,work:$('tk-work-filter').value,due:state.due,purchase:$('tk-purchase-date').value,sort:$('tk-sort').value,buyerHistory:$('tk-buyer-history').value};
+ }
+ function groups(){const opts=options();return !historyView||cancellationView&&opts.work==='cancel'?queue.pendingGroups(state.orders,opts):queue.select(state.orders,opts);}
+ const narrowWork=()=>!historyView&&queue.lineWork($('tk-work-filter').value);
+ function summary(gs){
+  const f=queue.financials(gs);
+  return {orders:f.orders,buyers:f.buyers,lines:f.lines,units:f.units,amounts:f.lines?{USD:{sales:f.sales/100,shipping:f.shipping/100,fees:f.fees/100,actual:f.actual,estimated:f.est,unknown_sales:f.missingPrice,unknown_ship:f.missingShip,unknown_fees:f.missingFee}}:{}};
+ }
+ function renderPendingCards(visible){
+  for(const id of ['tk-money-cards','tk-money-notes','tk-selection-totals','tk-extra-filters'])$(id).hidden=historyView;
+  $('tk-summary').hidden=!historyView;
+  if(historyView)return;
+  const checked=state.orders.reduce((latest,o)=>o.finance_checked_at&&(!latest||o.finance_checked_at>latest.finance_checked_at)?o:latest,null);
+  $('tk-fee-source').textContent=checked?(checked.finance_scope?'This shop has authorized TikTok Finance.':'This shop has authorized order access. Actual statements require TikTok Finance access.'):'';
+  const opts=options(),facets={};
+  const dates=opts.due==='all'?visible:queue.pendingGroups(state.orders,{...opts,due:'all'});
+  facets['due:all']=summary(dates);
+  for(const k of ['overdue','today','tomorrow','unknown'])facets['due:'+k]=summary(dates.filter(g=>k==='unknown'?g.whole.unknown:g.urgency.level===k));
+  for(const [key,work] of Object.entries(workKeys))facets['work:'+key]=summary(work===opts.work?visible:queue.pendingGroups(state.orders,{...opts,work}));
+  window.PendingQueueCards.render($('tk-money-cards'),facets,state.due,Object.keys(workKeys).find(k=>workKeys[k]===opts.work)||'all');
+  window.PendingQueueCards.shown($('tk-selection-totals'),summary(visible));
+ }
+ function setWork(key){
+  $('tk-work-filter').value=key;
+  if(key==='cancel'){
+   historyView=true;cancellationView=true;const url=new URL(location.href);url.searchParams.set('view','cancellations');history.replaceState(null,'',url);updateView();marketplaceNavigation();
+  }
+  resetContext();render();
+ }
+ function resetContext(){contextBuyers.clear();collapsedMatches.clear();}
+ function packingOrders(key){return narrowWork()?groups().find(g=>g.key===key)?.orders||[]:state.orders.filter(o=>o.buyer_username.toLowerCase()===key&&inView(o));}
+ $('tk-money-cards').onclick=e=>{
+  const b=e.target.closest('[data-mq-key]');if(!b)return;
+  if(b.dataset.mqType==='due'){state.due=state.due===b.dataset.mqKey?'all':b.dataset.mqKey;resetContext();render();}
+  else{const work=workKeys[b.dataset.mqKey];setWork($('tk-work-filter').value===work?'':work);}
+ };
+ $('tk-buyer-history').onchange=()=>{resetContext();render();};
+ $('tk-reset-queue').onclick=()=>{for(const id of ['tk-work-filter','tk-search','tk-stage-filter','tk-purchase-date'])$(id).value='';$('tk-buyer-history').value='all';$('tk-sort').value='oldest';state.due='all';resetContext();render();};
  function filtered(){return groups().flatMap(g=>g.orders);}
- function toggleBuyer(key){if(state.expanded.has(key))state.expanded.delete(key);else state.expanded.add(key);render();}
+ function toggleBuyer(key){if(narrowWork()){if(collapsedMatches.has(key))collapsedMatches.delete(key);else collapsedMatches.add(key);}else if(state.expanded.has(key))state.expanded.delete(key);else state.expanded.add(key);render();}
  function createLabelButton(key){
-  if(historyView)return '';
+  if(historyView||narrowWork())return '';
   const orders=window.TikTokShipping.buyerOrders(state.orders,key);if(!orders.length)return '';
   return `<button type="button" class="tk-card-button tk-label-create" data-create-labels="${esc(key)}">${esc(window.TikTokShipping.actionLabel(orders))}</button>`;
  }
@@ -54,7 +95,7 @@
   const visible=new Set(groups().filter(g=>window.TikTokShipping.buyerOrders(state.orders,g.key).length).map(g=>g.key));
   for(const key of state.labelBuyers)if(!visible.has(key))state.labelBuyers.delete(key);
   const count=[...state.labelBuyers].reduce((n,key)=>n+window.TikTokShipping.buyerOrders(state.orders,key).length,0);
-  $('tk-label-batch').hidden=historyView;
+  $('tk-label-batch').hidden=historyView||narrowWork();
   $('tk-create-labels').disabled=!count;$('tk-create-labels').textContent=`Create / get shipping labels${count?' ('+count+')':''}`;
   $('tk-label-selection').textContent=count?`${state.labelBuyers.size} buyers · ${count} orders selected`:'Select buyers for a bulk label batch (up to 50 orders).';
   for(const box of $('tk-orders').querySelectorAll('[data-label-buyer]'))box.checked=state.labelBuyers.has(box.dataset.labelBuyer);
@@ -80,7 +121,7 @@
    history.replaceState(null,'',url);updateView();marketplaceNavigation();
   }
   // A saved capture must stay visible even when the queue was filtered to another buyer.
-  if(!filtered().some(o=>o.id===id)){$('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';}
+  if(!filtered().some(o=>o.id===id&&o.lines.some(l=>l.id===lineId))){$('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';$('tk-buyer-history').value='all';resetContext();}
   state.expanded.add(order.buyer_username.toLowerCase());
   for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
   render();
@@ -113,16 +154,17 @@
   </article>`;
  }
  function buyerCard(g,index){
-  const open=state.expanded.has(g.key),u=g.urgency,urgencyClass=historyView?'':u.level==='today'?'is-due-today':u.level==='tomorrow'?'is-due-tomorrow':u.level==='overdue'?'is-overdue':'';
-  const names=[...new Set(g.orders.map(queue.customerName))].join(' · '),canLabel=!historyView&&window.TikTokShipping.buyerOrders(state.orders,g.key).length;
+  const narrow=narrowWork(), context=narrow&&contextBuyers.has(g.key), displayed=context?g.whole:g, open=narrow?!collapsedMatches.has(g.key):state.expanded.has(g.key),u=g.urgency,urgencyClass=historyView?'':u.level==='today'?'is-due-today':u.level==='tomorrow'?'is-due-tomorrow':u.level==='overdue'?'is-overdue':'';
+  const matchedMoney=narrow?summary([g]).amounts.USD:null;
+  const names=[...new Set(g.orders.map(queue.customerName))].join(' · '),canLabel=!historyView&&!narrow&&window.TikTokShipping.buyerOrders(state.orders,g.key).length;
   return `<section class="tk-buyer buyer-order-card ${open?'is-expanded':'is-collapsed'} ${urgencyClass} ${historyView&&g.orders.some(queue.hasCancellation)?'has-cancellation':''} ${index%2?'is-alt-group':''}" data-buyer-key="${esc(g.key)}">
    <div class="tk-buyer-header"><div class="tk-buyer-identity">${canLabel?`<label class="tk-label-select"><input type="checkbox" data-label-buyer="${esc(g.key)}" aria-label="Select ${esc(g.buyer)} for shipping labels"><span class="tk-sr-only">Select for labels</span></label>`:''}<span class="tk-buyer-avatar" aria-hidden="true">${esc(g.buyer.slice(0,2).toUpperCase())}</span><div class="tk-buyer-name"><span class="tk-buyer-customer"><small>Customer</small><strong>${esc(names)}</strong></span><span class="tk-section-label">TikTok username</span><button type="button" class="buyer-card-buyer-name" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}">${esc(g.buyer)}</button><span class="buyer-card-compact-count">${g.orders.length} ${g.orders.length===1?'order':'orders'} · ${g.quantity} ${g.quantity===1?'item':'items'}</span></div></div>
-    <div class="tk-buyer-overview">${historyView?window.TikTokCancellations?.summary(g)||'':''}${historyView?'':`<span class="tk-buyer-due tk-date ${u.level}">${esc(u.label)}</span>`}${g.waiting&&!cancellationView?`<span class="tk-stage waiting">${g.waiting} waiting</span>`:''}<span class="buyer-card-value">${money(g.total)}</span><button type="button" class="tk-card-button tk-expand-button" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}"><span>${open?'Hide':'Open'}</span>${cardIcon('chevron')}</button></div></div>
+    <div class="tk-buyer-overview">${historyView?window.TikTokCancellations?.summary(g)||'':''}${historyView?'':`<span class="tk-buyer-due tk-date ${u.level}">${esc(u.label)}</span>`}${g.waiting&&!cancellationView?`<span class="tk-stage waiting">${g.waiting} waiting</span>`:''}<span class="buyer-card-value">${narrow?(matchedMoney.unknown_sales?'Item value incomplete':money(matchedMoney.sales)+' item sales'):money(g.total)}</span><button type="button" class="tk-card-button tk-expand-button" data-expand="${esc(g.key)}" aria-expanded="${open}" aria-controls="tk-lines-${index}"><span>${open?'Hide':'Open'}</span>${cardIcon('chevron')}</button></div></div>
    <div class="buyer-card-meta tk-buyer-meta"><span>Placed ${esc(placed(g))}</span><button type="button" class="tk-text-action" data-buyer-tool="dates" data-buyer="${esc(g.key)}">${g.shipBy?'Ship by '+esc(queue.shortDate(g.shipBy)):'Set shipping date'}${g.unknown&&g.shipBy?` · ${g.unknown} dates needed`:''}</button><span class="${g.labelCount?'tk-label-saved':'tk-label-missing'}">${g.labelCount?`${g.labelCount}/${g.orders.length} orders with labels`:'No labels saved'}</span>${window.TikTokWork?.summary(g)||''}</div>
    <div class="tk-buyer-workflow"><div class="tk-workflow-group"><span class="tk-section-label">Order actions</span><div><a class="tk-card-button" data-tk-chat-orders="${esc(g.orders.map(o=>o.id).join(','))}" href="tiktok-messages.html?order=${encodeURIComponent(g.orders[0].id)}">Buyer chat & reply</a><button type="button" class="tk-card-button tk-create-task" data-tk-task-buyer="${esc(g.key)}">Create task</button>${historyView&&!cancellationView?'':window.TikTokCancellations?.groupButton(g,cancellationView)||''}</div></div><div class="tk-workflow-group"><span class="tk-section-label">Shipping</span><div>${createLabelButton(g.key)}<button type="button" class="tk-card-button" data-buyer-tool="labels" data-buyer="${esc(g.key)}">Shipping labels</button></div></div><div class="tk-workflow-group tk-packing-actions" ${cancellationView?'hidden':''}><span class="tk-section-label">${historyView?'Order evidence':'Packing'}</span><div><button type="button" class="tk-card-button" data-tiktok-phone="${esc(g.key)}">${cardIcon('phone')}Use my phone</button><button type="button" class="tk-card-button tk-complete-button" data-tiktok-finish="${esc(g.key)}">${cardIcon('check')}${historyView?'Completion photos':'Complete order'}</button></div></div>
     <details class="tk-card-tools"><summary>${cardIcon('tools')}<span>Order tools</span></summary><div class="tk-tools-list">${receiptAction(g)}<button type="button" data-buyer-packet="${esc(g.key)}">Buyer packet PDF</button><button type="button" data-buyer-tool="dates" data-buyer="${esc(g.key)}">Shipping dates</button><button type="button" data-buyer-tool="preparation" data-buyer="${esc(g.key)}">Preparation &amp; notes</button></div></details>
    </div>
-   ${open?`<div class="buyer-card-expanded" id="tk-lines-${index}"><div class="tk-items-heading"><h3>${historyView?'Order items':'Items to prepare'}</h3><span>${g.lines.length} ${g.lines.length===1?'line':'lines'}</span></div><div class="buyer-line-list">${g.orders.map(orderRow).join('')}</div></div>`:`<div id="tk-lines-${index}" hidden></div>`}
+   ${open?`<div class="buyer-card-expanded" id="tk-lines-${index}"><div class="tk-items-heading"><h3>${historyView?'Order items':'Items to prepare'}</h3><span>${displayed.lines.length} ${displayed.lines.length===1?'line':'lines'}</span>${narrow&&g.whole.lines.length>g.lines.length?`<button type="button" class="tk-card-button" data-context="${esc(g.key)}">${context?'Show matching lines':'Show buyer’s other open items'}</button>`:''}</div><div class="buyer-line-list">${displayed.orders.map(orderRow).join('')}</div></div>`:`<div id="tk-lines-${index}" hidden></div>`}
   </section>`;
  }
  function render(){
@@ -132,6 +174,7 @@
   $('tk-cancellation-toggle').classList.toggle('has-cancellations',cancellationCount>0);
   $('tk-clear-purchase-date').hidden=!$('tk-purchase-date').value;
   const all=queue.select(state.orders,viewOptions()),visible=groups(),list=visible.flatMap(g=>g.orders);
+  renderPendingCards(visible);
   const total=all.reduce((n,g)=>n+g.orders.length,0),items=all.reduce((n,g)=>n+g.quantity,0),unknown=all.reduce((n,g)=>n+g.unknown,0);
   const tile=(title,count,help,filter='',tone='')=>`<div class="summary-urgency ${tone}"><button type="button" class="tk-summary-button" ${filter?`data-tk-due="${filter}" aria-pressed="${state.due===filter}"`:''}><span>${title}</span><strong>${count}</strong><small>${help}</small></button></div>`;
   $('tk-summary').innerHTML=tile(cancellationView?'Cancellations':historyView?'TikTok history':'Open queue',`${total} orders`,`${items} items · ${all.length} buyer groups`,'all')+(historyView?tile('Buyers',all.length,'TikTok only')+tile('Items',items,'Saved order items'):['overdue','today','tomorrow'].map((level,i)=>{const g=all.filter(g=>g.urgency.level===level);return tile(['Overdue','Due today','Due tomorrow'][i],`${g.length} groups`,`${g.reduce((n,g)=>n+g.orders.length,0)} orders · ${g.filter(g=>g.waiting).length} waiting`,level,'is-'+level);}).join('')+tile('Date needed',`${unknown} orders`,'Verify the ship-by date in TikTok','unknown','is-unknown'))+(cancellationView?'':tile('Waiting',`${all.filter(g=>g.waiting).length} groups`,`${all.reduce((n,g)=>n+g.waiting,0)} orders`));
@@ -140,6 +183,7 @@
   document.querySelectorAll('[data-tk-due]').forEach(b=>{b.setAttribute('aria-pressed',String(state.due===b.dataset.tkDue));b.onclick=()=>{state.due=b.dataset.tkDue;render();};});
   if(!cancellationView){const waitingButton=$('tk-summary').lastElementChild.querySelector('button');waitingButton.setAttribute('aria-pressed',String($('tk-work-filter').value==='waiting'));waitingButton.onclick=()=>{$('tk-work-filter').value=$('tk-work-filter').value==='waiting'?'':'waiting';state.due='all';render();};}
   $('tk-orders').innerHTML=visible.length?visible.map(buyerCard).join(''):`<div class="tk-empty">${state.orders.length?'No TikTok orders match this view.':'No TikTok orders imported yet.'}</div>`;
+  $('tk-orders').querySelectorAll('[data-context]').forEach(b=>b.onclick=()=>{const k=b.dataset.context;if(contextBuyers.has(k))contextBuyers.delete(k);else contextBuyers.add(k);render();});
   $('tk-orders').querySelectorAll('[data-expand]').forEach(b=>b.onclick=()=>toggleBuyer(b.dataset.expand));
   $('tk-orders').querySelectorAll('[data-buyer-key]').forEach(card=>card.onclick=event=>{
    if(event.target.closest('button,a,input,label,select,textarea,[contenteditable],details,summary,.tk-buyer-workflow,.buyer-card-expanded'))return;
@@ -150,9 +194,9 @@
   $('tk-orders').querySelectorAll('[data-create-labels]').forEach(b=>b.onclick=()=>busy(()=>openLabels([b.dataset.createLabels])));
   $('tk-orders').querySelectorAll('[data-label-buyer]').forEach(b=>b.onchange=()=>{if(b.checked)state.labelBuyers.add(b.dataset.labelBuyer);else state.labelBuyers.delete(b.dataset.labelBuyer);updateLabelSelection();});
   updateLabelSelection();
-  $('tk-orders').querySelectorAll('[data-tiktok-finish]').forEach(b=>b.onclick=()=>window.TikTokFulfillment.open(state.orders.filter(o=>o.buyer_username.toLowerCase()===b.dataset.tiktokFinish&&inView(o))));
+  $('tk-orders').querySelectorAll('[data-tiktok-finish]').forEach(b=>b.onclick=()=>window.TikTokFulfillment.open(packingOrders(b.dataset.tiktokFinish)));
   bindLineCompletion($('tk-orders'));
-  $('tk-orders').querySelectorAll('[data-tiktok-phone]').forEach(b=>b.onclick=()=>window.TikTokFulfillment.phone(state.orders.filter(o=>o.buyer_username.toLowerCase()===b.dataset.tiktokPhone&&inView(o))));
+  $('tk-orders').querySelectorAll('[data-tiktok-phone]').forEach(b=>b.onclick=()=>window.TikTokFulfillment.phone(packingOrders(b.dataset.tiktokPhone)));
   $('tk-orders').querySelectorAll('[data-buyer-tool]').forEach(b=>b.onclick=()=>busy(()=>buyerTools(b.dataset.buyer,b.dataset.buyerTool)));
   $('tk-orders').querySelectorAll('[data-buyer-packet]').forEach(b=>b.onclick=()=>busy(()=>packet(list.filter(o=>o.buyer_username.toLowerCase()===b.dataset.buyerPacket))));
   window.TikTokOrderChats?.rendered();
@@ -163,7 +207,18 @@
  $('tk-create-labels').onclick=()=>busy(()=>openLabels([...state.labelBuyers]));
  $('tk-select-labels').onclick=()=>{for(const g of groups())if(window.TikTokShipping.buyerOrders(state.orders,g.key).length)state.labelBuyers.add(g.key);updateLabelSelection();};
  $('tk-clear-labels').onclick=()=>{state.labelBuyers.clear();updateLabelSelection();};
- function bindLineCompletion(root){root.querySelectorAll('[data-tk-line-finish]').forEach(b=>b.onclick=()=>{const order=state.orders.find(o=>o.id===b.dataset.tkLineFinish);if(order){if($('tk-detail').open)$('tk-detail').close();window.TikTokFulfillment.open(state.orders.filter(o=>o.buyer_username.toLowerCase()===order.buyer_username.toLowerCase()&&inView(o)));}});}
+ function bindLineCompletion(root){
+  root.querySelectorAll('[data-tk-line-finish]').forEach(button=>button.onclick=()=>{
+   const order=state.orders.find(o=>o.id===button.dataset.tkLineFinish);
+   if(!order)return;
+   if($('tk-detail').open)$('tk-detail').close();
+   if(narrowWork()){
+    const id=button.closest('[data-tiktok-line]')?.dataset.tiktokLine;
+    const lines=order.lines.filter(l=>l.id===id);
+    if(lines.length)window.TikTokFulfillment.open([{...order,sourceLines:order.lines,lines}]);
+   }else window.TikTokFulfillment.open(packingOrders(order.buyer_username.toLowerCase()));
+  });
+ }
  function bindOrderButtons(root){root.querySelectorAll('[data-order]').forEach(b=>b.onclick=()=>busy(async()=>{if($('tk-buyer-tools').open)$('tk-buyer-tools').close();await detail(b.dataset.order,b.dataset.section);}));}
  async function previewDocument(d){const {data,error}=await db.storage.from('ebay-labels').createSignedUrl(d.path,120);if(error)throw error;const a=document.createElement('a');a.href=data.signedUrl;a.target='_blank';a.rel='noopener';a.click();}
  async function buyerTools(key,tool){
@@ -221,14 +276,14 @@
   $('tk-docs').querySelectorAll('[data-doc-preview]').forEach(b=>b.onclick=()=>busy(async()=>{const d=docs.data.find(x=>x.id===b.dataset.docPreview),{data,error}=await db.storage.from('ebay-labels').createSignedUrl(d.path,120);if(error)throw error;const a=document.createElement('a');a.href=data.signedUrl;a.target='_blank';a.rel='noopener';a.click();}));
  }
  function exportView(){const list=filtered().map(o=>({...o,lines:viewLines(o)}));if(!list.length)throw Error('No orders in this view.');const quote=v=>'"'+String(v??'').replace(/^\s*[=+@-]/,"'$&").replaceAll('"','""')+'"';const data=[['Marketplace','Order ID','Buyer Username','TikTok Status','TikTok Substatus','OG Stage','SKU ID','Seller SKU','Product','Quantity','Package ID','Tracking ID','Ship By','Notes','Export Snapshot','Item Search','Watch','Watch Missing','CGL Required','CGL Confirmed','Pending Cancellation','Inventory Barcode','Inventory Linked Qty','Inventory Deducted Qty']];for(const o of list)for(const l of o.lines)data.push(['TikTok',o.order_number,o.buyer_username,o.marketplace_status,o.marketplace_substatus,o.stage,l.sku_id,l.seller_sku,l.title,l.quantity,l.package_id,l.tracking_number,o.ship_by_date,o.notes,o.source_snapshot_at,l.work?.item_search,l.work?.is_watch,l.work?.watch_missing,l.work?.cgl_required,Boolean(l.work?.certificate_id),o.cancellation?.pending,l.inventory?.display_snapshot?.barcode,l.inventory?.quantity,l.inventory?.consumed_quantity]);download('\uFEFF'+data.map(r=>r.map(quote).join(',')).join('\r\n'),'OG-TikTok-'+(historyView?'history':'pending')+'.csv','text/csv');status('Exported this TikTok view. This tracking export is not a TikTok import file.');}
- $('tk-close-detail').onclick=()=>$('tk-detail').close();$('tk-close-buyer-tools').onclick=()=>$('tk-buyer-tools').close();$('tk-search').oninput=render;$('tk-stage-filter').onchange=render;$('tk-work-filter').onchange=render;$('tk-sort').onchange=render;$('tk-phone-refresh').onclick=()=>busy(refresh);
+ $('tk-close-detail').onclick=()=>$('tk-detail').close();$('tk-close-buyer-tools').onclick=()=>$('tk-buyer-tools').close();$('tk-search').oninput=render;$('tk-stage-filter').onchange=render;$('tk-work-filter').onchange=()=>setWork($('tk-work-filter').value);$('tk-sort').onchange=render;$('tk-phone-refresh').onclick=()=>busy(refresh);
  $('tk-refresh').onclick=()=>busy(refresh);$('tk-packet').onclick=()=>busy(()=>packet(filtered()));$('tk-export').onclick=()=>busy(exportView);
  $('tk-file').onchange=()=>busy(async()=>{const f=$('tk-file').files[0];if(!f)return;if(f.size>adapter.MAX_BYTES)throw Error('Choose a CSV smaller than 10 MB.');await preview(await f.text(),f.name,{modifiedAt:f.lastModified});});
  $('tk-import-confirm').onclick=()=>busy(confirmImport);$('tk-import-cancel').onclick=discard;
  $('tk-cancellation-toggle').onclick=()=>{
   cancellationView=!cancellationView;historyView=cancellationView;
   // Open the entire cancellation queue, even when packing was filtered to another buyer or date.
-  $('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';state.labelBuyers.clear();
+  $('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';$('tk-buyer-history').value='all';resetContext();state.labelBuyers.clear();
   const url=new URL(location.href);url.searchParams.delete('buyer');
   if(cancellationView)url.searchParams.set('view','cancellations');else url.searchParams.delete('view');
   history.replaceState(null,'',url);updateView();marketplaceNavigation();render();
@@ -237,7 +292,7 @@
   $('tk-cancellation-toggle').setAttribute('aria-pressed',String(cancellationView));
   $('tk-cancellation-toggle').classList.toggle('is-active',cancellationView);
   $('tk-cancellation-toggle').title=cancellationView?'Return to pending orders':'Show all orders and items awaiting cancellation';
-  $('tk-work-filter').querySelector('[value=cancel]').hidden=true;
+  $('tk-work-filter').querySelector('[value=cancel]').hidden=historyView;
   document.body.classList.toggle('tiktok-cancelled-view',cancellationView);$('tk-title').textContent=cancellationView?'TikTok Cancellations':historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-greeting').textContent=$('tk-title').textContent;$('tk-phone-title').textContent=cancellationView?'Cancellations':historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=cancellationView?'Cancellations':historyView?'TikTok order history':'Orders to Pack';document.querySelector('.buyer-due-filters').hidden=historyView;
   $('tk-cancelled-link').removeAttribute('aria-current');$('tk-history-link').removeAttribute('aria-current');$('tk-pending-link').removeAttribute('aria-current');$(cancellationView?'tk-cancelled-link':historyView?'tk-history-link':'tk-pending-link').setAttribute('aria-current','page');$('ebay-tab').href=historyView?'ebay-order-history.html':'pending-orders.html';
  }

@@ -53,3 +53,21 @@ test('HTTP client permits only the two read APIs, sends seller token in header, 
  await assert.rejects(api.read('/product/202309/products','private'),/Unsupported/);
  await assert.rejects(api.read(ORDER_PATH,'private',{page_size:'50'},{}),error=>error.message==='TikTok request failed (123; request ABC123).');
 });
+
+import {checkoutFacts,statementCharge,unsettledFees} from '../supabase/functions/tiktok-order-sync/queue-money.ts';
+test('checkout basis excludes tax, includes platform discount, and only complete order statements replace estimates',()=>{
+ assert.deepEqual(checkoutFacts({currency:'USD',total_amount:'42.50',tax:'2.50',platform_discount:'5.00',shipping_fee:'3.25'}),{buyer_shipping:3.25,referral_basis:45});
+ assert.deepEqual(checkoutFacts({currency:'USD'}),{buyer_shipping:null,referral_basis:null});
+ const data={order_id:'123',currency:'USD',total_count:1,fee_and_tax_amount:'-2.19',sku_transactions:[{sku_id:'sku',quantity:2,statement_id:'stmt'}]};
+ assert.equal(statementCharge(data,'123',[{sku_id:'sku',quantity:2}]),2.19);
+ assert.equal(statementCharge(data,'456',[{sku_id:'sku',quantity:2}]),null);
+ assert.equal(statementCharge(data,'123',[{sku_id:'sku',quantity:3}]),null);
+ assert.equal(statementCharge({...data,total_count:2},'123',[{sku_id:'sku',quantity:2}]),null);
+});
+
+test('unsettled fee lookups omit adjustments, incomplete pages, and ambiguous transactions',()=>{
+ const row={order_id:'123',status:'UNSETTLED',type:'ORDER',currency:'USD',est_fee_tax_amount:'-1.20'};
+ assert.equal(unsettledFees({transactions:[row,{...row,type:'CHARGE_BACK'}],total_count:2}).get('123'),1.2);
+ assert.equal(unsettledFees({transactions:[row,row],total_count:2}).get('123'),null);
+ assert.equal(unsettledFees({transactions:[row],total_count:3,next_page_token:'more'}).size,0);
+});
