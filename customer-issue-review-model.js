@@ -9,6 +9,36 @@
  const outcomes={against_us:'Decided against us',final:'Finalized on eBay',open:'Open on eBay',escalated:'Escalated to a case',unfinished:'Follow-up / refund / appeal unfinished',unknown:'Outcome needs verification'};
  function providerHistory(c){const d=c.raw_payload?.ebayDetail||{};if(c.source_lane==='inquiry'&&String(d.inquiryId)===String(c.ebay_return_id))return d.inquiryHistoryDetails?.history||[];if(c.source_lane==='case'&&String(d.caseId)===String(c.ebay_return_id))return d.caseHistoryDetails?.history||[];return null;}
  function amount(v){if(v?.value==null||!Number.isFinite(Number(v.value)))return '';try{return new Intl.NumberFormat('en-US',{style:'currency',currency:v.currency||'USD'}).format(Number(v.value));}catch{return '';}}
+ function orderDestination(order={}){
+  const raw=order.raw_payload||{},row=raw.first_row||{},text=v=>typeof v==='string'?v.trim():'';
+  const imported={fullName:row['Ship To Name'],contactAddress:{addressLine1:row['Ship To Address 1'],addressLine2:row['Ship To Address 2'],city:row['Ship To City'],stateOrProvince:row['Ship To State'],postalCode:row['Ship To Zip'],countryCode:row['Ship To Country']}};
+  const candidates=[
+   {ship:raw.order?.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo,source:'Saved eBay order'},
+   {ship:raw.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo,source:'Saved eBay order'},
+   {ship:imported,source:'Imported order shipping address'}
+  ];
+  // Use a single order destination snapshot. A buyer profile or billing address
+  // is not evidence of where this purchase was supposed to be shipped.
+  const fields=['addressLine1','addressLine2','city','stateOrProvince','postalCode','countryCode'];
+  const chosen=candidates.find(c=>fields.some(k=>text(c.ship?.contactAddress?.[k]))),a=chosen?.ship.contactAddress||{};
+  const locality=[text(a.city),[text(a.stateOrProvince),text(a.postalCode)].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return {orderId:order.id,orderNumber:order.order_number||'Not linked',recipient:text(chosen?.ship.fullName),addressLines:[text(a.addressLine1),text(a.addressLine2),locality,text(a.countryCode)].filter(Boolean),source:chosen?.source||''};
+ }
+ function shipmentPhotoOrders(members){
+  const result=new Map(),key=p=>`${p.bucket||p.storage_bucket}/${p.path||p.storage_path}`;
+  for(const m of members){
+   const orders=m.orders||[],lines=m.lines||[];
+   const add=(photos,scope={})=>{
+    const ids=scope.order_line_ids?.length?lines.filter(l=>scope.order_line_ids.includes(l.id)).map(l=>l.order_id):scope.order_ids;
+    const linked=orders.filter(o=>!Array.isArray(ids)||ids.includes(o.id)).map(orderDestination);
+    for(const p of photos||[])result.set(key(p),unique([...(result.get(key(p))||[]),...linked],o=>o.orderId||o.orderNumber));
+   };
+   for(const e of m.completion_events||[])add(e.photo_attachments,e);
+   // Packaging evidence is already scoped to this member's exact order by the RPC.
+   add(m.packaging_photos);
+  }
+  return result;
+ }
  function currentCaseStages(members){
   const cases=members.filter(m=>m.case.source_lane==='case');
   const successor=m=>cases.find(next=>m.case.ebay_return_id&&(
@@ -20,12 +50,14 @@
   const buyer=root.OGBuyerReport,evidence=root.OGIssueEvidence,members=packet.members||[],records=members.map(m=>m.case),orders=unique(members.flatMap(m=>m.orders||[])),lines=unique(members.flatMap(m=>m.lines||[]));
   const primary=records.find(c=>c.source_lane==='case')||records.find(c=>c.id===entry.case_id)||records[0]||{},orderMap=new Map(orders.map(o=>[o.id,o]));
   const historyUrl=new URL(`ebay-returns.html?caseId=${encodeURIComponent(entry.case_id)}`,baseUrl).href;
-  const events=members.flatMap(m=>m.reference_events||[]),items=lines.map(l=>{const o=orderMap.get(l.order_id)||{},photos=buyer.photosForLine(l,events);return {id:l.id,title:l.item_title||primary.item_title||'Item title not recorded',item:l.item_number,orderId:o.id,orderNumber:o.order_number||primary.order_number,quantity:l.quantity,price:buyer.itemPrice(l),purchased:buyer.purchaseDate(o),state:nice(l.line_status||o.status),photos,videoUrl:buyer.savedReceiptUrl(l,o,photos,events),orderUrl:o.order_number?`https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(o.order_number)}`:'',historyUrl};});
+  const events=members.flatMap(m=>m.reference_events||[]),items=lines.map(l=>{const o=orderMap.get(l.order_id)||{},photos=buyer.photosForLine(l,events);return {id:l.id,title:l.item_title||primary.item_title||'Item title not recorded',item:l.item_number,orderId:o.id,orderNumber:o.order_number||primary.order_number,destination:orderDestination({...o,order_number:o.order_number||primary.order_number}),quantity:l.quantity,price:buyer.itemPrice(l),purchased:buyer.purchaseDate(o),state:nice(l.line_status||o.status),photos,videoUrl:buyer.savedReceiptUrl(l,o,photos,events),orderUrl:o.order_number?`https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(o.order_number)}`:'',historyUrl};});
   const files=unique(members.flatMap(m=>evidence.collect({...m,completion_events:(m.completion_events||[]).map(e=>({...e,photo_attachments:(e.photo_attachments||[]).map(p=>({...p,created_at:p.created_at||e.created_at}))}))},items.flatMap(i=>i.photos),[])),f=>`${f.bucket}/${f.path}`);
   // Preserve crop metadata for item screenshots while retaining the original
   // evidence in Invsto. Shipment photos are always shown uncropped.
   const photoMap=new Map(items.flatMap(i=>i.photos).map(p=>[`${p.bucket}/${p.path}`,p]));
   for(const f of files)if(f.group==='item')Object.assign(f,{metadata:photoMap.get(`${f.bucket}/${f.path}`)?.metadata});
+  const destinations=shipmentPhotoOrders(members);
+  for(const f of files)if(['completion','packaging'].includes(f.group))f.shippingOrders=destinations.get(`${f.bucket}/${f.path}`)||[];
   const messages=unique(members.flatMap(m=>evidence.conversation({...m,case_history:providerHistory(m.case)||m.case_history||[]}).map(e=>({...e,caseNumber:m.case.ebay_return_id}))),e=>JSON.stringify([e.direction,e.message_body,e.sent_at,e.channel==='Buyer chat'?'buyer':e.caseNumber]));
   const timeline=[];const add=(at,title,body,source,actor='',internal=false)=>timeline.push({at,title,body:String(body||''),source,actor,internal,date:date(at)});
   for(const o of orders){add(o.sale_date,'Order purchased',`Order ${o.order_number} · ${buyer.purchaseDate(o)}`,'Saved order');if(o.shipped_on_date)add(o.shipped_on_date,'Shipment date recorded',`Order ${o.order_number}. This is the saved shipment date.`,'Saved order');}
@@ -46,5 +78,5 @@
   if(!messages.length)warnings.push('No written exchanges are saved for these case / order references.');
   return {id:entry.case_id,review:{...entry,...packet.review},buyer:primary.buyer_username||'Buyer not recorded',name:orders.map(o=>o.buyer_name).find(Boolean)||'',title:primary.item_title||items[0]?.title||'Item title not recorded',orderNumbers:[...new Set([...orders.map(o=>o.order_number),...records.map(c=>c.order_number)].filter(Boolean))],historyUrl,items,files,timeline:chronological,statuses,tracking,warnings,messages:messages.length,against:statuses.some(s=>s.outcome==='against_us'),members:records.length};
  }
- const api={esc,date,safe,nice,unique,caseUrl,outcomes,currentCaseStages,makeIssue};root.OGIssueReviewModel=api;if(typeof module!=='undefined')module.exports=api;
+ const api={esc,date,safe,nice,unique,caseUrl,outcomes,currentCaseStages,orderDestination,shipmentPhotoOrders,makeIssue};root.OGIssueReviewModel=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

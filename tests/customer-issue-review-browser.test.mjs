@@ -23,6 +23,11 @@ for(const width of [390,1366])test(`Review packet ${width}px: evidence, editable
  await viewer.getByRole('button',{name:'Next photograph',exact:true}).click();await expect(viewer.locator('#viewer-counter')).toHaveText('Photo 2 of 2');
  await page.screenshot({path:`test-results/customer-issues/review-photo-viewer-${width}.png`});
  await viewer.getByRole('button',{name:'Close photo viewer',exact:true}).click();await expect(viewer).not.toBeVisible();await expect(thumb).toBeFocused();
+ const proof=page.locator('.photo-grid figure').filter({has:page.locator('.ship-to')});await expect(proof).toHaveCount(1);
+ await expect(proof.locator('figcaption .ship-to')).toContainText('Order 21-12345-67890');await expect(proof.locator('address')).toHaveText('Ana María Fernández123 Example AvenueApartment 4BMiami, FL 33101-1234US');
+ await expect(proof.locator('.ship-to')).toContainText('Saved eBay order');await expect(page.locator('.item-row .ship-to')).toContainText('123 Example Avenue');
+ await expect(page.locator('#packet-report')).not.toContainText('WRONG PROFILE ADDRESS');await expect(page.locator('#packet-report')).not.toContainText('private@example.test');await expect(page.locator('#packet-report')).not.toContainText('555-0100');
+ await proof.screenshot({path:`test-results/customer-issues/review-proof-address-${width}.png`});
  await expect(page.locator('.tracking-card h3')).toHaveText('9400000000000000123456');await expect(page.locator('.tracking-card .pill')).toHaveText('Delivered');
  await page.getByText('Save or update carrier history',{exact:true}).click();await page.locator('textarea[name=history]').fill('Delivered, In/At Mailbox\nOctober 5, 2026 11:44 AM\nAll carrier scan events are retained.');await expect(page.locator('#download-packet')).toBeDisabled();
  await page.getByRole('button',{name:'Save tracking history',exact:true}).click();await expect(page.locator('.carrier-history')).toContainText('All carrier scan events are retained.');await expect(page.locator('#download-packet')).toBeEnabled();

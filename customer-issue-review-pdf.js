@@ -17,6 +17,20 @@
   async function ensure(h){if(y-h<74)await newPage();}
   async function write(s,size=10,font=0,fill=ink,gap=10){for(const line of wrap(s,532,size,font)){await ensure(size*1.45);await text(page,line,40,y,size,font,fill);y-=size*1.45;}y-=gap;}
   async function heading(label){await ensure(65);y-=8;await write(label,12,1,gold,14);}
+  function destinationRows(d){return [
+   ['ORDER SHIP-TO ADDRESS',8,1,gold,5],
+   [`Order ${d.orderNumber}`,10,1,ink,6],
+   [d.addressLines.length?[d.recipient,...d.addressLines].filter(Boolean).join('\n'):'Ship-to address not saved for this order.',10,0,ink,6],
+   ...(d.addressLines.length?[[`${d.source} / Intended shipping destination`,8,0,muted,0]]:[])
+  ];}
+  const destinationHeight=d=>20+destinationRows(d).reduce((h,[s,size,font,,gap])=>h+wrap(s,504,size,font).length*size*1.45+gap,0);
+  async function writeDestination(d){
+   const rows=destinationRows(d),height=destinationHeight(d);
+   if(height>570){for(const [s,size,font,fill,gap] of rows)await write(s,size,font,fill,gap);return;}
+   await ensure(height+10);rect(page,40,y-height+8,532,height,color('eaf0e7'));rect(page,40,y-height+8,3,height,gold);y-=4;
+   for(const [s,size,font,fill,gap] of rows){for(const line of wrap(s,504,size,font)){await text(page,line,54,y,size,font,fill);y-=size*1.45;}y-=gap;}
+   y-=26;
+  }
   async function url(label,value){if(!M.safe(value))return;await ensure(24);await text(page,label,40,y,9,1,color('235f64'));annot(page,[40,y-4,40+Math.min(532,width(label,9,1)),y+12],{A:{Type:'Action',S:'URI',URI:PDFString.of(value)}});y-=23;}
   async function jump(label,key,size=11){for(const line of wrap(label,532,size,1)){await ensure(size*1.5);await text(page,line,40,y,size,1);jumps.push({page,key,box:[40,y-4,40+Math.min(532,width(line,size,1)),y+size+2]});y-=size*1.5;}y-=8;}
   await newPage();dest.set('summary',page.ref);rect(page,0,478,612,256,ink);await text(page,'THE EBAY REVIEW COLLECTION',40,695,10,1,color('e6c88f'));await text(page,'The evidence.',40,636,40,2,white);await text(page,'Our position.',40,586,40,2,color('e6c88f'));await text(page,'A case-by-case record prepared for review.',40,523,12,0,white);y=435;
@@ -36,7 +50,7 @@
    await heading('01 / CASE OUTCOMES');
    for(const s of i.statuses){await ensure(110);await write(`${s.lane} ${s.number} / ${s.label}`,12,1,s.outcome==='against_us'?rose:ink);await write(`eBay status: ${s.status}\nOutcome reason: ${s.reason}\nRefund status: ${s.refund}${s.claim?'\nClaim amount: '+s.claim:''}\nOpened: ${s.opened}\nResponse deadline: ${s.deadline}\nLast successful sync: ${s.synced}`,10,0,ink,9);await url('Open eBay case / original order',s.url);for(const prior of s.previous||[]){await write(`Earlier stage: ${prior.lane} ${prior.number}. This is the original request for the case above, not a separate case. Its opening date and exchanges remain in the timeline.`,9,0,muted);await write(`Saved request state: ${prior.label} / ${prior.status}\nRefund status: ${prior.refund}\nOpened: ${prior.opened} / Last synced: ${prior.synced}`,8,0,muted);await url('Open original request',prior.url);}}
    await heading('02 / ORIGINAL PURCHASE & SHIPMENT');
-   for(const item of i.items){await ensure(100);await write(item.title,12,1);await write(`${B.totalsFor([item])} / Quantity ${item.quantity}\nPurchased: ${item.purchased}\nOrder ${item.orderNumber} / Item ${item.item||'not recorded'}\nSystem state: ${item.state}`,10);await url('Open eBay order',item.orderUrl);await url(item.videoUrl?'Watch video receipt':'Find video receipt in eBay order',item.videoUrl||item.orderUrl);if(!item.videoUrl)await write('No direct video receipt URL is saved; use the order link to locate it.',8,0,muted);}
+   for(const item of i.items){await ensure(100);await write(item.title,12,1);await write(`${B.totalsFor([item])} / Quantity ${item.quantity}\nPurchased: ${item.purchased}\nOrder ${item.orderNumber} / Item ${item.item||'not recorded'}\nSystem state: ${item.state}`,10);await url('Open eBay order',item.orderUrl);await url(item.videoUrl?'Watch video receipt':'Find video receipt in eBay order',item.videoUrl||item.orderUrl);if(!item.videoUrl)await write('No direct video receipt URL is saved; use the order link to locate it.',8,0,muted);await writeDestination(item.destination);}
    if(!i.items.length)await write('No exact item lines are linked to this issue.',10,0,rose);
    for(const t of i.tracking){await heading(`${t.label} / ${t.carrier||'Carrier not recorded'} / ${t.code}`);await write(`${t.status}${t.statusSource?' / '+t.statusSource+' / Checked '+M.date(t.statusAt):''}`,11,1);await write(t.scopes.join('\n'),9,0,muted);await url('Open full carrier tracking history',t.url);await url('View this tracking in Order History',t.historyUrl);if(t.history){await write(`Carrier history saved by ${t.history.captured_by_name||'Team member'} / ${M.date(t.history.captured_at)}. Scan times below are shown as reported by the carrier.`,9,0,muted);await write(t.history.history_text,10);await url('Carrier history source',t.history.source_url);}else await write('The full carrier scan history is not saved in this packet. Open the carrier link to review it.',9,0,muted);for(const e of t.events){await write(`${M.date(e.at)} / ${e.title}\n${e.source}${e.body?' / '+e.body:''}`,9,0,muted);}}
    if(!i.tracking.length)await write('No tracking saved for this issue.',10,0,muted);
@@ -45,8 +59,9 @@
    await heading('03 / VISUAL EVIDENCE');
    if(!i.files.length)await write('No photos saved for these exact order lines or their shipment.',10,0,muted);
    for(const [idx,f] of i.files.entries()){
-    if(f.image){await ensure(390);await write(`Evidence ${idx+1} / ${niceGroup(f.group)}`,10,1,gold,6);const im=await pdf.embedJpg(f.image.crop);const fit=im.scale(Math.min(532/im.width,310/im.height));rect(page,40,y-318,532,318,white);page.drawImage(im,{x:40+(532-fit.width)/2,y:y-310+(310-fit.height)/2,width:fit.width,height:fit.height});y-=334;await write(f.label,10,1,ink,4);await write(`${M.date(f.created_at)}${f.image.cropped?' / Item crop; original retained in Invsto.':''}`,8,0,muted);}
+    if(f.image){const caption=`${M.date(f.created_at)}${f.image.cropped?' / Item crop; original retained in Invsto.':''}`,addressHeight=f.shippingOrders?.length?destinationHeight(f.shippingOrders[0])+10:0,captionHeight=wrap(f.label,532,10,1).length*14.5+wrap(caption,532,8).length*11.6+58,photoHeight=Math.max(140,Math.min(310,600-captionHeight-addressHeight-24));await ensure(Math.min(610,photoHeight+24+captionHeight+addressHeight));await write(`Evidence ${idx+1} / ${niceGroup(f.group)}`,10,1,gold,6);const im=await pdf.embedJpg(f.image.crop);const fit=im.scale(Math.min(532/im.width,photoHeight/im.height));rect(page,40,y-photoHeight-8,532,photoHeight+8,white);page.drawImage(im,{x:40+(532-fit.width)/2,y:y-photoHeight+(photoHeight-fit.height)/2,width:fit.width,height:fit.height});y-=photoHeight+24;await write(f.label,10,1,ink,4);await write(caption,8,0,muted);}
     else{await ensure(70);await write(`Evidence ${idx+1} / ${niceGroup(f.group)} / ${f.label}`,10,1);await write(f.video?'Video evidence saved; open the system record to view.':f.error||'Preview unavailable; open the system record.',9,0,muted);}
+    for(const d of f.shippingOrders||[])await writeDestination(d);
     await url('View original evidence in Invsto',i.historyUrl);
    }
    await heading('04 / TIMELINE & WRITTEN EXCHANGES');await write('Oldest to newest. Undated entries appear last. Source and author distinguish buyer messages, our replies, eBay activity and internal records.',9,0,muted);
