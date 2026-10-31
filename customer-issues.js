@@ -255,7 +255,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${view==='final_review'?'':customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${view==='final_review'?`<div class="issue-review-card-deadline">${reviewDeadline(c)}</div><p class="issue-review-card-submitted">Work finished ${escape(date(c.final_review?.submitted_at))}</p>`:cardFacts(c)}
    <div class="issue-card-footer">${view==='final_review'?returnBadge(c)+`<span class="issue-tag">${escape(nextText(c))}</span>`:cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueReview?.button(c)||''}${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='final_review'?`return${total===1?'':'s'} awaiting review`:`${view==='history'?'finished':'active'} case${total===1?'':'s'}`}`;
   returnFilters();
@@ -344,7 +344,7 @@
    }
    if(options.focusCase&&Number.isInteger(result.focus_offset))offset=result.focus_offset;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
-   await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
+   await Promise.all([root.OGCaseNotes?.load(rows.map(c=>c.id)),root.OGIssueReview?.load()]);if(request!==listVersion)return;
    cards();root.OGIssueChats?.load(rows);
    if($('issues-feedback').classList.contains('is-error'))feedback('');
    const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
@@ -465,6 +465,7 @@
   const reason=c.source_lane==='inquiry'?'Item not received':/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
+   ${root.OGIssueReview?.button(c)||''}
    ${caseHistoryAction({...c,open_tasks:summary.open_tasks})}
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
@@ -676,6 +677,7 @@
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
   root.OGCaseNotes?.init({db,people,userId:ctx.user.id});
   root.OGIssueChats?.init(db);
+  await root.OGIssueReview?.init({client:db,feedback,onChange:()=>{cards();if(detail&&!root.OGCaseNotes?.isEditing&&!$('issue-action-form'))renderDetail();}});
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
    if(b.id==='issues-archive-finalized'){archiveFinalized();}

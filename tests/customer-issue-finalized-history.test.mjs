@@ -87,6 +87,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261031040000_customer_issue_finalized_history.sql'));
  await db.exec(await sqlFile('20261031050000_customer_issue_history_button.sql'));
  await db.exec(await sqlFile('20261031060000_customer_issue_history_close_tasks.sql'));
+ await db.exec(await sqlFile('20261031070000_customer_issue_ebay_review.sql'));
 
 
 });
@@ -281,4 +282,38 @@ test('accepting a decision closes tasks only after eBay and receiving work is fi
  await assert.rejects(manualArchive(true),/Return inspection is unfinished/);
  assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(200)]),'open');
  assert.equal(await scalar('select count(*)::int v from ebay_return_task_events'),0);
+});
+
+const markReview=(caseId=id(100))=>scalar('select save_customer_issue_ebay_review($1,$2) v',[caseId,'mark']);
+test('review pile persists one linked issue, does not change case/task state, and preserves positions on removal',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='inquiry',issue_kind='request',raw_payload='{"ebayDetail":{"inquiryId":"D100","state":"CLOSED"}}';
+ insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values('${id(101)}','case','dispute','D100','open','CLOSED',now(),'{"ebayDetail":{"caseId":"D100","sellerOutcome":"LOSE"}}')`);
+ await monitor();const first=await markReview();const again=await markReview(id(101));assert.equal(first.case_id,id(101));assert.equal(first.version,again.version);
+ const listed=await scalar('select list_customer_issue_ebay_reviews() v');assert.equal(listed.length,1);assert.deepEqual(listed[0].case_ids.sort(),[id(100),id(101)]);assert.equal(await status(),'open');
+ assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(200)]),'open');
+ const saved=await scalar('select save_customer_issue_ebay_review($1,$2,$3,$4,$5) v',[id(100),'save','Our evidence supports delivery.','Reconsider the decision.',first.version]);
+ assert.equal(saved.position,'Our evidence supports delivery.');assert.equal(saved.position_updated_by,id(1));assert.ok(saved.position_updated_at);
+ await assert.rejects(scalar('select save_customer_issue_ebay_review($1,$2,$3,$4,$5) v',[id(100),'save','Overwrite','',first.version]),/changed by someone else/);
+ await scalar('select save_customer_issue_ebay_review($1,$2,null,null,$3) v',[id(101),'remove',saved.version]);assert.equal((await scalar('select list_customer_issue_ebay_reviews() v')).length,0);
+ const restored=await markReview();assert.equal(restored.position,saved.position);assert.equal(restored.position_updated_at,saved.position_updated_at);
+ assert.equal(await scalar('select count(*)::int v from customer_issue_ebay_review_events'),4);
+});
+test('later eBay escalation keeps an existing review entry and position',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='inquiry',issue_kind='request',raw_payload='{"ebayDetail":{"inquiryId":"D100","state":"CLOSED"}}'`);
+ const first=await markReview();assert.equal(first.case_id,id(100));
+ await db.exec(`insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values('${id(101)}','case','dispute','D100','open','CLOSED',now(),'{"ebayDetail":{"caseId":"D100","sellerOutcome":"LOSE"}}')`);
+ assert.equal((await markReview(id(101))).case_id,id(100));assert.equal((await scalar('select list_customer_issue_ebay_reviews() v')).length,1);
+});
+test('review packet contains all saved messages beyond the panel limit and no other buyer conversation',async()=>{
+ await markReview();await db.exec(`update ebay_return_cases set buyer_username='buyer-a',order_number='01-ORDER',order_id='${id(10)}';
+ insert into ebay_return_messages(return_case_id,direction,message_body,sent_at,message_status) select '${id(100)}','inbound','Message '||g,now()-g*interval '1 minute','imported' from generate_series(1,620) g;
+ insert into ebay_return_messages(return_case_id,direction,message_body,sent_at,message_status) values('${id(100)}','internal','Private internal message',now(),'sent');
+ insert into ebay_conversations(id,other_party_username,conversation_type,reference_id) values('${id(700)}','buyer-a','FROM_MEMBERS','01-ORDER'),('${id(701)}','buyer-b','FROM_MEMBERS','OTHER');
+ insert into ebay_conversation_messages(id,conversation_id,direction,message_body,created_at_ebay) values('${id(710)}','${id(700)}','outbound','Our order response',now()),('${id(711)}','${id(701)}','inbound','Unrelated',now());`);
+ const packet=await scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]);assert.equal(packet.members.length,1);assert.equal(packet.members[0].case_messages.length,620);assert.equal(packet.members[0].buyer_messages.length,1);assert.equal(packet.members[0].buyer_messages[0].message_body,'Our order response');
+});
+test('review writes and report reads require an authenticated staff session',async()=>{
+ await db.exec("select set_config('test.access','no',false);set role authenticated");
+ await assert.rejects(markReview(),/Customer issues access/);await assert.rejects(scalar('select list_customer_issue_ebay_reviews() v'),/Customer issues access/);await assert.rejects(scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]),/Customer issues access/);
+ await assert.rejects(db.exec(`insert into customer_issue_ebay_reviews(case_id) values('${id(100)}')`),/permission denied/);
 });

@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261031-history-tasks" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261031-ebay-review" />
   <link rel="stylesheet" href="ebay-buyer-insights.css?v=20261029-report-2" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -81,7 +81,7 @@
 
       <main class="content issues-workspace" id="issues-workspace">
         <header class="issues-heading"><div><span class="eyebrow">CUSTOMER CARE</span><h1>Customer issues</h1><p>A clear next step for every customer.</p></div>
-          <div class="issues-heading-actions"><button type="button" id="scan-return-package" class="primary-btn">Scan return package</button><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
+          <div class="issues-heading-actions"><a class="primary-btn issue-review-link" href="customer-issue-review-report.html">eBay review packet <span id="issue-review-count">—</span></a><button type="button" id="scan-return-package" class="primary-btn">Scan return package</button><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
         </header>
         <div id="issues-feedback" role="status" aria-live="polite"></div>
         <section id="issues-history-banner" class="issues-history-banner" aria-labelledby="issues-history-title" data-admin-only="true">
@@ -250,7 +250,8 @@
   <script src="customer-issue-dispute.js?v=20261010-25"></script>
   <script src="customer-issue-notes.js?v=20261010-28"></script>
   <script src="customer-issue-chats.js?v=20261010-31"></script>
-  <script src="customer-issues.js?v=20261031-history-tasks"></script>
+  <script src="customer-issue-review.js?v=20261031-1"></script>
+  <script src="customer-issues.js?v=20261031-ebay-review"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>
