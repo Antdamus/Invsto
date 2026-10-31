@@ -15,6 +15,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261031230000_marketplace_pending_summaries.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261031234500_whatnot_queue_screenshots.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261101000500_whatnot_marketplace_status.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261101003000_whatnot_shipping_label_summary.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('all historical orders import; missing filters show only matching lines and counts',async()=>{
@@ -139,4 +140,17 @@ test('physical label completion checks the current exact number and requires a p
  await attach('second',next);await close(next);
  assert.equal((await run("select details->>'label_source' as src from whatnot_order_events where line_id=$1 and action='complete'",[row.id]))[0].src,'Whatnot tracking verified by staff');
  assert.equal((await run('select work_state from whatnot_order_lines where id=$1',[unrelated.lines[0].id]))[0].work_state,'pending');
+});
+
+test('Whatnot label summaries distinguish attached PDFs, platform issuance, and stale or missing coverage',async()=>{
+ const o=record('63455');o.username='label-scope';o.lines=Array.from({length:5},(_,i)=>({...o.lines[0],id:'63455'+i}));o.lines[2].shipment_status='created';o.lines[4].replacement_shipment_id='other';await save(o);
+ const [a,b,c,d,e]=o.lines;
+ const file=async(path,ids,snap)=>run("insert into whatnot_order_files(path,kind,name,mime,line_ids,snapshot,actor,actor_name) values($1,'label','label.pdf','application/pdf',$2,$3,$4,'Staff')",[path,ids,JSON.stringify(snap),actor]);
+ await file('group-label-1',[a.id,d.id],[{id:a.id,quantity:a.quantity,tracking_number:a.tracking_number},{id:d.id,quantity:d.quantity,tracking_number:'old-tracking'}]);
+ await file('same-line-second-label',[a.id],[{id:a.id,quantity:a.quantity,tracking_number:a.tracking_number}]);
+ await run("update whatnot_order_lines set item_missing=true where id=$1",[c.id]);
+ const rows=await run('select id,label_state,order_label_pdfs,order_labels_issued_only,order_label_pdfs_to_check from whatnot_queue_lines where order_id=$1 order by id',[o.id]);
+ assert.deepEqual(rows.map(l=>l.label_state),['attached','issued','missing','review','missing']);
+ const filtered=(await run("select whatnot_queue_summary('pending','label-scope','missing',0,'all',null,'due','all') as s"))[0].s.groups[0].lines;
+ assert.deepEqual(filtered.map(l=>[l.id,l.order_label_pdfs,l.order_labels_issued_only,l.order_label_pdfs_to_check]),[[c.id,2,1,1]]);
 });

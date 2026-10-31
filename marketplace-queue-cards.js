@@ -59,6 +59,18 @@
   el.innerHTML='<header class="mq-overview-head"><div><h2>'+title+'</h2><p>'+counts+'</p></div>'+
    (target&&s?.lines?'<a href="#'+target+'">View orders <span aria-hidden="true">↓</span></a>':'')+'</header>'+figures(s);
  }
+ function shippingLabelBadge(attached,total,unit='order',issued=0,review=0){
+  const scope=total>1?' · '+attached+' of '+counted(total,unit):'';
+  let text=attached?'Shipping label'+(attached>1?'s':'')+' attached'+scope:'No shipping label attached';
+  if(issued===total&&total>0)text=total===1?'Whatnot label issued · No PDF attached':'Whatnot labels issued · No PDFs attached';
+  else if(issued)text+=' · '+counted(issued,'line')+' with a Whatnot label only';
+  if(review)text+=' · Check '+(total===1?'current tracking':counted(review,'line'));
+  let state='missing';
+  if(review||(attached>0&&attached<total)||(issued>0&&issued<total))state='partial';
+  else if(attached)state='attached';
+  else if(issued)state='issued';
+  return '<span class="mq-shipping-label is-'+state+'"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2.5 3h7l8 8-6.5 6.5-8.5-8z"/><circle cx="6.5" cy="6.5" r="1"/></svg>'+text+'</span>';
+ }
  function screenshotBadge(missing){
   const message=missing?counted(missing,'line')+(missing===1?' needs':' need')+' a screenshot':'All lines have screenshots';
   return '<span class="mq-coverage '+(missing?'needs-photo':'has-photo')+'">'+message+'</span>';
@@ -69,5 +81,5 @@
  function orderCounts(lines,units,shownLines){
   return counted(lines,'order line')+' · '+counted(units,'item')+(shownLines<lines?' · Showing '+shownLines+' of '+lines:'');
  }
- window.PendingQueueCards={render,shown,screenshotBadge,linePhoto,orderCounts};
+ window.PendingQueueCards={render,shown,shippingLabelBadge,screenshotBadge,linePhoto,orderCounts};
 })();

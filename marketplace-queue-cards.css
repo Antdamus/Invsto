@@ -53,3 +53,11 @@ button.mq-chip:hover{border-color:#a89569}button.mq-chip[aria-pressed=true]{colo
  .mq-filter-group button.mq-chip{display:grid;grid-template-columns:minmax(0,1fr) auto;justify-items:start;align-content:center;text-align:left;gap:.1rem .25rem}
  .mq-filter-group .mq-chip-count{justify-self:end}.mq-filter-group .mq-chip-value{grid-column:1/-1}
 }
+
+.mq-shipping-label{display:inline-flex;align-items:center;gap:.38rem;width:fit-content;max-width:100%;padding:.28rem .58rem;border:1px solid;border-radius:.45rem;font:700 .82rem/1.35 system-ui,sans-serif;white-space:normal;text-align:left}
+.mq-shipping-label svg{width:1rem;height:1rem;flex:none}
+.mq-shipping-label.is-attached{color:#c7f4d5;background:#163a29;border-color:#488565}
+.mq-shipping-label.is-partial{color:#ffe0a5;background:#3d2d16;border-color:#99763d}
+.mq-shipping-label.is-missing{color:#ffd1c8;background:#3a2221;border-color:#9b6158}
+.mq-shipping-label.is-issued{color:#c7e6ff;background:#1c3042;border-color:#5a7f9c}
+.wn-summary-badges{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
