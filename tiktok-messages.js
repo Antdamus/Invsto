@@ -46,7 +46,7 @@
   if(switching){state.messages=new Map();state.cursor=null;state.detail=null;$('tm-reader').innerHTML='<div class="tm-empty">Loading conversation…</div>';}
   $('tm-workspace').classList.add('is-reading');list();const cursor=older?state.cursor:null;
   try{const data=await api({action:'conversation',id,...(cursor?{cursor}:{})});if(request!==state.threadRequest)return;
-   if(!data.history_error){for(const m of data.messages)state.messages.set(m.id,m);if(older||switching||!state.cursor)state.cursor=data.next_page_token;}
+   if(!data.history_error){if(!older)state.messages=new Map();for(const m of data.messages)state.messages.set(m.id,m);state.cursor=data.next_page_token;}
    reader(data);const url=new URL(location.href);url.searchParams.set('conversation',id);history.replaceState(null,'',url);
   }catch(e){if(request!==state.threadRequest)return;if($('tm-thread-error'))$('tm-thread-error').textContent=e.message;else $('tm-reader').innerHTML=`<div class="tm-empty"><p>${esc(e.message)}</p><button class="tm-button" id="tm-retry">Retry conversation</button><button class="tm-button" id="tm-return">← Inbox</button></div>`;if($('tm-retry'))$('tm-retry').onclick=()=>loadThread(id);if($('tm-return'))$('tm-return').onclick=()=>$('tm-workspace').classList.remove('is-reading');}
   finally{if(request===state.threadRequest)state.loadingThread=false;}
