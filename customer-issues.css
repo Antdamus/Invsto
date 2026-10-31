@@ -164,3 +164,16 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 .issue-chat-link>svg{flex:none;margin-top:2px}.issue-chat-copy{display:grid;gap:4px;min-width:0;width:100%}.issue-chat-title{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:14px}.issue-chat-title>span:last-child{margin-left:auto}.issue-chat-copy small{font-size:11px;color:#abc7bc;line-height:1.5}.issue-chat-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-size:13px;line-height:1.5}
 #issues-workspace .issue-chat-link.has-unread{border-color:#9fd6c2;background:#233e32}.issue-chat-unread{font-size:10px;padding:3px 7px;border-radius:20px;background:#b4e8cb;color:#153825}#issues-workspace .issue-chat-link.is-empty{background:transparent;border-color:var(--issue-border);color:var(--issue-muted)}#issues-workspace .issue-chat-link:hover{border-color:#cbe8d9;background:#2a4136}.issue-chat-link:focus-visible{outline:2px solid var(--issue-gold);outline-offset:3px}
 @media(max-width:900px){.issue-chat-slot{margin:0 15px 14px}.issue-chat-link{padding:13px}.issue-chat-copy small{font-size:12px}.issue-chat-preview{font-size:14px}}
+/* Keep the History action visible above filters on both phones and desktops. */
+.issues-history-banner{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:14px 0 22px;padding:24px;border:2px solid #d8ba73;border-radius:18px;background:linear-gradient(120deg,#243e34,#172c25);box-shadow:0 8px 28px #0002;color:#f5f4eb}
+.issues-history-banner[hidden]{display:none}
+.issues-history-banner h2{font-size:clamp(21px,2.3vw,28px);line-height:1.2;margin:8px 0 10px;color:#fff5d5}
+.issues-history-banner .eyebrow{color:#efd59c;letter-spacing:.1em}
+.issues-history-banner p{margin:8px 0;color:#dde7df;max-width:780px;line-height:1.5}
+.issues-history-banner strong{color:#fff}
+.issues-history-banner .issues-history-summary{font-weight:750;color:#ffe3a2}
+.issues-history-banner small{display:block;color:#becfc4;line-height:1.45}
+.issues-history-actions{display:flex;flex-direction:column;gap:10px;flex-shrink:0;max-width:100%}
+.issues-history-actions button{white-space:normal;min-height:46px}
+.issue-response-badge.is-lost{color:#ffd1ce;background:#7c2929;border:1px solid #c06b66}
+@media(max-width:800px){.issues-history-banner{align-items:stretch;flex-direction:column;padding:19px;gap:16px}.issues-history-actions{width:100%}.issues-history-actions button{width:100%}}

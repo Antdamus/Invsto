@@ -40,6 +40,16 @@
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
  const db={storage:{from:()=>({download:async()=>({data:new Blob(['test evidence bytes'],{type:'image/png'})})})},auth:{getSession:async()=>({data:{session:{user:{id:'me'}}}})},from:query,functions:{invoke:async(name,args)=>{fixtureCalls.push({invoke:name,args});if(args?.body?.action==='dispute_evidence')return {data:{url:'https://antdamus.github.io/Invsto/StoreWebsite/OG_Logo.png',mime_type:'image/png',archived:true}};return {data:{message:'Refresh queued. You can keep working.'}};}},rpc:async(name,args={})=>{
+  if(name==='customer_issue_history_preview'){
+   if(window.fixtureHistoryFailure)return {error:{message:'Could not check eBay status'}};
+   const checks={};if(location.search.includes('historyArchiveFixture'))for(const r of rows.filter(r=>r.status!=='closed'))checks[r.id]={ready:r.id==='case-1',reason:r.id==='case-1'?null:r.id==='case-2'?'Decided against us · keep for review':'Internal work is unfinished'};
+   const ready_ids=Object.keys(checks).filter(id=>checks[id].ready);return {data:{ready_ids,ready:ready_ids.length,kept:rows.filter(r=>r.status!=='closed').length-ready_ids.length,against_us:location.search.includes('historyArchiveFixture')?1:0,checks}};
+  }
+  if(name==='archive_finalized_customer_issues'){
+   fixtureWrites.push({name,args});if(window.fixtureArchiveFailure)return {error:{message:'Connection interrupted'}};
+   const results=args._case_ids.map(id=>{const r=rows.find(r=>r.id===id),archived=r?.id==='case-1'&&!window.fixtureNewWork;if(archived){r.status='closed';r.open_tasks=0;}return {id,archived};});
+   return {data:{results,archived:results.filter(r=>r.archived).length}};
+  }
   fixtureCalls.push({rpc:name,args});if(name==='can_access_post_order_issues')return {data:true};if(name==='list_customer_issues'){
    const scoped=rows.filter(r=>(!args._search||[r.customer_name,r.buyer_username,r.order_number,r.ebay_return_id].some(v=>String(v||'').toLowerCase().includes(args._search.toLowerCase())))&&(args._scope==='all'||r[args._scope]));
    const return_stages={};for(const r of scoped.filter(r=>r.status!=='closed'&&r.issue_kind==='return')){const stage=r.return_stage||'unknown';return_stages[stage]=(return_stages[stage]||0)+1;}

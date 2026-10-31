@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261014-final-review" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261031-finalized-history" />
   <link rel="stylesheet" href="ebay-buyer-insights.css?v=20261029-report-2" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -84,6 +84,13 @@
           <div class="issues-heading-actions"><button type="button" id="scan-return-package" class="primary-btn">Scan return package</button><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
         </header>
         <div id="issues-feedback" role="status" aria-live="polite"></div>
+        <section id="issues-history-banner" class="issues-history-banner" aria-labelledby="issues-history-title" data-admin-only="true">
+          <div><span class="eyebrow">KEEP THE ACTIVE LIST CLEAR</span><h2 id="issues-history-title">Fully finished? Move it to History.</h2>
+            <p>Only finalized eBay cases with nothing left to do. <strong>Unfinished work and decisions against us stay here.</strong></p>
+            <p id="issues-history-summary" class="issues-history-summary" role="status">Checking which cases are fully finalized…</p>
+            <small>Checks all customer issues, regardless of the filters below. Future finalized cases also archive automatically after eBay sync.</small>
+          </div><div class="issues-history-actions"><button type="button" id="issues-archive-finalized" class="primary-btn" disabled>Move finalized cases to History</button><button type="button" id="issues-open-history" class="secondary-btn">View History</button></div>
+        </section>
         <details class="issues-sync-health"><summary id="issues-health-summary">Checking connection...</summary><div id="issues-health-detail"></div></details>
         <nav class="issues-tabs" aria-label="Customer issue views">
           <button data-issue-view="attention" aria-pressed="true">All open <b>-</b></button>
@@ -243,7 +250,7 @@
   <script src="customer-issue-dispute.js?v=20261010-25"></script>
   <script src="customer-issue-notes.js?v=20261010-28"></script>
   <script src="customer-issue-chats.js?v=20261010-31"></script>
-  <script src="customer-issues.js?v=20261014-final-review"></script>
+  <script src="customer-issues.js?v=20261031-finalized-history"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>

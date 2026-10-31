@@ -30,6 +30,34 @@
  }
  const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
  let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',returnCounts=null,disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
+ let historyPreview=null,historyReceipt='';
+ function historyBanner(){
+  const banner=$('issues-history-banner');if(!banner)return;
+  banner.hidden=ctx.employee.role!=='admin';if(banner.hidden)return;
+  const button=$('issues-archive-finalized'),n=Number(historyPreview?.ready||0);
+  button.disabled=saving||!n;
+  button.textContent=saving?'Moving finalized cases…':`Move finalized cases to History${n?` (${n})`:''}`;
+  $('issues-history-summary').textContent=historyPreview
+   ?`${historyReceipt}${n} ready for History · ${historyPreview.kept} stay active${historyPreview.against_us?` · ${historyPreview.against_us} decided against us`:''}`
+   :'Could not verify finalized cases. Click Refresh to check again; no cases have been moved.';
+ }
+ async function archiveFinalized(){
+  if(saving||!historyPreview?.ready_ids?.length)return;
+  const ids=[...historyPreview.ready_ids],position=captureListPosition();saving=true;historyBanner();
+  let archived=0;
+  try{
+   // Recheck every selected case in the database under locks. New work or a
+   // changed eBay outcome makes that case stay active, even after this preview.
+   for(let start=0;start<ids.length;start+=500){
+    const result=checked(await db.rpc('archive_finalized_customer_issues',{_case_ids:ids.slice(start,start+500)}));
+    archived+=Number(result.archived||0);
+   }
+   historyReceipt=`${archived} moved to History. `;clearBulk();
+   await continueAfterClose(ids,position);
+   feedback(`${archived} finalized case${archived===1?'':'s'} moved to History. Evidence and activity are preserved; unfinished cases and decisions against us stay active.`);
+  }catch(error){historyReceipt='';feedback(`${archived?`${archived} moved. `:''}${error.message||'Could not confirm the move.'} Refresh to verify before trying again.`,true);}
+  finally{saving=false;historyBanner();}
+ }
  const PAGE=30;
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
@@ -60,6 +88,7 @@
  }
  function closeBlock(c,items=[]){
   if(!c)return 'Case could not be loaded. Refresh and try again.';
+  if(c.archive_check?.reason)return c.archive_check.reason;
   if(['pending','changes_requested'].includes(c.final_review?.status))return 'Final review is still pending';
   if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks))return 'Already saved in History';
   if(c.ebay_return_id&&!closed(c))return 'Still open on eBay';
@@ -156,6 +185,8 @@
   return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge issue-refund-badge is-${refund.tone}"><span>${escape(refund.label)}</span>${refundDate}</span>`:'');
  }
  function nextText(c){
+  if(closed(c)&&c.archive_check?.reason)return c.archive_check.reason;
+  if(c.archive_check?.ready)return 'Fully finalized · ready for History';
   if(c.final_review?.status==='pending')return 'Awaiting final review';
   if(c.final_review?.status==='changes_requested')return 'Final review · more information needed';
   if(['closed','cancelled'].includes(c.status)&&!c.open_tasks)return 'Closed · saved in History';
@@ -184,7 +215,7 @@
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Review the current case status';
  }
- function providerBadge(c){return root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
+ function providerBadge(c){return c.archive_check?.reason?.startsWith('Decided against us')?{kind:'lost',label:'Decided against us · stays active'}:root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
  function providerBadgeHtml(c){
   const badge=providerBadge(c),protection=root.OGDisputeResponse?.protection(c);
   return (badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'')+
@@ -285,6 +316,11 @@
    const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(view==='dispute'?{_dispute_state:disputeState,_focus_case_id:options.focusCase||null}:options.focusCase?{_focus_case_id:options.focusCase}:{})}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};returnCounts=result.return_stages||null;disputeCounts=result.dispute_states||{};total=result.total||0;
+   if(ctx.employee.role==='admin'){
+    let preview=null;try{preview=checked(await db.rpc('customer_issue_history_preview'));}catch{/* Keep the case list usable while the archive check is unavailable. */}
+    if(request!==listVersion)return;historyPreview=preview;
+    rows.forEach(c=>c.archive_check=preview?.checks?.[c.id]);historyBanner();
+   }
    if(options.focusCase&&Number.isInteger(result.focus_offset))offset=result.focus_offset;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
@@ -394,7 +430,9 @@
  }
  function renderDetail(){
   if(!detail||detail.c.id!==selected)return;
-  const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status)).length};
+  const {c,tasks,items,lines,events}=detail;
+  c.archive_check=historyPreview?.checks?.[c.id];
+  const summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status)).length};
   Object.assign(summary,{final_review:c.final_review,refund_due_at:c.refund_due_at,refund_deadline_source:c.refund_deadline_source});
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
   const provider=root.OGIssueEvidence.providerContext(c),overrides={};
@@ -412,7 +450,7 @@
    ${root.OGIssueChats?.slot(c)||''}
    <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
    <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':providerBadge(c)?.kind==='reviewing'?'eBay is reviewing this escalated case. No response is currently requested. Keep it open until eBay decides the outcome; any internal work remains separate.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
-   ${ctx.employee.role==='admin'&&!['pending','changes_requested'].includes(c.final_review?.status)&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
+   ${ctx.employee.role==='admin'&&!c.archive_check?.reason&&!['pending','changes_requested'].includes(c.final_review?.status)&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
    <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(closed(c)||['waiting','protected','no_response','reviewing'].includes(providerBadge(c)?.kind)?'No current response deadline':date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
@@ -610,6 +648,7 @@
  }
  async function init(context){
   ctx=context;db=ctx.supabase;ready=true;
+  if($('issues-history-banner'))$('issues-history-banner').hidden=ctx.employee.role!=='admin';
   resetSort();
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
@@ -617,7 +656,9 @@
   root.OGIssueChats?.init(db);
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
-   if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;resetSort();offset=0;closeCase();refresh({detail:false});}
+   if(b.id==='issues-archive-finalized'){archiveFinalized();}
+   else if(b.id==='issues-open-history'){clearBulk();view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';resetSort();closeCase();refresh({detail:false});}
+   else if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;resetSort();offset=0;closeCase();refresh({detail:false});}
    else if(b.hasAttribute('data-bulk-start')&&ctx.employee.role==='admin'){selecting=true;closeCase();cards();}
    else if(b.hasAttribute('data-bulk-done')){clearBulk();cards();}
    else if(b.hasAttribute('data-bulk-clear')){bulkSelection.clear();cards();}
