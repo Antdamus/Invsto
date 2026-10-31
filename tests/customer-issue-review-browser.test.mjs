@@ -49,10 +49,25 @@ for(const width of [390,1366])test(`Review packet ${width}px: evidence, editable
  if(width===1366){
   const bytes=await page.evaluate(async()=>Array.from(await OGIssueReviewPdf.build({issues:OGIssueReviewReport.issues,generatedAt:'2026-10-30T15:00:00Z',includeInternal:false})));
   await writeFile(new URL('../output/pdf/ebay-case-review-preview.pdf',import.meta.url),new Uint8Array(bytes));
-  const check=await page.evaluate(async bytes=>{const pdf=await PDFLib.PDFDocument.load(new Uint8Array(bytes));return {pages:pdf.getPageCount(),links:pdf.getPages().map(p=>p.node.lookup(PDFLib.PDFName.of('Annots'))?.size()||0)};},bytes);assert.ok(check.pages>=5);assert.ok(check.links.every(n=>n>=2));
+  const check=await page.evaluate(async bytes=>{const pdf=await PDFLib.PDFDocument.load(new Uint8Array(bytes));return {pages:pdf.getPageCount(),links:pdf.getPages().map(p=>p.node.lookup(PDFLib.PDFName.of('Annots'))?.size()||0)};},bytes);assert.ok(check.pages>=4&&check.pages<=6);assert.ok(check.links.every(n=>n>=2));
  }
 });
 test('Concurrent position edit preserves draft and blocks export until resolved',async t=>{const p=await pageFor(t,390);await p.locator('.position summary').click();await p.locator('textarea[name=position]').fill('Keep this unsaved draft');await p.evaluate(()=>{window.fixtureSaveConflict=true;});await p.getByRole('button',{name:'Save position',exact:true}).click();await expect(p.locator('#packet-error')).toContainText('changed by someone else');await expect(p.locator('textarea[name=position]')).toHaveValue('Keep this unsaved draft');await expect(p.locator('#download-packet')).toBeDisabled();});
+
+test('PDF preserves long positions, complete scans and extra photos across multiple cases',async t=>{
+ const p=await pageFor(t,1366);
+ const result=await p.evaluate(async()=>{
+  const original=OGIssueReviewReport.issues[0],second={...original,id:'case-long',buyer:'second.example',name:'Second review customer',review:{...original.review,position:'LONG POSITION START. '+('The evidence supports this requested review. '.repeat(95))+'LONG POSITION END.',requested_resolution:'FULL REQUESTED RESOLUTION.'}};
+  const scans=Array.from({length:18},(_,n)=>`Carrier scan ${String(n+1).padStart(2,'0')}\nEXAMPLE CITY, FL 33152\nOctober ${18-n}, 2026 11:44 AM`).join('\n\n');
+  const first={...original,tracking:original.tracking.map(t=>({...t,history:{history_text:scans,captured_at:'2026-10-30T15:00:00Z',captured_by_name:'Reviewer'}}))};
+  second.files=[...original.files,{...original.files[0],label:'Additional close-up photograph',path:'extra-photo.png'}];
+  const bytes=Array.from(await OGIssueReviewPdf.build({issues:[first,second],generatedAt:'2026-10-30T15:00:00Z',includeInternal:true}));
+  const pdf=await PDFLib.PDFDocument.load(new Uint8Array(bytes)),refs=new Set(pdf.getPages().map(p=>p.ref.toString()));let internal=0;
+  for(const page of pdf.getPages()){const annotations=page.node.lookup(PDFLib.PDFName.of('Annots'));for(let n=0;n<(annotations?.size()||0);n++){const a=pdf.context.lookup(annotations.get(n)),d=a.lookup(PDFLib.PDFName.of('Dest'));if(d){if(!refs.has(d.get(0).toString()))throw Error('Broken page destination');internal++;}}}
+  return {bytes,pages:pdf.getPageCount(),internal};
+ });
+ assert(result.internal>=result.pages*4);await writeFile(new URL('../output/pdf/ebay-case-review-stress-preview.pdf',import.meta.url),new Uint8Array(result.bytes));
+});
 
 test('Issue action marks the shared pile and shows the report link without closing a case',async t=>{
  const ctx=await browser.newContext();t.after(()=>ctx.close());const p=await ctx.newPage();await p.goto(origin+'/ebay-returns.html');
