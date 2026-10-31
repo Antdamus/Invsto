@@ -18,7 +18,7 @@ async function fixture(page){
  window.calls=[];window.fixtureLines=lines;
  return {auth:{getUser:async()=>({data:{user:{id:'user'}}})},functions:{invoke:async(name,{body})=>{calls.push({name,body});return {data:{admin:true,configured:true,connection:{seller_name:'ogjewelers',enabled:true,last_synced_at:'2026-10-31T16:00:00Z',last_full_sync_at:'2026-10-31T16:00:00Z'}}}}},
  rpc:async(name,args)=>{calls.push({name,args});if(name==='can_manage_inventory')return {data:true};if(name==='whatnot_queue_summary'){const ls=['missing','no_screenshot'].includes(args._filter)?lines.filter(l=>l.item_missing):lines;const totals=n=>({lines:n,orders:n?1:0,buyers:n?1:0,units:n,amounts:n?{USD:{sales:n*25,shipping:n*2,fees:n*1.5}}:{}});return {data:{groups:[{buyer_key:'9',buyer:'fixture_buyer',customer:'Fixture Customer',lines:ls}],buyers:1,visible_lines:ls.length,visible_items:ls.length,counts:{pending:2,review:0,history:0,all:2},market_counts:{market_open:1,unfulfilled:1},facets:{'due:all':totals(ls.length),'due:overdue':totals(ls.length),'work:no_screenshot':totals(1),'work:missing':totals(1),'work:ready':totals(1),'work:waiting':totals(1),shown:totals(ls.length)},filters:{all:2,missing:1,cgl:0,overdue:2,today:0,tomorrow:0,no_tracking:0,unknown:0}}};}if(name==='attach_whatnot_file')return {data:'fixture-file-id'};if(name==='whatnot_work_action')return {data:{updated:args._lines.length}};throw Error('Unexpected RPC '+name);},
- storage:{from(){return {upload:async(path,file)=>{calls.push({name:'upload',path,filename:file.name});return {error:null};}}}},from(name){if(!name.startsWith('whatnot_'))throw Error('Cross marketplace query');const q={select(){return q},overlaps(){return q},in(){return q},eq(){return q},is(){return q},order(){return q},limit:async()=>({data:[]}),range:async()=>({data:[]}),then(r){return Promise.resolve({data:[]}).then(r)}};return q;}};
+ storage:{from(){return {upload:async(path,file)=>{calls.push({name:'upload',path,filename:file.name});return {error:null};}}}},from(name){if(!name.startsWith('whatnot_')&&!['marketplace_order_notes','marketplace_order_note_summaries'].includes(name))throw Error('Cross marketplace query');const q={select(){return q},overlaps(){return q},in(){return q},eq(){return q},is(){return q},order(){return q},limit:async()=>({data:[]}),range:async()=>({data:[]}),then(r){return Promise.resolve({data:[]}).then(r)}};return q;}};
  }}` }));
  await page.goto(origin+'/pending-whatnot-orders.html');await expect(page.locator('#wn-selection-totals h2')).toHaveText('Queue overview');
 }
@@ -42,7 +42,7 @@ test('desktop and phone queues show exact lines, customer name, due urgency and 
  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:'output/whatnot/queue-phone.png',fullPage:true});
  await page.locator('[data-mq-key=no_screenshot]').click();await expect(page.locator('.wn-line')).toHaveCount(1);
  await expect(page.locator('.wn-line .mq-coverage')).toHaveText('Needs screenshot');
- await page.getByRole('button',{name:'Select shown items'}).click();await page.getByRole('button',{name:'Add note',exact:true}).click();
+ await page.getByRole('button',{name:'Select shown items'}).click();await page.getByRole('button',{name:'Note selected lines',exact:true}).click();
  await page.locator('#wn-value').fill('Checked tray 12; item is missing.');await page.locator('#wn-action-submit').click();
  const update=await page.evaluate(()=>calls.find(c=>c.name==='whatnot_work_action'));assert.equal(update.args._lines.length,1);assert.equal(update.args._lines[0].id,'9001');assert.deepEqual(errors,[]);await page.close();
 });
@@ -112,5 +112,16 @@ test('phone scans a routed physical barcode across queues then takes a packing p
   assert.deepEqual(writes.map(c=>c.name),['attach_whatnot_file','whatnot_work_action']);
   assert.equal(writes[0].args._kind,'completion_photo');assert.deepEqual(writes[0].args._lines,[{id:'9002',revision:1}]);
   assert.deepEqual(writes[1].args._lines,[{id:'9002',revision:1,verified_tracking_number:'9400111000000000001234'}]);
+ }finally{await page.close();}
+});
+
+test('Whatnot order and line note buttons open the exact scope without selecting checkboxes',async()=>{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await fixture(page);
+ try{
+  await page.locator('.wn-order-block>header').getByRole('button',{name:'Add order note'}).click();
+  await expect(page.locator('#mn-context')).toHaveText('Order #1484060355 · Whole order');await page.locator('#mn-close').click();
+  await page.locator('#wn-item-9002').getByRole('button',{name:'Add line note'}).click();
+  await expect(page.locator('#mn-context')).toContainText('Gold bracelet · Line 9002');await expect(page.locator('#mn-feed')).toHaveText('No staff notes yet.');
+  await expect(page.locator('[data-select-line]:checked')).toHaveCount(0);
  }finally{await page.close();}
 });

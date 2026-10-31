@@ -17,9 +17,9 @@ async function setup(page,{receiptId='',cancellations=false,view=''}={}){
  await page.goto(origin+'/pending-tiktok-orders.html'+(receiptId?'?tiktokReceipt='+receiptId:view?'?view='+view:''));
  await page.evaluate(()=>{
   const tables={tiktok_orders:[],tiktok_order_lines:[],tiktok_order_imports:[],tiktok_order_events:[],tiktok_order_documents:[],tiktok_order_receipt_photos:[]};window.fixtureTables=tables;window.fixtureCalls=[];
-  window.supabase={auth:{signInWithPassword:async({password})=>password==='fixture-password'?{data:{user:{id:'fixture-user'}}}:{error:{message:'Invalid login'}},getSession:async()=>({data:{session:{user:{id:'fixture-user',email:'staff@fixture.test'}}}})},from(name){if(!name.startsWith('tiktok_'))throw Error('Cross-marketplace access: '+name);let matches=tables[name]||[];const q={select(){return q;},order(){return q;},in(k,values){matches=matches.filter(x=>values.includes(x[k]));return q;},eq(k,v){matches=matches.filter(x=>x[k]===v);return q;},range(a,b){return Promise.resolve({data:matches.slice(a,b+1)});},limit(n){return Promise.resolve({data:matches.slice(0,n)});},then(resolve){return Promise.resolve({data:matches}).then(resolve);}};return q;},rpc:async(name,args)=>{if(name==='can_access_tiktok_messages')return {data:true};if(name==='list_tiktok_order_chat_markers')return {data:args._order_ids.map(id=>({order_id:id,buyer_linked:true,chats:[]}))};if(name==='can_revert_order_fulfillment')return {data:true};window.fixtureCalls.push({name,args});if(name==='import_tiktok_orders'){for(const r of args._rows){tables.tiktok_orders.push({...r,id:'order-1',revision:1,stage:'pending',notes:'',source_snapshot_at:args._snapshot_at});tables.tiktok_order_lines.push({...r,id:'line-1',order_id:'order-1'});}tables.tiktok_order_imports.push({filename:args._filename,snapshot_at:args._snapshot_at,imported_at:new Date().toISOString()});return {data:{added:1,refreshed:0,stale:0,history_skipped:0}};}if(name==='update_tiktok_order'){Object.assign(tables.tiktok_orders[0],{stage:args._stage,notes:args._notes,ship_by_date:args._ship_by,revision:2});return {data:tables.tiktok_orders[0]};}throw Error('Unexpected RPC '+name);}};
+  window.supabase={auth:{signInWithPassword:async({password})=>password==='fixture-password'?{data:{user:{id:'fixture-user'}}}:{error:{message:'Invalid login'}},getSession:async()=>({data:{session:{user:{id:'fixture-user',email:'staff@fixture.test'}}}})},from(name){if(!name.startsWith('tiktok_')&&!['marketplace_order_notes','marketplace_order_note_summaries'].includes(name))throw Error('Cross-marketplace access: '+name);let matches=tables[name]||[];const q={select(){return q;},order(){return q;},in(k,values){matches=matches.filter(x=>values.includes(x[k]));return q;},eq(k,v){matches=matches.filter(x=>x[k]===v);return q;},range(a,b){return Promise.resolve({data:matches.slice(a,b+1)});},limit(n){return Promise.resolve({data:matches.slice(0,n)});},then(resolve){return Promise.resolve({data:matches}).then(resolve);}};return q;},rpc:async(name,args)=>{if(name==='can_access_tiktok_messages')return {data:true};if(name==='list_tiktok_order_chat_markers')return {data:args._order_ids.map(id=>({order_id:id,buyer_linked:true,chats:[]}))};if(name==='can_revert_order_fulfillment')return {data:true};window.fixtureCalls.push({name,args});if(name==='import_tiktok_orders'){for(const r of args._rows){tables.tiktok_orders.push({...r,id:'order-1',revision:1,stage:'pending',notes:'',source_snapshot_at:args._snapshot_at});tables.tiktok_order_lines.push({...r,id:'line-1',order_id:'order-1'});}tables.tiktok_order_imports.push({filename:args._filename,snapshot_at:args._snapshot_at,imported_at:new Date().toISOString()});return {data:{added:1,refreshed:0,stale:0,history_skipped:0}};}if(name==='update_tiktok_order'){Object.assign(tables.tiktok_orders[0],{stage:args._stage,notes:args._notes,ship_by_date:args._ship_by,revision:2});return {data:tables.tiktok_orders[0]};}throw Error('Unexpected RPC '+name);}};
  });
- for(const src of ['vendor/pdf-lib/pdf-lib.min.js','tiktok-order-import.js','tiktok-order-packet.js','marketplace-queue-cards.js','tiktok-order-queue.js','tiktok-receipt-photos.js','tiktok-shipping.js','tiktok-tasks.js','tiktok-order-chats.js',...(cancellations?['tiktok-cancellations.js']:[]),'tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+src});
+ for(const src of ['vendor/pdf-lib/pdf-lib.min.js','tiktok-order-import.js','tiktok-order-packet.js','marketplace-order-notes.js','marketplace-queue-cards.js','tiktok-order-queue.js','tiktok-receipt-photos.js','tiktok-shipping.js','tiktok-tasks.js','tiktok-order-chats.js',...(cancellations?['tiktok-cancellations.js']:[]),'tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+src});
  await expect(page.locator('#tk-status')).toContainText('Import your first');
 }
 
@@ -328,4 +328,39 @@ test('work cards show line values, allocated fees and shipping, and limit a buye
  await page.locator('[data-context]').click();await expect(page.locator('.tk-order-item')).toHaveCount(2);await expect(page.locator('#tk-selection-totals')).toContainText('1 item line');
  await page.locator('#tk-reset-queue').click();await expect(page.locator('#tk-selection-totals')).toContainText('$30.00');
  await page.close();
+});
+
+test('staff can sign one whole order or exact item from a phone, retry safely and read name and Eastern time',async()=>{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await setup(page);
+ try{
+  await page.evaluate(()=>{
+   const t=fixtureTables;
+   for(const id of ['1','2']){
+    t.tiktok_orders.push({id,order_number:'57762364879664333'+id,buyer_username:'notebuyer',stage:'pending',marketplace_status:'To ship',order_amount:12,created_time:'10/17/2026 11:48:52 AM'});
+    t.tiktok_order_lines.push({id:'item-'+id,order_id:id,sku_id:'173276548981473714'+id,title:'Silver ring '+id,quantity:1,seller_sku:'SKU-'+id});
+   }
+   t.marketplace_order_notes=[];t.marketplace_order_note_summaries=[];const original=supabase.rpc;
+   window.noteAttempts=[];
+   supabase.rpc=async(name,a)=>{
+    if(name!=='add_marketplace_order_note')return original(name,a);
+    noteAttempts.push(a);
+    if(noteAttempts.length===1)return {error:{message:'Connection interrupted'}};
+    const row={market:a._market,order_id:a._order_id,line_id:a._line_id,signer:'Jordan Lee',body:a._note,item_title:'Silver ring 2',created_at:'2026-10-31T18:10:00Z',id:a._request_id};
+    t.marketplace_order_notes.unshift(row);t.marketplace_order_note_summaries.unshift({...row,note_count:1,preview:row.body});return {data:a._request_id};
+   };
+  });
+  await page.locator('#tk-phone-refresh').click();const buyer=page.locator('.tk-buyer');
+  await buyer.getByRole('button',{name:'Add order note'}).click();await expect(page.locator('#mn-draft')).toBeDisabled();
+  await page.locator('#mn-order').selectOption('2');await page.locator('#mn-draft').fill('Checked the parcel.');
+  await page.locator('#mn-save').click();await expect(page.locator('#mn-status')).toContainText('Connection interrupted');await expect(page.locator('#mn-draft')).toHaveValue('Checked the parcel.');
+  await page.locator('#mn-save').click();await expect(page.locator('#mn-feed')).toContainText('Signed by Jordan Lee');await expect(page.locator('#mn-feed')).toContainText('2:10 PM EDT');
+  assert.equal(await page.evaluate(()=>noteAttempts[0]._request_id===noteAttempts[1]._request_id),true);
+  await page.locator('#mn-close').click();await expect(buyer.locator('.mn-preview')).toContainText('Jordan Lee');await buyer.locator('.tk-expand-button').click();
+  await buyer.locator('[data-tiktok-line="item-2"]').getByRole('button',{name:'Add line note'}).click();await expect(page.locator('#mn-feed')).toContainText('No staff notes yet');
+  await page.locator('#mn-draft').fill('Keep the <blue> box.');await page.locator('#mn-save').click();await expect(page.locator('#mn-feed')).toContainText('Keep the <blue> box.');
+  const args=await page.evaluate(()=>noteAttempts.map(a=>[a._market,a._order_id,a._line_id]));
+  assert.deepEqual(args,[['tiktok','2',null],['tiktok','2',null],['tiktok','2','item-2']]);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.locator('#mn-close').click();await expect(buyer.locator('[data-tiktok-order="1"] .mn-preview').first()).toBeHidden();
+ }finally{await page.close();}
 });

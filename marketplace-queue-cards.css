@@ -61,3 +61,19 @@ button.mq-chip:hover{border-color:#a89569}button.mq-chip[aria-pressed=true]{colo
 .mq-shipping-label.is-missing{color:#ffd1c8;background:#3a2221;border-color:#9b6158}
 .mq-shipping-label.is-issued{color:#c7e6ff;background:#1c3042;border-color:#5a7f9c}
 .wn-summary-badges{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+
+.mn-control{display:flex;align-items:center;gap:.4rem .65rem;flex-wrap:wrap;max-width:100%;min-width:0}
+.mn-control .mn-add,#mn-dialog button,#mn-dialog select{font:600 .88rem/1.3 system-ui,sans-serif;border:1px solid #8f7950;background:#302d22;color:#ffe3aa;border-radius:8px;padding:.55rem .75rem;cursor:pointer}
+.mn-control .mn-add{display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap}.mn-control .mn-add span{font-size:1.12rem}
+.mn-preview{width:100%;max-width:40rem;overflow-wrap:anywhere;color:#e8d3ab;font:500 .78rem/1.4 system-ui,sans-serif}
+.wn-line .mn-control{margin:.5rem 0}.mn-control .mn-preview[hidden],#mn-dialog [hidden]{display:none!important}
+#mn-dialog{width:min(34rem,94vw);max-height:88dvh;overflow:auto;box-sizing:border-box;background:#17221c;color:#f4f2e9;border:1px solid #72846f;border-radius:16px;padding:clamp(14px,3vw,24px);box-shadow:0 14px 54px #0008;color-scheme:dark}
+#mn-dialog::backdrop{background:#080e0bd9}#mn-dialog header{display:flex;align-items:flex-start;justify-content:space-between}#mn-dialog h2,#mn-dialog h3{margin:.25rem 0 .6rem;color:#fff7e4}
+#mn-dialog header small{color:#d6ba80;letter-spacing:.1em}#mn-dialog form,#mn-dialog label{display:grid;gap:.4rem}
+#mn-dialog textarea,#mn-dialog select{min-width:0;box-sizing:border-box;width:100%;padding:.6rem;border:1px solid #617565;border-radius:7px;background:#101914;color:#f7f6ee;font:inherit}
+#mn-dialog #mn-context{margin:.25rem 0 .55rem;overflow-wrap:anywhere;font-weight:600}#mn-dialog .mn-help,#mn-dialog time,#mn-dialog article small{color:#c5d0c4;font-size:.82rem}
+#mn-dialog #mn-save{justify-self:start;background:#efd396;color:#292319}#mn-dialog button:disabled{opacity:.55;cursor:default}
+#mn-dialog #mn-status{margin:.3rem 0;color:#f3d28b}#mn-dialog section{border-top:1px solid #49574a;margin-top:.8rem;padding-top:.8rem}
+#mn-dialog article{border-top:1px solid #3d4a3d;margin-top:.7rem;padding:.65rem 0}#mn-dialog article time,#mn-dialog article small{display:block}
+#mn-dialog article p{margin:.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#mn-dialog #mn-feed{margin-top:.55rem}
+@media(max-width:700px){.mn-control .mn-add,#mn-dialog button{min-height:44px}#mn-dialog textarea,#mn-dialog select{font-size:16px}}
