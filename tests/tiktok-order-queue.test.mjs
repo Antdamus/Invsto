@@ -40,6 +40,14 @@ test('partly verified groups report missing dates separately and count only labe
 test('shipped and dispatched records stay in history while cancellations have their own queue',()=>{const orders=[order('1','Alice','2026-10-16'),order('2','Alice','2026-10-16',{marketplace_status:'Shipped'}),order('3','Bob',null,{stage:'dispatched'}),order('4','Carol',null,{marketplace_status:'Canceled'})];assert.equal(q.select(orders,{now}).flatMap(g=>g.orders).length,1);assert.equal(q.select(orders,{history:true,due:'overdue',now}).flatMap(g=>g.orders).length,2);});
 test('sorting uses source calendar values, puts unknown deadlines last and does not change order IDs',()=>{const a=order('1','Zoe',null,{created_time:'9/30/2026 11:59:00 PM'}),b=order('2','Amy','2026-10-18',{created_time:'10/01/2026 12:01:00 AM'});assert.equal(q.select([b,a],{now})[0].buyer,'Zoe');assert.equal(q.select([a,b],{sort:'due',now})[0].buyer,'Amy');assert.equal(q.select([a,b],{sort:'newest',now})[0].orders[0].order_number,b.order_number);});
 
+test('API and CSV purchases display the same Eastern time and sort together correctly',()=>{
+ const csv=order('1','Alice',null,{created_time:'10/29/2026 9:57:16 PM'}),api=order('2','Zoe',null,{created_time:'2026-10-29 22:01:09'});
+ const latest=q.select([csv,api],{sort:'newest',now});assert.equal(latest[0].buyer,'Zoe');assert.equal(latest[0].created,Date.UTC(2026,9,29,22,1,9));
+ assert.equal(q.select([api,csv],{sort:'oldest',now})[0].buyer,'Alice');
+ assert.equal(q.group([{...api,created_time:'2026-10-29 21:57:16'}],now)[0].created,q.group([csv],now)[0].created);
+ for(const created_time of ['2026-02-30 12:00:00','2026-10-29 24:00:00','2026-10-29 21:60:00'])assert.equal(q.group([{...api,created_time}],now)[0].created,0);
+});
+
 test('a shipped export cannot hide inventory links still awaiting OG completion',()=>{
  const o=order('1','buyer','2026-10-17',{marketplace_status:'Shipped',lines:[{quantity:1,inventory:{quantity:1,consumed_quantity:0}}]});assert.equal(q.closed(o),false);
  o.lines[0].inventory.consumed_quantity=1;assert.equal(q.closed(o),true);o.lines[0].inventory.consumed_quantity=0;o.marketplace_status='Canceled';assert.equal(q.closed(o),true);

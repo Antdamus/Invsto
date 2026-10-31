@@ -65,7 +65,7 @@ test('front TikTok tasks retain exact order/item context, require an owner, hand
 
 test('TikTok preview, import, preparation/history and packet download use only TikTok data on desktop and mobile',async()=>{
  const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await setup(page);
- await expect(page.getByRole('navigation',{name:'Order marketplace'}).getByRole('link')).toHaveCount(2);
+ await expect(page.getByRole('navigation',{name:'Order marketplace'}).getByRole('link')).toHaveText(['eBay','TikTok','Whatnot']);
  await page.locator('#tk-import').evaluate(e=>e.open=true);await page.locator('#tk-file').setInputFiles({name:'To Ship order-2026-10-17-22_04.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});await expect(page.locator('#tk-preview')).toContainText('1 orders');assert.equal(await page.evaluate(()=>window.fixtureCalls.length),0);
  await page.locator('#tk-import-confirm').click();await expect(page.locator('#tk-orders')).toContainText('fixture-buyer');await expect(page.locator('#tk-status')).toContainText('1 new');
  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-desktop.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
