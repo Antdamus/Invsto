@@ -4,6 +4,36 @@
  const scalar=v=>typeof v==='string'||typeof v==='number'?String(v):'';
  function numbers(m={}){m=m||{};return [...new Set([m.trackingNumber,m.shippingBarcodeNumber,...list(m.trackingNumbers),...list(m.shippingBarcodeNumbers),...list(m.labelRows).flatMap(numbers)].map(code).filter(Boolean))];}
  function carrierUrl(carrier,tracking){const c=String(carrier||'').toLowerCase(),t=encodeURIComponent(tracking);if(c.includes('usps'))return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${t}`;if(c.includes('fedex'))return `https://www.fedex.com/fedextrack/?trknbr=${t}`;if(c.includes('ups'))return `https://www.ups.com/track?tracknum=${t}`;if(c.includes('dhl'))return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${t}`;return `https://www.17track.net/en/track?nums=${t}`;}
+ // Copied carrier scans have local wall-clock times, often without a zone.
+ // Keep that provenance rather than interpreting them in the reviewer's zone.
+ function scanMilestones(entry){
+  const rows=String(entry.history?.history_text||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean),found={shipped:[],delivered:[]};
+  const stamp=/^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+(\d{1,2}),?\s+(\d{4})(?:,?\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(AM|PM))?(?:\s+(EST|EDT|CST|CDT|MST|MDT|PST|PDT|UTC|GMT))?$/i;
+  for(let n=0;n<rows.length;n++){
+   const event=rows[n],kind=/^(?:(?:Accepted, )?USPS in possession of item|Accepted at USPS (?:Origin Facility|Regional Origin Facility)|Accepted at USPS Facility|Picked up|Accepted at (?:UPS|FedEx) Origin Facility)$/i.test(event)?'shipped':/^Delivered(?:[ ,.-].*)?$/i.test(event)&&!/(?:return|sender|shipper|attempt|not delivered|expected|estimated)/i.test(event)?'delivered':null;
+   if(!kind)continue;
+   let location='';
+   for(let p=n+1;p<=n+2&&p<rows.length;p++){
+    const match=rows[p].match(stamp);
+    if(match){
+     const month=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(match[1].slice(0,3).toLowerCase());
+     const day=Number(match[2]),year=Number(match[3]),hour=match[4]?Number(match[4]):0,minute=Number(match[5]||0),utc=Date.UTC(year,month,day,(hour%12)+(match[6]?.toUpperCase()==='PM'?12:0),minute);
+     if(new Date(utc).getUTCDate()!==day||hour>12||(match[4]&&hour<1)||minute>59)break;
+     const zone=match[7]?.toUpperCase();
+     found[kind].push({value:rows[p],source:`${entry.history?.carrier||entry.carrier||'Carrier'} ${kind==='shipped'?'acceptance':'delivery'} scan · ${zone?'carrier time '+zone:'carrier local time (zone not supplied)'}`,event,location,sort:utc});break;
+    }
+    // Only a location can intervene between a scan label and its timestamp.
+    if(p!==n+1||!/[A-Z]{2}\s+\d{5}(?:-\d{4})?$/.test(rows[p]))break;
+    location=rows[p];
+   }
+  }
+  return {shipped:found.shipped.sort((a,b)=>a.sort-b.sort)[0]||null,delivered:found.delivered.sort((a,b)=>b.sort-a.sort)[0]||null};
+ }
+ function milestones(entry){
+  const scans=scanMilestones(entry);
+  if(!scans.shipped){const recorded=entry.events.filter(e=>e.title==='Shipment recorded by eBay'&&Number.isFinite(Date.parse(e.at))).sort((a,b)=>Date.parse(a.at)-Date.parse(b.at))[0];if(recorded)scans.shipped={value:root.OGIssueReviewModel.date(recorded.at),source:'Shipment recorded by eBay; carrier acceptance scan not saved'};}
+  return scans;
+ }
  function build(members,items,baseUrl,histories=[]){
   const entries=new Map(),lineIds=new Set(items.map(i=>i.id));
   const events=(entry,at,title,source,body='')=>{if(at)entry.events.push({at,title,source,body});};
@@ -47,5 +77,5 @@
   }
   return [...entries.values()];
  }
- const api={build,numbers,carrierUrl};root.OGIssueReviewTracking=api;if(typeof module!=='undefined')module.exports=api;
+ const api={build,numbers,carrierUrl,scanMilestones,milestones};root.OGIssueReviewTracking=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
