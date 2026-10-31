@@ -621,3 +621,8 @@ enabled = true
 # The handler validates the bearer token and can_manage_inventory before any work.
 verify_jwt = false
 entrypoint = "./functions/ebay-order-map-history/index.ts"
+
+[functions.whatnot-order-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/whatnot-order-sync/index.ts"

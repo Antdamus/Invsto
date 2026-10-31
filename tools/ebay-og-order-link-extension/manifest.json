@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OG eBay Order Link",
-  "description": "Connects eBay orders and separate TikTok exports, receipts and shipping labels to OG.",
-  "version": "1.0.24",
+  "description": "Connects eBay, TikTok and Whatnot orders, receipts and shipping evidence to Invsto.",
+  "version": "1.0.25",
   "permissions": [
     "storage",
     "activeTab",
@@ -32,25 +32,58 @@
       ]
     },
     {
-      "resources": ["online-print-page.js"],
-      "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+      "resources": [
+        "online-print-page.js"
+      ],
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
     }
   ],
   "content_scripts": [
     {
-      "matches": ["https://seller-us.tiktok.com/*"],
-      "js": ["tiktok-print-probe.js", "tiktok-report-probe.js"],
+      "matches": [
+        "https://www.whatnot.com/dashboard/orders/*"
+      ],
+      "js": [
+        "whatnot-receipt-capture.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://seller-us.tiktok.com/*"
+      ],
+      "js": [
+        "tiktok-print-probe.js",
+        "tiktok-report-probe.js"
+      ],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": ["https://seller-us.tiktok.com/*"],
-      "js": ["tiktok-print.js", "tiktok-receipt-capture.js", "tiktok-export.js", "tiktok-orders.js", "tiktok-shipping.js"],
+      "matches": [
+        "https://seller-us.tiktok.com/*"
+      ],
+      "js": [
+        "tiktok-print.js",
+        "tiktok-receipt-capture.js",
+        "tiktok-export.js",
+        "tiktok-orders.js",
+        "tiktok-shipping.js"
+      ],
       "run_at": "document_start"
     },
     {
-      "matches": ["https://www.ebay.com/ship/*"],
-      "js": ["shipping-combine-policy.js", "shipping-combine-guard.js"],
+      "matches": [
+        "https://www.ebay.com/ship/*"
+      ],
+      "js": [
+        "shipping-combine-policy.js",
+        "shipping-combine-guard.js"
+      ],
       "run_at": "document_start"
     },
     {
@@ -73,7 +106,8 @@
         "online-print-bridge.js",
         "tiktok-orders-bridge.js",
         "tiktok-labels-bridge.js",
-        "tiktok-receipt-bridge.js"
+        "tiktok-receipt-bridge.js",
+        "whatnot-receipt-bridge.js"
       ],
       "run_at": "document_idle"
     }
