@@ -86,6 +86,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261014110000_customer_return_final_review.sql'));
  await db.exec(await sqlFile('20261031040000_customer_issue_finalized_history.sql'));
  await db.exec(await sqlFile('20261031050000_customer_issue_history_button.sql'));
+ await db.exec(await sqlFile('20261031060000_customer_issue_history_close_tasks.sql'));
 
 
 });
@@ -219,9 +220,65 @@ test('new case message returns the record immediately; historical message import
  await db.exec(`insert into ebay_return_messages(return_case_id,direction,message_body,sent_at) values('${id(100)}','inbound','New buyer update',now()+interval '1 second')`);
  assert.equal(await status(),'open');assert.equal(await scalar('select history_update_pending v from ebay_return_cases where id=$1',[id(100)]),true);
 });
-test('manual acceptance cannot discard employee work or a changed family snapshot',async()=>{
+test('manual acceptance requires a fresh case and task snapshot',async()=>{
  const plan=await manualPlan();await monitor("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"';");
- await assert.rejects(manualArchive(true,plan.cases),/Internal work is unfinished/);
- await db.exec("update ebay_return_tasks set assigned_to_user_id=null;update ebay_return_cases set item_title='Changed since preview'");
- await assert.rejects(manualArchive(true,plan.cases),/This issue changed/);assert.equal(await status(),'open');
+ await assert.rejects(manualArchive(true,plan.cases),/issue or its tasks changed/);
+ const withTasks=await manualPlan();await db.exec("update ebay_return_tasks set latest_note='New employee information'");
+ await assert.rejects(manualArchive(true,withTasks.cases),/issue or its tasks changed/);
+ const fresh=await manualPlan();await db.exec("update ebay_return_cases set item_title='Changed since preview'");
+ await assert.rejects(manualArchive(true,fresh.cases),/issue or its tasks changed/);assert.equal(await status(),'open');
+});
+
+test('accepting a fair decision resolves every linked task with actor, time, reason and preserved notes',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='inquiry',issue_kind='request',raw_payload='{"ebayDetail":{"inquiryId":"D100","state":"CLOSED","inquiryDetails":{"escalationDate":{"value":"2026-10-29"}}}}';
+ insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values
+ ('${id(101)}','case','dispute','D100','open','CLOSED',now(),'{"ebayDetail":{"caseId":"D100","sellerOutcome":"LOSE"}}'),
+ ('${id(102)}','case','dispute','OTHER','open','CLOSED',now(),'{"ebayDetail":{"caseId":"OTHER","sellerOutcome":"LOSE"}}');
+ update ebay_return_cases set order_id='${id(10)}';
+ insert into ebay_return_tasks(id,return_case_id,task_type,title,status,assigned_to_user_id,created_by,resolution_notes,latest_note) values
+ ('${id(200)}','${id(100)}','follow_up','Call eBay','assigned','${id(2)}','${id(1)}','Earlier resolution note','Keep employee note'),
+ ('${id(201)}','${id(101)}','question','Review escalation','completed_by_employee','${id(2)}','${id(1)}',null,null),
+ ('${id(202)}','${id(102)}','follow_up','Unrelated issue','assigned','${id(2)}','${id(1)}',null,null),
+ ('${id(203)}','${id(100)}','follow_up','Already done','resolved','${id(2)}','${id(1)}','Already resolved',null);`);
+ const plan=await manualPlan();assert.equal(plan.allowed,true);assert.equal(plan.task_count,2);assert.equal(plan.accept_decision,true);
+ assert.equal((await archive()).archived,0,'automatic cleanup cannot close employee tasks');
+ await assert.rejects(manualArchive(false),/Review and accept/);
+ const result=await manualArchive(true);assert.equal(result.archived,2);assert.equal(result.closed_tasks,2);
+ assert.deepEqual(result.closed_task_ids,[id(200),id(201)]);
+ const tasks=(await db.query('select * from ebay_return_tasks order by id')).rows;
+ for(const t of tasks.slice(0,2)){
+  assert.equal(t.status,'resolved');assert.equal(t.resolved_by,id(1));assert.equal(t.resolved_by_email,'operator@example.test');assert.ok(t.resolved_at);
+  assert.match(t.resolution_notes,/Decision reviewed and accepted as fair/);assert.equal(t.metadata.decision_accepted_as_fair,true);
+ }
+ assert.match(tasks[0].resolution_notes,/Earlier resolution note/);assert.equal(tasks[0].latest_note,'Keep employee note');
+ assert.equal(tasks[2].status,'assigned');assert.equal(tasks[3].resolution_notes,'Already resolved');
+ const events=(await db.query("select * from ebay_return_task_events where payload->>'source'='customer_issue_manual_history' order by task_id")).rows;
+ assert.equal(events.length,2);for(const e of events){assert.equal(e.action,'resolved');assert.equal(e.signed_by,id(1));assert.ok(e.created_at);assert.equal(e.payload.decision_accepted_as_fair,true);assert.deepEqual(e.payload.issue_case_ids,[id(100),id(101)]);}
+ assert.equal(events[0].payload.previous_task.status,'assigned');assert.equal(events[0].payload.previous_task.resolution_notes,'Earlier resolution note');
+ await db.exec('update ebay_return_cases set synced_at=now()');assert.equal(await status(),'closed','task closeout belongs to the saved snapshot');
+ await assert.rejects(manualArchive(true,plan.cases),/issue or its tasks changed/);
+ const archivedPlan=await scalar('select customer_issue_manual_history_check(c) v from ebay_return_cases c where id=$1',[id(100)]);
+ assert.equal((await manualArchive(true,archivedPlan.cases)).archived,0);
+ assert.equal(await scalar("select count(*)::int v from ebay_return_task_events where payload->>'source'='customer_issue_manual_history'"),2);
+ await db.exec(`insert into ebay_return_messages(return_case_id,direction,message_body,sent_at) values('${id(100)}','inbound','New buyer update',now()+interval '1 second')`);
+ assert.equal(await status(),'open');assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(200)]),'resolved','new information does not silently undo signed task closures');
+});
+
+test('a finalized favorable decision with employee tasks requires explicit acceptance too',async()=>{
+ await monitor("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"';");
+ const plan=await manualPlan();assert.equal(plan.allowed,true);assert.equal(plan.against_us,false);assert.equal(plan.accept_decision,true);
+ await assert.rejects(manualArchive(false),/Review and accept/);assert.equal((await archive()).archived,0);
+ assert.equal((await manualArchive(true)).closed_tasks,1);
+});
+
+test('accepting a decision closes tasks only after eBay and receiving work is finalized',async()=>{
+ await monitor("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"';");
+ await db.exec(`insert into customer_return_reviews(return_case_id,status,reviewer_id,submitted_by,submission_note) values('${id(100)}','pending','${id(2)}','${id(1)}','Please review')`);
+ await assert.rejects(manualArchive(true),/Final review is unfinished/);
+ await db.exec(`delete from customer_return_reviews;update ebay_return_cases set ebay_status='OPEN'`);
+ await assert.rejects(manualArchive(true),/Still open on eBay/);
+ await db.exec(`update ebay_return_cases set ebay_status='CLOSED',status='needs_review'`);
+ await assert.rejects(manualArchive(true),/Return inspection is unfinished/);
+ assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(200)]),'open');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_task_events'),0);
 });

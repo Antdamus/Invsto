@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261031-history-button" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261031-history-tasks" />
   <link rel="stylesheet" href="ebay-buyer-insights.css?v=20261029-report-2" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -86,7 +86,7 @@
         <div id="issues-feedback" role="status" aria-live="polite"></div>
         <section id="issues-history-banner" class="issues-history-banner" aria-labelledby="issues-history-title" data-admin-only="true">
           <div><span class="eyebrow">KEEP THE ACTIVE LIST CLEAR</span><h2 id="issues-history-title">Fully finished? Move it to History.</h2>
-            <p>Only finalized eBay cases with nothing left to do. <strong>Unfinished work stays active.</strong> You can also review and accept a decision against us with the Send to History button on that case.</p>
+            <p>Automatic cleanup only moves finalized eBay cases with nothing left to do. <strong>Unfinished work stays active.</strong> To accept a decision as fair and close its related tasks, use Send to History on that case. Your decision and the task closures are recorded.</p>
             <p id="issues-history-summary" class="issues-history-summary" role="status">Checking which cases are fully finalized…</p>
             <small>Checks all customer issues, regardless of the filters below. Future finalized cases also archive automatically after eBay sync.</small>
           </div><div class="issues-history-actions"><button type="button" id="issues-archive-finalized" class="primary-btn" disabled>Move finalized cases to History</button><button type="button" id="issues-open-history" class="secondary-btn">View History</button></div>
@@ -250,7 +250,7 @@
   <script src="customer-issue-dispute.js?v=20261010-25"></script>
   <script src="customer-issue-notes.js?v=20261010-28"></script>
   <script src="customer-issue-chats.js?v=20261010-31"></script>
-  <script src="customer-issues.js?v=20261031-history-button"></script>
+  <script src="customer-issues.js?v=20261031-history-tasks"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>

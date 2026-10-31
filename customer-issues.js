@@ -34,9 +34,10 @@
  function caseHistoryAction(c,compact=false){
   if(ctx.employee.role!=='admin')return '';
   if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks)&&!['pending','changes_requested'].includes(c.final_review?.status))return compact?'':'<section class="issue-case-history"><div><strong>Saved in History · watching for updates</strong><p>New eBay activity or case work brings this record back to the active list.</p></div></section>';
-  const check=c.archive_check?.manual,allowed=check?.allowed===true;
-  const reason=allowed?(check.accept_decision?'Decided against us. If you accept the decision as fair, click Send to History to clear this issue.':'Closed on eBay with no remaining work on this issue.'):(check?.reason||'Checking whether this case can be archived…');
-  return `<section class="issue-case-history ${compact?'is-compact':''}" aria-label="Case History action"><div><strong>${allowed?'Send this issue to History':'Keep this case visible'}</strong><p>${escape(reason)}</p>${check?.case_count>1?`<p class="issue-history-scope">Includes all ${escape(check.case_count)} linked request / case records.</p>`:''}${check?.related_case_id?`<a href="ebay-returns.html?caseId=${encodeURIComponent(check.related_case_id)}">View escalated case ${escape(check.related_case_number||'')} ↗</a>`:''}<small>New updates bring it back automatically.</small></div><button type="button" class="primary-btn" data-send-history="${escape(c.id)}" ${allowed?'':'disabled'}>Send to History</button></section>`;
+  const check=c.archive_check?.manual,allowed=check?.allowed===true,tasks=Number(check?.task_count||0);
+  const reason=allowed?(check.accept_decision?`${check.against_us!==false?'Decided against us. ':''}If you accept the decision as fair, click Send to History to clear this issue.`:'Closed on eBay with no remaining work on this issue.'):(check?.reason||'Checking whether this case can be archived…');
+  const taskNotice=allowed&&tasks?`<p class="issue-history-scope"><strong>Also closes ${tasks} related task${tasks===1?'':'s'}.</strong> ${check.accept_decision?'Each task records “Decision reviewed and accepted as fair,”':'Each task records that the finalized issue was archived,'} with your name and the time. Previous notes are kept.</p>`:'';
+  return `<section class="issue-case-history ${compact?'is-compact':''}" aria-label="Case History action"><div><strong>${allowed?'Send this issue to History':'Keep this case visible'}</strong><p>${escape(reason)}</p>${check?.case_count>1?`<p class="issue-history-scope">Includes all ${escape(check.case_count)} linked request / case records.</p>`:''}${taskNotice}${check?.related_case_id?`<a href="ebay-returns.html?caseId=${encodeURIComponent(check.related_case_id)}">View escalated case ${escape(check.related_case_number||'')} ↗</a>`:''}<small>New updates bring it back automatically.</small></div><button type="button" class="primary-btn" data-send-history="${escape(c.id)}" ${allowed?'':'disabled'}>Send to History</button></section>`;
  }
  async function sendCaseToHistory(id){
   const c=detail?.c.id===id?detail.c:rows.find(r=>r.id===id);if(!c||saving)return;
@@ -46,7 +47,7 @@
    const plan=c.archive_check?.manual;
    const result=checked(await db.rpc('send_customer_issue_to_history',{_case_id:id,_expected_cases:plan?.cases||[],_accept_decision:plan?.accept_decision===true}));
    historyReceipt=`${result.archived} record${result.archived===1?'':'s'} sent to History. `;clearBulk();await continueAfterClose(result.archived_ids||[id],position);
-   feedback('The issue was sent to History. New eBay information or case work brings it back for review.');
+   feedback(`The issue was sent to History.${result.closed_tasks?` ${result.closed_tasks} related task${result.closed_tasks===1?' was':'s were'} closed with an explanation.`:''} New eBay information or case work brings it back for review.`);
   }catch(error){feedback(error.message||'Could not confirm the move. Refresh the case before trying again.',true);}
   finally{saving=false;cards();if(detail)renderDetail();historyBanner();}
  }
