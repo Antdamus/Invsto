@@ -88,6 +88,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261031050000_customer_issue_history_button.sql'));
  await db.exec(await sqlFile('20261031060000_customer_issue_history_close_tasks.sql'));
  await db.exec(await sqlFile('20261031070000_customer_issue_ebay_review.sql'));
+ await db.exec(await sqlFile('20261031071000_customer_issue_review_action_validation.sql'));
 
 
 });
@@ -313,6 +314,7 @@ test('review packet contains all saved messages beyond the panel limit and no ot
  const packet=await scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]);assert.equal(packet.members.length,1);assert.equal(packet.members[0].case_messages.length,620);assert.equal(packet.members[0].buyer_messages.length,1);assert.equal(packet.members[0].buyer_messages[0].message_body,'Our order response');
 });
 test('review writes and report reads require an authenticated staff session',async()=>{
+ await markReview();await assert.rejects(scalar('select save_customer_issue_ebay_review($1,null,$2,$3,null) v',[id(100),'Overwrite without version','Request']),/valid review action/);
  await db.exec("select set_config('test.access','no',false);set role authenticated");
  await assert.rejects(markReview(),/Customer issues access/);await assert.rejects(scalar('select list_customer_issue_ebay_reviews() v'),/Customer issues access/);await assert.rejects(scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]),/Customer issues access/);
  await assert.rejects(db.exec(`insert into customer_issue_ebay_reviews(case_id) values('${id(100)}')`),/permission denied/);
