@@ -49,12 +49,15 @@
    '<div>'+cell('Seller proceeds',fmt(data.focus_proceeds))+'<span>'+change(data.focus_proceeds,data.previous_proceeds)+' · previous '+fmt(data.previous_proceeds)+'</span></div></div>'+
    '<div class="ws-list">'+Array.from(groups).reverse().map(weekCard).join('')+'</div>'+
    '<details class="ws-method"><summary>Adjustments and coverage</summary><p>USD orders from eBay, TikTok Shop, and Whatnot are counted once by purchase week in Eastern time. Booked items include cancellations. Confirmed merchandise refunds and cancellations reduce that week once. Failed payments, buyer tax, and shipping collected are outside net item sales.</p>'+
-   '<p>Seller proceeds use order-linked marketplace entries after fees, refunds, adjustments, and documented postage. eBay funds on hold or processing are included when the amounts and postage are recorded. Positive balances with incomplete costs stay out. Recorded losses can appear before an order fully settles. This is the reconciled portion of sales, not a bank deposit. Inventory cost, off-platform postage, and account-wide charges are outside these figures.</p>'+
+   '<p>Seller proceeds include buyer shipping credited by the marketplace, less fees, refunds, adjustments, and recorded postage. A shared eBay label is split once across its linked orders. eBay funds on hold or processing are included when costs are recorded. Positive balances with incomplete costs stay out. Recorded losses can appear before an order fully settles. This shows the reconciled portion of sales. It excludes inventory cost, off-platform postage, and account-wide charges without an order.</p>'+
    '<p>'+feedNote('TikTok Shop',data.feeds?.tiktok)+' '+feedNote('Whatnot',data.feeds?.whatnot)+(data.whatnot_backfill?' Whatnot order history is still importing.':'')+'</p></details>';
  }
  function init(client){
   const panel=$('weekly-sales-report'),month=$('ws-month');if(!panel||month.dataset.ready)return;month.dataset.ready='true';
-  let seq=0,manualMonth=false;month.value=month.max=etMonth();
+  const requested=new URLSearchParams(location.search).get('month');
+  month.max=etMonth();
+  let seq=0,manualMonth=Boolean(requested&&/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)&&requested>='2000-01'&&requested<=month.max);
+  month.value=manualMonth?requested:month.max;
   async function load(){
    const version=++seq;if(!panel.open||document.hidden)return;
    month.max=etMonth();if(!manualMonth)month.value=month.max;

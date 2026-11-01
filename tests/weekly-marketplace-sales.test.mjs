@@ -20,6 +20,7 @@ test('weekly report revises the original ET week, separates cancellation and ref
    create table tiktok_order_imports(id uuid,source text);create function import_tiktok_api_order(_token uuid,_rows jsonb,_hash text) returns jsonb language plpgsql as $$declare imp uuid;begin update public.tiktok_order_imports set source='api' where id=imp;return null;end$$;`);
   await db.exec(await readFile(new URL('../supabase/migrations/20261101040000_weekly_marketplace_sales.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101041000_weekly_sales_settlement_sync.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101042000_weekly_sales_shared_postage.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -43,6 +44,16 @@ test('weekly report revises the original ET week, separates cancellation and ref
   r=await report();assert.equal(row(r,'2025-05-26','ebay').refunded,100);assert.equal(row(r,'2025-05-26','ebay').net,0);
   await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PAID","ebayFinance":{"transactionIds":["x","y","z"],"transactions":[{"transactionId":"x","orderNumber":"e1","transactionType":"SALE","transactionStatus":"FUNDS_ON_HOLD","amount":90,"bookingEntry":"CREDIT"},{"transactionId":"y","orderNumber":"e1","transactionType":"SHIPPING_LABEL","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":6,"bookingEntry":"DEBIT"},{"transactionId":"z","orderNumber":"e1","transactionType":"REFUND","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":15,"bookingEntry":"DEBIT"}]}}' where id='a'`);
   r=await report();assert.equal(row(r,'2025-05-26','ebay').proceeds,69);assert.equal(row(r,'2025-05-26','ebay').settled_orders,1);
+  // One shared debit spans two purchase weeks; only one copy of its seven cents is deducted.
+  for(const [order,id,day] of [['combined-A','aa','2025-06-08 12:00Z'],['combined-B','bb','2025-06-09 12:00Z']]){
+   const raw={orderPaymentStatus:'PAID',ebayFinance:{source:'ebay_finances_api',orderNumber:order,transactionIds:[id,'shared-label'],transactions:[
+    {transactionId:id,orderNumber:order,transactionType:'SALE',bookingEntry:'CREDIT',transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT',amount:10},
+    {transactionId:'shared-label',transactionType:'SHIPPING_LABEL',bookingEntry:'DEBIT',transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT',amount:.07}]}};
+   await db.query('insert into ebay_orders values($1,$2,$3,$4,now(),$5,10,null)',[id,order,'fulfilled',day,JSON.stringify(raw)]);
+  }
+  const postage=(await db.query("select order_number,posted,complete from weekly_sales_proceeds('2025-06-01','2025-06-09') where order_number='combined-A'")).rows[0];
+  assert.equal(Number(postage.posted),9.96);assert.equal(postage.complete,true);
+  assert.equal(Number((await one("select posted from weekly_sales_proceeds('2025-06-09','2025-06-10') where order_number='combined-B'")).posted),9.97);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });
