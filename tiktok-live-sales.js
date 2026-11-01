@@ -7,6 +7,7 @@
  const money=v=>Number(v||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
  const time=v=>v?new Date(v).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Time unavailable';
  const states={paid:'Confirmed paid',waiting:'Pending payment',failed:'Payment failed',review:'Needs review',cancelled:'Canceled'};
+ const ended=()=>!!(data?.connection.broadcast_ended_at||data?.connection.review_completed_at||(data?.session.status&&data.session.status!=='active'));
  let data=null,currentSession=null,loading=false,employees=[],connections=[],rendered='',authorized=false,stream=null,receipts=[];
  try{stream=JSON.parse(params.get('stream')||'null');}catch{}
  const rpc=async(name,args={})=>{const r=await sb.rpc(name,args);if(r.error)throw r.error;return r.data;};
@@ -23,6 +24,12 @@
  window.liveBagPrintBridge.install({printBag},sort,id=>data?.connection.event_id===id&&Date.now()-Date.parse(data.server_time)<8000?data:null,{platform:'tiktok'});
  function updateStatus(){
   if(!data)return;const c=data.connection,observed=c.health?.observed_at,age=Date.now()-Date.parse(observed),fresh=Number.isFinite(age)&&age>=-30000&&age<20000,live=fresh&&c.health?.ready;
+  $('end-capture').hidden=ended();
+  if(ended()){
+   $('connection-title').textContent='Show ended';status('Saved report · '+data.attempts.length+' auction records'+(observed?' · Last capture '+time(observed):''),true);
+   if(isCapture&&eventId===c.event_id)window.postMessage({type:'TIKTOK_CAPTURE_ENDED',event_id:eventId},location.origin);
+   return;
+  }
   $('connection-title').textContent=live?'TikTok capture connected':fresh?'Capture needs attention':'Waiting for the TikTok console';
   const message=fresh?(c.health?.message||'Reading TikTok sold auctions.'):'The TikTok console is not sending current observations.';
   const version=/^\d+\.\d+\.\d+$/.test(c.health?.version||'')?' · Capture v'+c.health.version:'';
@@ -49,11 +56,17 @@
  }
  async function refresh(){if(loading||!authorized||!currentSession)return;loading=true;try{data=await rpc('get_tiktok_live_dashboard',{_session_id:currentSession});try{receipts=await rpc('get_tiktok_live_bag_print_status',{_event_id:data.connection.event_id});}catch{receipts=[];}render();}catch(e){status(e.message,true);}finally{loading=false;}}
  async function loadShows(){const r=await sb.from('tiktok_live_connections').select('*').order('linked_at',{ascending:false}).limit(500);if(r.error)throw r.error;connections=r.data;$('shows').replaceChildren(new Option('Choose a show',''),...connections.map(c=>new Option(c.title+' · '+time(c.started_at||c.linked_at),c.session_id)));const linked=connections.find(c=>c.event_id===eventId);if(linked)currentSession=linked.session_id;else if(!eventId&&!currentSession)currentSession=connections[0]?.session_id||null;$('shows').value=currentSession||'';if(currentSession)await refresh();else if(eventId&&stream){$('setup').hidden=false;$('setup-title').textContent=stream.title||'TikTok Live';$('setup-description').textContent=stream.start_label||'Choose the seller for this show. Historical sales are saved; automatic printing starts with new sales.';}}
- window.addEventListener('message',async e=>{if(e.source!==window||e.origin!==location.origin||e.data?.type!=='TIKTOK_LIVE_BATCH')return;const {id,payload}=e.data;if(!/^[0-9a-f-]{36}$/i.test(id||''))return;try{if(!authorized)throw Error('Sign in to Invsto.');if(payload?.event_id!==eventId)throw Error('Wrong TikTok show.');if(!currentSession)throw Error('Choose the seller for this TikTok show.');await rpc('ingest_tiktok_live_events',{_event_id:eventId,_events:payload.events,_health:payload.health});window.postMessage({type:'TIKTOK_LIVE_ACK',id,ok:true},location.origin);await refresh();}catch(error){window.postMessage({type:'TIKTOK_LIVE_ACK',id,ok:false,error:error.message},location.origin);}});
+ window.addEventListener('message',async e=>{if(e.source!==window||e.origin!==location.origin||e.data?.type!=='TIKTOK_LIVE_BATCH')return;const {id,payload}=e.data;if(!/^[0-9a-f-]{36}$/i.test(id||''))return;try{if(!authorized)throw Error('Sign in to Invsto.');if(!isCapture||payload?.event_id!==eventId)throw Error('Wrong TikTok show.');if(!currentSession)throw Error('Choose the seller for this TikTok show.');
+  if(ended()&&!payload.events?.length){window.postMessage({type:'TIKTOK_LIVE_ACK',id,ok:true,ended:true},location.origin);return;}
+  const r=await rpc('ingest_tiktok_live_events',{_event_id:eventId,_events:payload.events,_health:payload.health});window.postMessage({type:'TIKTOK_LIVE_ACK',id,ok:true,ended:!!r?.ended||ended()},location.origin);await refresh();
+ }catch(error){window.postMessage({type:'TIKTOK_LIVE_ACK',id,ok:false,ended:ended(),error:error.message},location.origin);}});
+ $('end-capture').onclick=async()=>{const id=data?.connection.event_id;if(!id||ended()||!confirm('End capture for '+data.connection.title+'? The saved sales and bag report will remain available.'))return;
+  $('end-capture').disabled=true;try{await rpc('end_tiktok_live_capture',{_event_id:id,_source:'staff'});await refresh();}catch(e){status(e.message,true);}finally{$('end-capture').disabled=false;}
+ };
  $('setup-form').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{if(!stream||!eventId)throw Error('Start capture from the TikTok console.');const s=await rpc('start_tiktok_live_capture',{_event_id:eventId,_primary_seller_employee_id:$('seller').value,_stream:stream});currentSession=s.id;$('setup').hidden=true;await loadShows();}catch(error){$('setup-status').textContent=error.message;}finally{b.disabled=false;}};
  $('shows').onchange=()=>{currentSession=$('shows').value;data=null;rendered='';void refresh();};if(isCapture)$('shows').disabled=true;
  $('search').oninput=()=>render();$('payment').onchange=()=>render();$('refresh').onclick=()=>refresh();$('printer').onclick=async()=>{try{const chosen=await window.printStations.chooseDestination({copies:1,configureOnly:true});const {data:auth}=await sb.auth.getSession();localStorage.setItem('invsto.live.bagPrinter.v1.'+auth.session.user.id,JSON.stringify({...chosen,copies:1}));status('Bag-label printer saved.');}catch(e){status(e.message,true);}};
  $('report').onclick=()=>window.print();$('photo-close').onclick=()=>$('photo-dialog').close();window.addEventListener('live-bag-photo-saved',()=>{rendered='';void refresh();});
  async function init(){try{const r=await sb.auth.getSession();if(!r.data?.session){$('signin').hidden=false;throw Error('Sign in to Invsto, then refresh this receiver.');}employees=await rpc('get_live_sale_seller_directory');if(!employees.length)throw Error('An active inventory staff account is required.');authorized=true;$('seller').replaceChildren(new Option('Choose seller',''),...employees.map(e=>new Option(e.display_name||e.email,e.id)));await loadShows();if(!data){$('connection-title').textContent='Ready for TikTok capture';status('Start capture in the TikTok LIVE console.');}if(isCapture)document.title='TikTok capture receiver · Invsto';}catch(e){status(e.message,true);}}
- void init();setInterval(refresh,5000);
+ void init();setInterval(()=>{if(!ended())void refresh();},5000);
 })();

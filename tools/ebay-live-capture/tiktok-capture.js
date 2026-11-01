@@ -13,7 +13,7 @@
  }
  chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
-  if(m.type==='TIKTOK_LIVE_CONTEXT'){reply({event_id:parser.metadata(document,location.href)?.event_id});return;}
+  if(m.type==='TIKTOK_LIVE_CONTEXT'){reply({event_id:parser.metadata(document,location.href)?.event_id,running,ended:parser.ended(document)});return;}
   if(m.type==='TIKTOK_CAPTURE_FRAME'){try{reply({ok:true,image:captureFrame()});}catch(e){reply({ok:false,error:e.name==='SecurityError'?'TikTok has not made this video frame available. Restart the preview and retry.':e.message});}return;}
  });
  function status(message,error=false){latest=message;if(box){box.querySelector('[data-tt-status]').textContent=message;panel.setCaptureStatus?.({state:error?'attention':running?'active':'waiting',label:running?'TikTok capture on':'TikTok capture stopped',detail:message});}}
@@ -38,7 +38,8 @@
    context=current;mount();if(!running)return;
    const canMove=!held&&Date.now()-lastInput>15000&&!document.querySelector('[role="dialog"]')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
    let result=parser.parse(document);
-   if(!result.list&&canMove){
+   const ended=parser.ended(document);
+   if(!ended&&!result.list&&canMove){
     const auction=[...document.querySelectorAll('[role="tab"]')].find(e=>/^(Auction|LIVE auctions)/.test(e.textContent.trim()));
     if(auction&&auction.getAttribute('aria-selected')!=='true')auction.click();
     else [...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Sold items')?.click();
@@ -46,8 +47,9 @@
    }
    const events=[];
    for(const e of result.events){const signature=JSON.stringify([e.key,e.title,e.payment_state,e.payment_label,!!e.sold_at]);const previous=seen.get(e.key);if(!previous||previous.signature!==signature){events.push(e);seen.set(e.key,{signature,event:e});}}
-   const health={ready:result.supported,observed_at:new Date().toISOString(),history_read:historyRead,rows_seen:seen.size,message:result.errors[0]||(historyRead?'Current sold history read; watching new sales':'Reading available sold history')};
+   const health={ready:!ended&&result.supported,broadcast_ended:ended,observed_at:new Date().toISOString(),history_read:historyRead,rows_seen:seen.size,message:ended?'TikTok says the broadcast ended.':result.errors[0]||(historyRead?'Current sold history read; watching new sales':'Reading available sold history')};
    const delivered=await send('TIKTOK_LIVE_OBSERVE',{events,health});
+   if(delivered?.ended){running=false;status('Show ended · saved report available.');return;}
    if(!delivered?.ok){for(const e of events)seen.delete(e.key);throw Error(delivered?.error||'Capture could not be saved.');}
    status((delivered.pending?`${delivered.pending} observations waiting · `:'')+(delivered.status||health.message)+(result.errors.length?' · '+result.errors[0]:''),!result.supported||delivered.pending>0);
    const list=result.list;if(list&&canMove){

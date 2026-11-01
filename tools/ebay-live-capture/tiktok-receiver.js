@@ -2,6 +2,11 @@
 (()=>{
  const eventId=new URL(location.href).searchParams.get('capture_event');if(!/^tiktok-[0-9]{10,25}$/.test(eventId||'')||new URL(location.href).searchParams.get('capture')!=='1')return;
  const pending=new Map();
+ let endReported=false;
+ window.addEventListener('message',e=>{
+  if(endReported||e.source!==window||e.origin!==location.origin||e.data?.type!=='TIKTOK_CAPTURE_ENDED'||e.data.event_id!==eventId)return;
+  endReported=true;chrome.runtime.sendMessage({type:'TIKTOK_LIVE_RECEIVER_ENDED',event_id:eventId}).catch(()=>{endReported=false;});
+ });
  chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
   if(m.type==='TIKTOK_LIVE_PING'){reply({ok:true});return;}

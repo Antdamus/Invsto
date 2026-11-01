@@ -3,6 +3,11 @@
  'use strict';
  const text=n=>(n?.textContent||'').replace(/\s+/g,' ').trim();
  const payment=s=>/^Payment complete$/i.test(s)?'paid':/^Payment failed$/i.test(s)?'failed':/^(Payment pending|Awaiting payment|Pending payment|Waiting for payment|Processing payment|Payment processing)(?:\.{3}|…)?$/i.test(s)?'waiting':/^(Cancelled|Canceled|Order cancelled|Order canceled)$/i.test(s)?'cancelled':'review';
+ function ended(doc){
+  return [...doc.querySelectorAll('h1,h2,h3,header [role="status"],[role="dialog"] [role="heading"]')].some(node=>
+   node.getClientRects().length&&!node.closest('.sold-items-latest-list,#invsto-capture-helper,[role="log"]')&&
+   /^(?:(?:your|this|the) )?(?:live|live stream|livestream|live broadcast) (?:has |is )?ended[.!]?$/i.test(text(node)));
+ }
  function metadata(doc,url){
   const link=[...doc.querySelectorAll('a[href]')].find(a=>a.href.includes('/workbench/live/overview?room_id='));
   const room=link&&new URL(link.href).searchParams.get('room_id');
@@ -40,5 +45,5 @@
   if(!events.length&&text(list)&&!/^(No sold items|No orders|No auction orders|No data|Nothing here yet)$/i.test(text(list)))errors.push('TikTok’s sold-item layout is not recognized. Check the list before continuing.');
   return {events,errors,list,supported:!errors.length};
  }
- root.InvstoTikTokParser={parse,metadata,payment};
+ root.InvstoTikTokParser={parse,metadata,payment,ended};
 })(typeof window==='undefined'?globalThis:window);

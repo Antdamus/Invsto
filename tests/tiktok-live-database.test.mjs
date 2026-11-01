@@ -27,8 +27,19 @@ before(async()=>{
  create function enqueue_label_print(uuid,uuid,text,int,text,text,uuid,text) returns jsonb language sql as $$insert into public.label_print_jobs(station_id,request_id,barcode,copies,printer_roll) values($1,$2,$6,$4,$8) returning to_jsonb(label_print_jobs.*)$$;
  grant usage on schema auth to authenticated;`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261030020000_tiktok_live_capture.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261101030000_tiktok_end_capture.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
+test('broadcast end is idempotent and preserves queued pre-end evidence and its original heartbeat',async()=>{
+ const pending=sale();await ingest([]);
+ const old=(await db.query('select last_received_at from tiktok_live_connections')).rows[0].last_received_at;
+ const finish=()=>db.query("select end_tiktok_live_capture($1,'staff') stopped",[event]);
+ assert.equal(String((await finish()).rows[0].stopped),String((await finish()).rows[0].stopped));
+ await ingest([]);await ingest([pending]);const d=(await db.query('select get_tiktok_live_dashboard($1) d',[session.id])).rows[0].d;
+ assert.equal(d.attempts.length,1);assert.ok(d.connection.broadcast_ended_at);assert.equal(+new Date(d.connection.last_received_at),+new Date(old));
+ await assert.rejects(start(),/already closed/);
+ await assert.rejects(ingest([{...pending,observed_at:new Date(Date.now()+10000).toISOString()}]),/later observations/);
+});
 beforeEach(async()=>{await db.exec(`reset role;truncate tiktok_live_audit,tiktok_live_attempts,tiktok_live_connections,live_sale_bag_photos,label_print_jobs,storage.objects,live_sale_lots,live_sale_sessions cascade;select set_config('test.actor','${id(1)}',false);select set_config('test.allowed','yes',false);set role authenticated;`);session=(await start()).rows[0].s;});
 test('show start and replayed sales are idempotent; TikTok never creates eBay attempts',async()=>{
  assert.equal((await start()).rows[0].s.id,session.id);await ingest([sale()]);await ingest([sale()]);

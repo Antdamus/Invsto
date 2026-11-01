@@ -20,6 +20,13 @@ test('TikTok parser reads exact usernames, SKU, price and explicit payment; chan
 test('unreadable and duplicate rows report incomplete capture instead of false success',async t=>{
  const page=await browser.newPage();t.after(()=>page.close());await page.setContent(`<div class="sold-items-latest-list">${row()}${row()}${row('22','Payment complete','bad username')}</div>`);await page.addScriptTag({path:fileURLToPath(new URL('../tools/ebay-live-capture/tiktok-parser.js',import.meta.url))});const r=await page.evaluate(()=>{const r=InvstoTikTokParser.parse(document);return {events:r.events,errors:r.errors,supported:r.supported};});assert.equal(r.supported,false);assert.equal(r.events.length,1);assert.equal(r.errors.length,2);
 });
+test('only an explicit end notice outside the sales list or chat identifies an ended broadcast',async t=>{
+ const page=await browser.newPage();t.after(()=>page.close());
+ await page.setContent('<div class="sold-items-latest-list"><h2>LIVE ended</h2></div><div role="log"><h2>Your LIVE has ended</h2></div><h1>Offline</h1>');
+ await page.addScriptTag({path:fileURLToPath(new URL('../tools/ebay-live-capture/tiktok-parser.js',import.meta.url))});
+ assert.equal(await page.evaluate(()=>InvstoTikTokParser.ended(document)),false);
+ await page.locator('h1').evaluate(el=>el.textContent='This LIVE has ended');assert.equal(await page.evaluate(()=>InvstoTikTokParser.ended(document)),true);
+});
 test('capture sends a newly available sale time even when payment is unchanged, without resending each relative-time tick',async t=>{
  const page=await browser.newPage();t.after(()=>page.close());await page.goto(origin+'/tiktok-live-sales.html');
  await page.setContent(`<a href="https://shop.tiktok.com/workbench/live/overview?room_id=7702243594937125663">LIVE dashboard</a><div class="sold-items-latest-list">${row('24','Payment processing...').replace('· 16m','')}</div>`);
@@ -51,4 +58,10 @@ test('receiver heartbeats cannot make an inactive TikTok source look connected',
  assert.match(await page.locator('#connection-detail').innerText(),/not sending current observations/);assert.match(await page.locator('#connection-detail').innerText(),/Capture v1.8.3/);
  assert.equal(await page.locator('#connection-dot').evaluate(el=>el.classList.contains('live')),false);
  assert.match(await page.locator('#totals').innerText(),/\$201.00/,'saved sales remain available while the source is offline');
+});
+test('an ended show opens as a saved report and displays all of its sales',async t=>{
+ const page=await open(t);await page.evaluate(()=>{fixture.connection.broadcast_ended_at=new Date().toISOString();});
+ await page.locator('#refresh').click();await page.getByText('Show ended',{exact:true}).waitFor();
+ assert.match(await page.locator('#connection-detail').innerText(),/Saved report · 2 auction records/);
+ assert.equal(await page.locator('#end-capture').isVisible(),false);assert.equal(await page.locator('.sale').count(),2);
 });
