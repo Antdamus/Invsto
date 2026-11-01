@@ -49,8 +49,10 @@ async function reportText(raw:string){
 }
 export async function syncWeeklyWhatnot(db:any,api:any){
  await syncRefundFeed(db,'whatnot',async(f,now)=>{
-  const p=f.progress||{},today=new Date(now),coverage=p.coverage_start||new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth(),1)-7*day).toISOString();
-  const from=p.from||f.through_at||coverage,until=p.until||new Date(Math.min(now,Date.parse(from)+7*day)).toISOString();
+  const p=f.progress||{},today=new Date(now),coverage=p.coverage_start||new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth()-1,1)-7*day).toISOString();
+  // Whatnot requires UTC timestamps with exactly three fractional digits, even for saved Postgres cursors.
+  const from=new Date(p.from||f.through_at||coverage).toISOString();
+  const until=new Date(p.until||Math.min(now,Date.parse(from)+7*day)).toISOString();
   if(Date.parse(until)-Date.parse(from)<3600000&&!p.run)return;
   let report;
   try{
