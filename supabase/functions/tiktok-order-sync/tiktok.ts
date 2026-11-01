@@ -65,7 +65,7 @@ export function client(appKey: string, appSecret: string, request: typeof fetch 
       catch (error) { if (error instanceof TikTokError || error instanceof Error && !/fetch|network|https?:/i.test(error.message)) throw error; throw Error('TikTok authorization request could not finish. Retry the connection.'); }
     },
     async read(path: string, token: string, query: Record<string, string> = {}, body?: Record<string, unknown>) {
-      if (path !== ORDER_PATH && path !== SHOPS_PATH && path !== '/order/202507/orders' && path !== '/finance/202507/orders/unsettled' && !/^\/finance\/202501\/orders\/\d{10,24}\/statement_transactions$/.test(path)) throw Error('Unsupported TikTok read endpoint');
+      if (path !== ORDER_PATH && path !== SHOPS_PATH && path !== '/return_refund/202602/returns/search' && path !== '/order/202507/orders' && path !== '/finance/202507/orders/unsettled' && !/^\/finance\/202501\/orders\/\d{10,24}\/statement_transactions$/.test(path)) throw Error('Unsupported TikTok read endpoint');
       const params = {...query, app_key:appKey, timestamp:String(Math.floor(Date.now() / 1000))};
       const payload = body === undefined ? '' : JSON.stringify(body);
       const url = new URL(path, API_ORIGIN);
@@ -105,8 +105,9 @@ export function mapOrder(order: any, knownBuyer?: string) {
     seen.add(lineId);
     // The order API returns one line item per unit; it has no quantity field.
     let line = lines.get(sku);
-    if (!line) { line = {sku_id:sku, product_id:id(item.product_id, 'product ID'), title:String(item.product_name).slice(0, 1000), seller_sku:item.seller_sku || '', variation:item.sku_name || '', quantity:0, amount:0, cancelled:0, tracking:new Set<string>()}; lines.set(sku, line); }
-    line.quantity++; line.amount += cents(item.sale_price); line.cancelled += Number(item.display_status === 'CANCELLED');
+    if (!line) { line = {sku_id:sku, product_id:id(item.product_id, 'product ID'), title:String(item.product_name).slice(0, 1000), seller_sku:item.seller_sku || '', variation:item.sku_name || '', quantity:0, amount:0, cancelled:0, cancelledAmount:0, tracking:new Set<string>()}; lines.set(sku, line); }
+    const price=cents(item.sale_price);line.quantity++;line.amount+=price;
+    if(item.display_status==='CANCELLED'){line.cancelled++;line.cancelledAmount+=price;}
     if (item.tracking_number) line.tracking.add(String(item.tracking_number));
   }
   for (const line of lines.values()) if (line.cancelled > 0 && line.cancelled < line.quantity) review = true;
@@ -120,5 +121,5 @@ export function mapOrder(order: any, knownBuyer?: string) {
     cancel_return:review ? 'TikTok API: partially cancelled quantity within one SKU. Verify the item quantities in TikTok before packing.' : order.is_buyer_request_cancel ? 'TikTok buyer requested cancellation. Review in TikTok.' : order.cancel_reason || '',
     api_buyer_id:buyerId, api_update_time:time(order.update_time)
   };
-  return Array.from(lines.values(), line => ({...shared, sku_id:line.sku_id, product_id:line.product_id, title:line.title, seller_sku:line.seller_sku, variation:line.variation, quantity:line.quantity, line_amount:(line.amount / 100).toFixed(2), tracking_number:Array.from(line.tracking).join(', '), api_cancelled:line.cancelled === line.quantity}));
+  return Array.from(lines.values(), line => ({...shared, sku_id:line.sku_id, product_id:line.product_id, title:line.title, seller_sku:line.seller_sku, variation:line.variation, quantity:line.quantity, line_amount:(line.amount / 100).toFixed(2), tracking_number:Array.from(line.tracking).join(', '), api_cancelled_item_amount:(line.cancelledAmount/100).toFixed(2), api_cancelled:line.cancelled === line.quantity}));
 }

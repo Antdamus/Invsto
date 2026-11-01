@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {client, seal, unseal, sha256, chooseProductionShop, SHOPS_PATH, TikTokError} from './tiktok.ts';
 import {syncOrderPage, syncInProgress} from './sync.ts';
 import {refreshQueueMoney} from './queue-money.ts';
+import {syncWeeklyTikTok} from './weekly-sales.ts';
 
 const APP_URL = 'https://antdamus.github.io/Invsto/pending-tiktok-orders.html';
 const ORIGIN = new URL(APP_URL).origin;
@@ -27,6 +28,7 @@ async function worker(db: any, workerToken: string) {
     }
     const result=await syncOrderPage(db,c,workerToken,api,tokens.access_token);
     if(!result.more){try{await refreshQueueMoney(db,c,api,tokens);}catch{console.warn('TikTok queue financial data could not refresh; order sync succeeded.');}}
+    try{await syncWeeklyTikTok(db,c,api,tokens);}catch{console.warn('Weekly sales reconciliation deferred; order sync succeeded.');}
     return json(200,result);
   } catch (error) {
     const message = safeError(error);

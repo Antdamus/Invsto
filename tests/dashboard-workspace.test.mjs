@@ -38,6 +38,7 @@ async function open(t, width = 390, {ready = true} = {}) {
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`${origin}/dashboard.html`);
   await page.addScriptTag({url: `${origin}/task-workflow.js`});
+  await page.addScriptTag({url: `${origin}/weekly-marketplace-sales.js`});
   await page.addScriptTag({url: `${origin}/dashboard.js`});
   await page.evaluate(() => {
     const date = delta => {const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + delta); return d.toISOString();};
@@ -91,6 +92,24 @@ async function open(t, width = 390, {ready = true} = {}) {
   return page;
 }
 
+test('weekly sales on a phone refreshes late adjustments and displays proceeds separately',async t=>{
+ const page=await open(t,390);
+ await page.evaluate(()=>{
+  const original=supabase.rpc;window.refund=0;
+  supabase.rpc=async function(name,args){
+   if(name!=='get_weekly_marketplace_sales')return original.call(this,name,args);
+   return {data:{month:'2026-10-01',as_of:'2026-10-31T21:00:00Z',anchor:'2026-10-26',current_month:true,
+    focus_net:100-refund,previous_net:75,focus_proceeds:64,previous_proceeds:60,feeds:{},
+    rows:[{market:'ebay',week:'2026-10-26',first_day:'2026-10-26',end_day:'2026-11-01',net:100-refund,booked:200,cancelled:50,refunded:refund,held:50,proceeds:64,orders:3,settled_orders:1,comparable:100-refund,comparable_proceeds:64}]}};
+  };
+ });
+ await page.locator('#weekly-sales-report>summary').click();
+ await expect(page.locator('.ws-headline')).toContainText('$100.00');await expect(page.locator('.ws-headline')).toContainText('$64.00');
+ await page.locator('.ws-week>summary').click();await expect(page.locator('.ws-inner')).toContainText('1 of 3');
+ await page.evaluate(()=>{refund=22;});await page.locator('#ws-refresh').click();
+ await expect(page.locator('.ws-headline')).toContainText('$78.00');await expect(page.locator('.ws-week')).toHaveAttribute('open','');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});
 for (const width of [320,390,430,768,1366]) test(`Dashboard at ${width}px: usable summaries, navigation, filters and reports`, async t => {
   const page = await open(t,width);
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth > innerWidth);

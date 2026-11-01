@@ -367,6 +367,7 @@ async function initializeDashboard() {
     dashText("admin-greeting", name ? `${greeting}, ${name}.` : "Your day, at a glance.");
     dashText("dashboard-date", new Date().toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"}));
     setupDashboardListeners();
+    window.WeeklyMarketplaceSales?.init(supabase);
     await refreshDashboard();
   } catch (error) {
     console.warn("Dashboard connection failed:", error?.message || error);

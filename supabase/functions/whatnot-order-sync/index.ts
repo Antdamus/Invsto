@@ -1,5 +1,6 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {client,mapOrder,seal,unseal,WhatnotError} from './whatnot.mjs';
+import {syncWeeklyWhatnot} from './weekly-sales.ts';
 const CORS={'Access-Control-Allow-Origin':'https://antdamus.github.io','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS','Vary':'Origin','Cache-Control':'no-store'};
 const env=(n:string)=>{const v=Deno.env.get(n);if(!v)throw new WhatnotError('Whatnot server setup is incomplete.');return v;};
 const reply=(status:number,data:unknown)=>new Response(JSON.stringify(data),{status,headers:{...CORS,'Content-Type':'application/json'}});
@@ -33,6 +34,7 @@ async function worker(db:any,token:string){
   }
   const more=c.full_in_progress&&Boolean(p.next_cursor);
   const changes=c.full_in_progress?{page_cursor:more?p.next_cursor:null,full_in_progress:more,orders_processed:c.orders_processed+p.data.length,...(!more?{last_full_sync_at:new Date().toISOString()}:{} )}:{};
+  try{await syncWeeklyWhatnot(db,api);}catch{console.warn('Weekly Whatnot report deferred; order sync continues.');}
   check(await db.from('whatnot_api_connection').update({...changes,last_synced_at:new Date().toISOString(),last_error:null,next_sync_at:new Date(Date.now()+(more?0:300000)).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',token));
   return reply(200,{ok:true,orders_read:saved,more});
  }catch(e){const error=message(e);await db.from('whatnot_api_connection').update({last_error:error,next_sync_at:new Date(Date.now()+300000).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',token);return reply(502,{error});}

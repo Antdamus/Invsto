@@ -54,18 +54,20 @@ export function mapOrder(order, items, shipments, show = null) {
 export function client(token, {fetcher=fetch,sleep=ms=>new Promise(r=>setTimeout(r,ms))}={}) {
   if (typeof token !== 'string' || !/^wn_pat_tk_[A-Za-z0-9._-]{12,}$/.test(token)) throw new WhatnotError('Enter a valid Whatnot personal access token.');
   let lastCall = 0;
-  async function read(path, query={}) {
-    if (!/^\/(users\/me|orders(?:\/[1-9][0-9]*(?:\/items)?)?|shipments\/[1-9][0-9]*|shows\/[a-fA-F0-9-]+)$/.test(path)) throw new WhatnotError('Unsupported Whatnot request.');
+  async function read(path, query={}, reportRequest=null) {
+    if (!/^\/(users\/me|orders(?:\/[1-9][0-9]*(?:\/items)?)?|shipments\/[1-9][0-9]*|shows\/[a-fA-F0-9-]+|reports(?:\/[a-fA-F0-9-]{36})?)$/.test(path) ||
+      reportRequest && (path!=='/reports'||reportRequest.report_parameters?.report_type!=='seller_financial_report')) throw new WhatnotError('Unsupported Whatnot request.');
     const url = new URL(BASE+path);url.search=new URLSearchParams(query).toString();
     for (let attempt=0;attempt<4;attempt++) {
       await sleep(Math.max(0,180-(Date.now()-lastCall)));lastCall=Date.now();
       let response;
-      try { response = await fetcher(url,{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(20000),redirect:'error'}); }
+      try { response = await fetcher(url,{method:reportRequest?'POST':'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json',...(reportRequest?{'Content-Type':'application/json'}:{})},...(reportRequest?{body:JSON.stringify(reportRequest)}:{}),signal:AbortSignal.timeout(20000),redirect:'error'}); }
       catch { throw new WhatnotError('Whatnot could not be reached. Sync will retry without skipping orders.'); }
       if ((response.status===429 || response.status>=500) && attempt<3) {
         const retry=Math.min(15000,Math.max(1000,Number(response.headers.get('Retry-After')||0)*1000,2**attempt*1000));await sleep(retry);continue;
       }
       if (response.status===401) throw new WhatnotError('Whatnot authorization expired or was revoked. Reconnect the account.');
+      if (response.status===403 && path.startsWith('/reports'))throw new WhatnotError('Financial report permission required');
       if (response.status===403) throw new WhatnotError('Whatnot denied access. The token needs Read orders, Read shipments, Read customers and Read shows.');
       if (!response.ok) throw new WhatnotError(`Whatnot request failed (${response.status}). No orders were skipped.`);
       try { return await response.json(); } catch { throw new WhatnotError('Whatnot returned an unreadable response.'); }
