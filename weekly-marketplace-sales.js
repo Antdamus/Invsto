@@ -10,6 +10,29 @@
   return d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'});
  }
  const sum=(rows,k)=>rows.reduce((s,r)=>s+Number(r[k]||0),0);
+ function dateOffset(iso,days){const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+ const pacificHour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Los_Angeles',hour:'2-digit',hourCycle:'h23'});
+ function pacificMidnight(iso){const early=Date.parse(iso+'T07:00:00Z');return pacificHour.format(early)==='00'?early:early+3600000;}
+ function hubUrl(first,last){
+  const query=new URLSearchParams({referencePeriodFilter:'CUSTOM',benchmarkPeriodFilter:'CUSTOM',benchmarkStart:String(pacificMidnight(dateOffset(first,-7))),referenceStart:String(pacificMidnight(first)),referenceEnd:String(pacificMidnight(last))});
+  return 'https://www.ebay.com/sh/performance/sales?'+query.toString();
+ }
+ function hubLink(first,last,label){return '<a target="_blank" rel="noopener" href="'+hubUrl(first,last)+'">'+label+' ↗</a>';}
+ function hubOverview(data,groups){
+  const saved=data.seller_hub||[],last=data.current_month?data.cutoff.slice(0,10):dateOffset(data.rows.at(-1).end_day,-1);
+  const first=data.month,find=(a,b)=>saved.find(r=>r.first_day===a&&r.last_day===b),month=find(first,last);
+  const link=hubLink(first,last,'Open this period in eBay');
+  if(!month)return '<section class="ws-hub"><h3>eBay Seller Hub</h3><p>'+link+' to see the latest sales after fees and postage for these Pacific reporting dates.</p></section>';
+  const weekly=Array.from(groups.values()).reverse().map(part=>{
+   const a=part[0].first_day,b=[dateOffset(part[0].end_day,-1),last].sort()[0],r=find(a,b);
+   return '<tr><th>'+hubLink(a,b,dayLabel(a)+' – '+dayLabel(b))+'</th><td>'+(r?fmt(r.item_sales):'See eBay')+'</td><td>'+(r?fmt(r.reported_net):'See eBay')+'</td></tr>';
+  }).join('');
+  const start=data.anchor>first?data.anchor:first,focus=find(start,last),prior=find(dateOffset(start,-7),dateOffset(last,-7));
+  const compare=focus&&prior?'<p><b>'+dayLabel(start)+' – '+dayLabel(last)+'</b> compared with '+hubLink(prior.first_day,prior.last_day,dayLabel(prior.first_day)+' – '+dayLabel(prior.last_day))+'. After selling costs, '+change(Number(focus.reported_net),Number(prior.reported_net))+' ('+fmt(prior.reported_net)+' previously).</p>':'';
+  return '<section class="ws-hub"><h3>eBay Seller Hub · sales and selling costs</h3><p>Returns and cancellations are reflected on eBay’s reporting dates (Pacific). Figures checked '+etStamp(month.checked_at)+'. '+link+'</p>'+
+   '<div class="ws-headline"><div><small>ITEM SALES</small><strong>'+fmt(month.item_sales)+'</strong><p>Shipping collected separately · '+fmt(month.shipping_collected)+'</p></div><div><small>AFTER SELLING COSTS</small><strong>'+fmt(month.reported_net)+'</strong><p>eBay fees '+fmt(month.selling_fees)+' · Shipping labels '+fmt(month.label_cost)+'</p></div></div>'+compare+
+   '<table><thead><tr><th>Reporting dates</th><th>Item sales</th><th>After selling costs</th></tr></thead><tbody>'+weekly+'</tbody></table></section>';
+ }
  function change(now,prior){
   const delta=now-prior,absolute=fmt(Math.abs(delta));
   if(delta===0)return 'Even with the prior week at the same point';
@@ -41,7 +64,7 @@
   };
   const caption=data.current_month?'This week so far':'Last week in this month';
   const period=dayLabel(data.anchor)+' through '+etStamp(data.as_of);
-  return '<div class="ws-headline"><div><small>MONTH · VERIFIED NET ITEM SALES</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>'+fmt(sum(rows,'held'))+' awaiting verification</p></div>'+
+  return (market==='ebay'&&data.month&&data.cutoff?hubOverview(data,groups)+'<h3 class="ws-source-title">Invsto · by original purchase week (Eastern)</h3>':'')+'<div class="ws-headline"><div><small>MONTH · VERIFIED NET ITEM SALES</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>'+fmt(sum(rows,'held'))+' awaiting verification</p></div>'+
    '<div><small>MONTH · RECORDED SELLER PROCEEDS</small><strong>'+(sum(rows,'settled_orders')||sum(rows,'proceeds')!==0?fmt(sum(rows,'proceeds')):'Awaiting settlement')+'</strong><p>'+sum(rows,'settled_orders')+' of '+sum(rows,'orders')+' included orders reconciled</p></div></div>'+
    (sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).filter(k=>market==='all'||market===k).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
    '<div class="ws-comparison"><h3>'+caption+'</h3><p>'+(data.current_month?period:'Through '+dayLabel(rows.at(-1).end_day,-1))+' · compared with the same elapsed days and time one week earlier.</p>'+

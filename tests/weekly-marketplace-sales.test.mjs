@@ -22,6 +22,7 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await db.exec(await readFile(new URL('../supabase/migrations/20261101041000_weekly_sales_settlement_sync.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101042000_weekly_sales_shared_postage.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101045000_weekly_sales_market_filter.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101051000_weekly_ebay_seller_hub.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -41,7 +42,9 @@ test('weekly report revises the original ET week, separates cancellation and ref
   assert.equal(row(await report(),'2025-06-02','tiktok').net,100);
   await db.exec("update weekly_sales_refunds set state='completed';update tiktok_order_lines set api_cancelled_item_amount=0");
   r=await report();assert.equal(row(r,'2025-06-02','tiktok').net,80);assert.equal(row(r,'2025-06-02','whatnot').net,70);
+  await db.exec("insert into weekly_ebay_seller_hub_periods values('2025-06-01','2025-06-30',100,5,10,2,93,now())");
   const ebay=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r;
+  assert.equal(ebay.seller_hub[0].reported_net,93);assert.equal((await report()).seller_hub,null);
   assert.ok(ebay.rows.every(item=>item.market==='ebay'));assert.equal(ebay.rows.reduce((n,item)=>n+item.net,0),100);
   await db.exec("update ebay_orders set raw_payload='{\"orderPaymentStatus\":\"FULLY_REFUNDED\"}' where id='a'");
   r=await report();assert.equal(row(r,'2025-05-26','ebay').refunded,100);assert.equal(row(r,'2025-05-26','ebay').net,0);

@@ -99,17 +99,21 @@ test('weekly sales on a phone refreshes late adjustments and displays proceeds s
   supabase.rpc=async function(name,args){
    if(name!=='get_weekly_sales_for_market')return original.call(this,name,args);
    window.lastMarket=args._market;
-   return {data:{month:'2026-10-01',as_of:'2026-10-31T21:00:00Z',anchor:'2026-10-26',current_month:true,
+   return {data:{month:'2026-10-01',cutoff:'2026-10-31T17:00:00',as_of:'2026-10-31T21:00:00Z',anchor:'2026-10-26',current_month:true,
+    seller_hub:[{first_day:'2026-10-01',last_day:'2026-10-31',item_sales:110,reported_net:91,checked_at:'2026-10-31T20:30:00Z'}],
     focus_net:100-refund,previous_net:75,focus_proceeds:64,previous_proceeds:60,feeds:{},
     rows:[{market:'ebay',week:'2026-10-26',first_day:'2026-10-26',end_day:'2026-11-01',net:100-refund,booked:200,cancelled:50,refunded:refund,held:50,proceeds:64,orders:3,settled_orders:1,comparable:100-refund,comparable_proceeds:64}]}};
   };
  });
  await page.locator('#weekly-sales-report>summary').click();
  assert.equal(await page.locator('#ws-market').inputValue(),'ebay');
- await expect(page.locator('.ws-headline')).toContainText('$100.00');await expect(page.locator('.ws-headline')).toContainText('$64.00');
+  await expect(page.locator('.ws-hub')).toContainText('$91.00');
+  const octLink=new URL(await page.locator('.ws-hub a').first().getAttribute('href'));
+  assert.equal(octLink.searchParams.get('referenceStart'),String(Date.parse('2026-10-01T07:00:00Z')));
+  await expect(page.locator('#ws-results>.ws-headline')).toContainText('$100.00');await expect(page.locator('#ws-results>.ws-headline')).toContainText('$64.00');
  await page.locator('.ws-week>summary').click();await expect(page.locator('.ws-inner')).toContainText('1 of 3');
  await page.evaluate(()=>{refund=22;});await page.locator('#ws-refresh').click();
- await expect(page.locator('.ws-headline')).toContainText('$78.00');await expect(page.locator('.ws-week')).toHaveAttribute('open','');
+ await expect(page.locator('#ws-results>.ws-headline')).toContainText('$78.00');await expect(page.locator('.ws-week')).toHaveAttribute('open','');
  await page.locator('#ws-market').selectOption('all');await expect(page.locator('#ws-status')).toContainText('All marketplaces');
  assert.equal(await page.evaluate(()=>window.lastMarket),'all');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
