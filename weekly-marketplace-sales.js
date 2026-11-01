@@ -145,6 +145,17 @@
   connect.onclick=async()=>{connect.disabled=true;try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'connect'}});if(error)throw error;
    if(data.url&&new URL(data.url).origin==='https://auth.ebay.com'){location.assign(data.url);return;}if(!data.ok)throw Error();await earningsStatus();load();
   }catch{earnStatus.textContent='Could not start eBay authorization. Try again.';}finally{connect.disabled=false;}};
+  let lastReport=null;
+  function sourceTimes(data){
+   const el=$('ws-source-times'),f=data?.ebay_refresh;
+   el.hidden=!f;if(!f){el.replaceChildren();return;}
+   const lines=[['Order changes, refunds & cancellations',f.changes],['Order funds',f.finance],['Bank payouts',f.payouts],['Itemized Seller Hub holds',data.ebay_account_holds?.verified_at],['Statement / financial overview for this month',f.statement],['Itemized claims export for this month',f.claims]];
+   const list=document.createElement('dl');for(const [name,at] of lines){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=name;dd.textContent=at?etStamp(at):'Not yet verified';list.append(dt,dd);}
+   const summary=document.createElement('summary');summary.textContent='When each source was last verified';
+   const note=document.createElement('p');note.textContent=f.watching+' orders monitored for a funds update · '+f.delivered+' with verified delivery. Order funds, returns and payouts refresh on the server. Seller Hub details refresh while Edge is running and signed in.';
+   const status=document.createElement('p');status.textContent=[f.browser?.note,f.browser?.statement_note,f.claim_note||'Monthly claim details update when a complete Seller Hub export matches the statement.'].filter(Boolean).join(' ');
+   el.replaceChildren(summary,list,note,status);
+  }
   async function load(){
    const version=++seq;if(!panel.open||document.hidden)return;
    month.max=etMonth();if(!manualMonth)month.value=month.max;
@@ -155,13 +166,15 @@
     if(seq!==version||!panel.open)return;
     const expanded=new Set(Array.from($('ws-results').querySelectorAll('.ws-pay-group[open]'),d=>d.dataset.payKey));
     $('ws-results').innerHTML=render(data,market.value);
-    itemLedger(data);
+    itemLedger(data);lastReport={key:market.value+'/'+month.value,at:data.as_of};sourceTimes(data);
     for(const group of $('ws-results').querySelectorAll('.ws-pay-group'))group.open=expanded.has(group.dataset.payKey);
     $('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
-   }catch{if(seq===version){$('ws-results').replaceChildren();itemLedger(null);$('ws-status').textContent='Could not verify these totals. Use Refresh sales to retry.';}}
+   }catch{if(seq===version){const keep=lastReport?.key===market.value+'/'+month.value&&$('ws-results').childElementCount>0;
+    if(!keep){$('ws-results').replaceChildren();itemLedger(null);sourceTimes(null);}
+    $('ws-status').textContent=keep?'Refresh delayed. Showing the last report from '+etStamp(lastReport.at)+'. Retrying automatically.':'Could not verify these totals. The report will retry automatically.';}}
   }
-  panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();itemLedger(null);load();};
-  market.onchange=()=>{$('ws-results').replaceChildren();itemLedger(null);load();};
+  panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();itemLedger(null);sourceTimes(null);load();};
+  market.onchange=()=>{$('ws-results').replaceChildren();itemLedger(null);sourceTimes(null);load();};
   $('ws-refresh').onclick=load;
   document.addEventListener('visibilitychange',()=>{if(panel.open&&!document.hidden)load();});
   setInterval(()=>{if(panel.open&&!document.hidden)load();},60000);

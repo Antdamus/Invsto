@@ -69,3 +69,8 @@
  .wi-balance tr.wi-bridge-detail{display:block;padding:0;border:0}.wi-balance .wi-bridge-detail>td{display:block;padding:0}.wi-balance .wi-bridge-detail>td:before{content:none}
 }
 @container weeklybalance (max-width:40rem){.wi-equation{grid-template-columns:minmax(0,1fr)}.wi-eq-line{gap:.5rem}.wi-balance .wi-bridge-toggle{min-height:40px}}
+.ws-source-times{margin:.75rem 0 1rem;padding:.65rem .9rem;border:1px solid #394940;border-radius:.65rem;color:#b8c6bd;font-size:.9rem}
+.ws-source-times summary{cursor:pointer;color:#ead8a0;font-weight:650}
+.ws-source-times dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.45rem .9rem;margin:.8rem 0}
+.ws-source-times dd{margin:0;text-align:right;color:#eef1ed}
+.ws-source-times p{line-height:1.5;margin:.5rem 0}

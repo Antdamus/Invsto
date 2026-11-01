@@ -29,7 +29,7 @@
   }finally{if(tab?.id!=null)await chrome.tabs.remove(tab.id).catch(()=>{});}
  }
  chrome.runtime.onMessage.addListener((m,s,send)=>{
-  if(m?.type!=='OG_READ_ACCOUNT_HOLDS'||!s.tab||s.frameId!==0||s.url?.split(/[?#]/)[0]!==dash)return;
+  if(m?.type!=='OG_READ_ACCOUNT_HOLDS'||!s.tab||s.frameId!==0||!(s.url?.split(/[?#]/)[0]===dash||s.url?.startsWith('https://antdamus.github.io/Invsto/ebay-report-refresh.html?job=')))return;
   inFlight??=collect().finally(()=>{inFlight=null;});
   inFlight.then(packet=>send({ok:true,packet}),e=>send({ok:false,message:e.message}));return true;
  });

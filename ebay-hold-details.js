@@ -29,14 +29,14 @@
   const codes=[...new Set(holds.map(h=>text(h.holdReason)).filter(Boolean))];
   const estimates=[...new Set(holds.map(h=>text(h.expectedReleaseDate)).filter(d=>stamp(d)))];
   const actions=[...new Set(holds.flatMap(h=>array(h.sellerActionsToRelease)).map(a=>text(a.sellerActionToRelease)).filter(Boolean))];
-  return {id,memos,categories,codes,estimates,actions,checked:onHold.length?finance.syncedAt:null,modified:evidence.modified,source:onHold.length?'eBay payments':'Saved eBay order',
+  return {id,memos,categories,codes,estimates,actions,delivery:evidence.delivery,checked:onHold.length?finance.syncedAt:null,modified:evidence.modified,source:onHold.length?'eBay payments':'Saved eBay order',
    releaseObserved:transactions.length>0&&transactions.every(t=>['FUNDS_AVAILABLE_FOR_PAYOUT','PAYOUT_INITIATED','PAYOUT','PAID_OUT'].includes(t.transactionStatus)),financeChecked:finance.syncedAt};
  }
  function fromLine(line){
   const order=line?.order||line||{},raw=order.raw_payload||{},lineRaw=line?.raw_payload||{};
   const candidates=[raw.ebayFinance,lineRaw.ebayFinance,order.ebay_finance,line?.ebay_finance].filter(f=>f&&typeof f==='object');
   candidates.sort((a,b)=>(Date.parse(b.syncedAt)||0)-(Date.parse(a.syncedAt)||0));
-  return model(order.order_number,{finance:candidates[0],payments:raw.order?.paymentSummary?.payments,modified:raw.order?.lastModifiedDate});
+  return model(order.order_number,{finance:candidates[0],payments:raw.order?.paymentSummary?.payments,modified:raw.order?.lastModifiedDate,delivery:raw.report_delivery});
  }
  function render(m,{compact=false}={}){
   if(!m)return '';
@@ -46,6 +46,7 @@
   const details=m.estimates.length||m.actions.length||m.codes.length;
   return '<aside class="ebay-hold-detail'+(compact?' eh-compact':'')+'" aria-label="eBay hold explanation"><strong class="eh-heading">'+(compact?'Funds on hold · ':'Why eBay is holding the funds · ')+esc(m.categories.map(k=>labels[k]).join(' / '))+'</strong>'+quote+unknown+
    '<small class="eh-source">'+esc(m.source)+(stamp(m.checked)?' · Checked '+esc(stamp(m.checked)):stamp(m.modified)?' · Last modified '+esc(stamp(m.modified)):'')+'</small>'+
+   (m.delivery?'<p class="eh-explanation"><b>'+esc(m.delivery.description)+(stamp(m.delivery.at)?' · '+esc(stamp(m.delivery.at)):'')+'</b><br><small>'+esc(m.delivery.source)+' · Checked '+esc(stamp(m.delivery.checked))+'. Delivery and funds release are tracked separately.</small></p>':'')+
    (details?'<details><summary>Release estimate &amp; eBay details</summary>'+
     m.estimates.map(d=>'<p><b>Saved order release estimate:</b> '+esc(stamp(d))+(Date.parse(d)<Date.now()?' · Estimate has passed':'')+'</p>').join('')+
     (m.estimates.length?'<p class="eh-muted">Estimate from the saved order record'+(stamp(m.modified)?' (order last modified '+esc(stamp(m.modified))+')':'')+'. It may predate the payment explanation above; eBay has not guaranteed this release date.</p>':'<p class="eh-muted">No release date was supplied in the saved order record.</p>')+

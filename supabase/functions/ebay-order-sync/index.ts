@@ -3,6 +3,7 @@ import { inspectShippingFulfillments } from "./shipments.ts";
 import { syncWeeklySaleUpdates } from "./weekly-sale-updates.ts";
 import { syncWeeklyPayouts } from "./weekly-payouts.ts";
 import { checkAccountHolds } from "./account-holds.ts";
+import { checkDelivery } from "./report-delivery.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1303,6 +1304,8 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
         if(!more)break;
       }
     }catch{console.warn('Weekly eBay adjustments will retry.');}
+    if(token && Date.now()+8500<deadline){try{await checkDelivery(supabase,token);}
+    catch{console.warn('eBay package evidence unavailable; retained the last verified delivery.');}}
   } finally {
     await supabase.rpc("finish_ebay_finance_worker", {_dispatch_token:dispatchToken});
   }

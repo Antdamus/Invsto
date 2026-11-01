@@ -7,6 +7,9 @@ root=Path(__file__).resolve().parents[1]
 folder=root/'tools/ebay-og-order-link-extension'
 files=('manifest.json','worker.js','background.js','content.js','app-bridge.js','online-print-background.js','online-print-bridge.js','online-print-page.js','tiktok-print-probe.js','tiktok-print.js','tiktok-orders.js','tiktok-export.js','tiktok-report-probe.js','tiktok-shipping.js','tiktok-labels-bridge.js','tiktok-orders-background.js','tiktok-orders-bridge.js','tiktok-receipt-capture.js','tiktok-receipt-background.js','tiktok-receipt-bridge.js','whatnot-receipt-capture.js','whatnot-receipt-background.js','whatnot-receipt-bridge.js','shipping-combine-policy.js','shipping-combine-guard.js','label-capture-probe.js','report-capture-probe.js','options.html','options.js','README.md')
 files+=('holds-bridge.js','holds-background.js','holds-reader.js')
+files+=('report-bridge.js','report-background.js','report-reader.js')
+files+=('claim-export.js','report-csv-probe.js')
+(folder/'claim-export.js').write_bytes((root/'weekly-ebay-claims.js').read_bytes())
 with zipfile.ZipFile(root/'downloads/OG-eBay-Order-Link.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
  for name in files:
   info=zipfile.ZipInfo(name,date_time=(2026,9,29,0,0,0));info.compress_type=zipfile.ZIP_DEFLATED;info.external_attr=0o644<<16
