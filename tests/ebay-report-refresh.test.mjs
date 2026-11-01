@@ -6,6 +6,21 @@ import {PGlite} from '@electric-sql/pglite';
 import {chromium} from '@playwright/test';
 import {deliveryResults} from '../supabase/functions/ebay-order-sync/report-delivery.ts';
 const file=p=>new URL('../'+p,import.meta.url);
+test('held-list worker requests exact ranges in its own tab and never publishes a partial or changing ledger',async()=>{
+ const src=await readFile(file('tools/ebay-og-order-link-extension/holds-background.js'),'utf8');
+ async function run(bad){
+  let handler,offset=0,removed=false;
+  const offsets=[],goto=({url})=>{const u=new URL(url);assert.equal(u.searchParams.get('limit'),'30');assert.equal(u.searchParams.get('pillFilterId'),'FUNDS_ON_HOLD_FILTER');offset=+u.searchParams.get('offset');offsets.push(offset);};
+  const page=()=>({start:offset+1,end:Math.min(31,offset+30),count:31,total:bad==='balance'&&offset?32:31,rows:Array.from({length:offset?1:30},(_,i)=>({kind:'sale',ref:String(bad==='duplicate'&&offset?0:offset+i),cents:bad==='sum'&&offset?2:1}))});
+  const chrome={runtime:{onMessage:{addListener:f=>{handler=f;}}},tabs:{
+   create:async o=>{assert.equal(o.active,false);goto(o);return {id:7};},update:async(id,o)=>{assert.equal(id,7);goto(o);},
+   sendMessage:async(id,m)=>{assert.equal(id,7);assert.deepEqual(Object.keys(m),['type']);return {ok:true,page:page()};},remove:async id=>{assert.equal(id,7);removed=true;}}};
+  runInNewContext(src,{chrome,URL,Date,setTimeout});const result=await new Promise(r=>handler({type:'OG_READ_ACCOUNT_HOLDS'},{tab:{id:2},frameId:0,url:'https://antdamus.github.io/Invsto/dashboard.html'},r));
+  assert.deepEqual(offsets,[0,30]);assert.equal(removed,true);return result;
+ }
+ assert.equal((await run()).packet.rows.length,31);
+ for(const bad of ['balance','duplicate','sum'])assert.equal((await run(bad)).ok,false);
+});
 test('actual delivery is conditional on seller, order and all purchased lines and packages',()=>{
  const id='01-12345-12345',ts='2026-01-02T12:00:00Z',pkg=d=>'<ShippingPackageInfo>'+d+'</ShippingPackageInfo>',line=p=>'<Transaction>'+p+'</Transaction>';
  const actual=pkg('<ActualDeliveryTime>'+ts+'</ActualDeliveryTime>'),estimate=pkg('<ScheduledDeliveryTimeMax>'+ts+'</ScheduledDeliveryTimeMax>');

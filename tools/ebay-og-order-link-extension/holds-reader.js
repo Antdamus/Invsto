@@ -52,10 +52,7 @@
  chrome.runtime.onMessage.addListener((m,s,send)=>{
   if(s.id!==chrome.runtime.id||m?.type!=='OG_HOLDS_PAGE')return;
   try{
-   const page=read();
-   if(m.advance){if(page.end!==m.end)throw Error('Page changed before advancing.');
-    const next=document.querySelector('button[aria-label="Next page"]');if(!next||next.disabled)throw Error('Seller Hub did not offer the next page.');next.click();send({ok:true});}
-   else send({ok:true,page});
+   send({ok:true,page:read()});
   }catch(e){send({ok:false,message:e.message});}
  });
 })();

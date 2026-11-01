@@ -792,8 +792,44 @@ function getFinancePayload(source = {}) {
     .sort((left, right) => getFinancePayloadRank(right) - getFinancePayloadRank(left))[0] || null;
 }
 
+const livePendingHolds=new WeakMap(),pendingHoldChecked=new WeakMap();
+let nextPendingHoldCheck=0,checkingPendingHolds=false;
 function getLineHoldExplanation(line) {
-  return window.OGEbayHoldDetails?.fromLine(line) || null;
+  return livePendingHolds.has(line)?livePendingHolds.get(line):window.OGEbayHoldDetails?.fromLine(line) || null;
+}
+async function refreshVisiblePendingHolds(){
+  const api=window.OGEbayHoldDetails,lines=state.orders;
+  const editing=()=>document.hidden||state.busy||document.activeElement?.matches('#orders-list input,#orders-list textarea,#orders-list select')||
+    Array.from(document.querySelectorAll('[role="dialog"]:not([hidden]):not(.hidden)')).some(d=>d.getClientRects().length>0);
+  if(!api||!lines?.length||checkingPendingHolds||Date.now()<nextPendingHoldCheck||editing())return;
+  const ids=[...new Set(lines.filter(isOpenOrderLine).map(l=>getOrderFromLine(l).order_number).filter(Boolean))];
+  if(!ids.length)return;
+  checkingPendingHolds=true;nextPendingHoldCheck=Date.now()+60000;
+  try{
+    const evidence={};for(let i=0;i<ids.length;i+=500){
+      const {data,error}=await supabase.rpc('pending_ebay_hold_updates',{_orders:ids.slice(i,i+500)});
+      if(error)return;Object.assign(evidence,data);
+    }
+    if(state.orders!==lines||editing())return;
+    const signature=m=>m?JSON.stringify([m.memos,m.categories,m.estimates,m.actions,m.codes,m.delivery]):'';
+    let changed=false;
+    for(const l of lines){
+      const id=getOrderFromLine(l).order_number,e=evidence[id];if(!e)continue;
+      const current=getLineHoldExplanation(l),at=Date.parse(e.finance?.syncedAt)||0;
+      const order=getOrderFromLine(l);
+      const latest=Math.max(pendingHoldChecked.get(l)||0,...[current?.financeChecked,order.raw_payload?.ebayFinance?.syncedAt,
+        l.raw_payload?.ebayFinance?.syncedAt,order.ebay_finance?.syncedAt,l.ebay_finance?.syncedAt].map(s=>Date.parse(s)||0));
+      if(latest>at||!e.finance?.transactions?.length&&!e.payments?.length)continue;
+      const next=api.model(id,e);
+      if(!next&&current&&!e.finance?.transactions?.some(t=>t.transactionType==='SALE'&&t.bookingEntry==='CREDIT'&&
+        (t.orderNumber===id||!t.orderNumber&&e.finance.orderNumber===id&&e.finance.source==='ebay_finances_api')&&
+        ['FUNDS_AVAILABLE_FOR_PAYOUT','PAYOUT_INITIATED','PAYOUT','PAID_OUT'].includes(t.transactionStatus)))continue;
+      if(signature(next)!==signature(current))changed=true;
+      livePendingHolds.set(l,next);
+      pendingHoldChecked.set(l,at);
+    }
+    if(changed)applyOrderFilters();
+  }finally{checkingPendingHolds=false;}
 }
 
 function filterOrderHoldReasons(lines) {
@@ -2693,7 +2729,7 @@ function formatFinanceQueueStatus(data = {}) {
   const remaining = waiting + retrying;
   let message = remaining
     ? `Updating in the background · ${checked} checked · ${remaining} remaining. You can keep working or close this page.`
-    : checked ? `${failed ? `${checked} payout checks completed` : "Payout checks finished"}${data.last_checked_at ? ` · ${formatDate(data.last_checked_at)}` : ""}. Refresh orders to see the latest details.` : "";
+    : checked ? `${failed ? `${checked} payout checks completed` : "Payout checks finished"}${data.last_checked_at ? ` · ${formatDate(data.last_checked_at)}` : ""}. Hold reasons and estimated release dates update automatically on this page.` : "";
   if (retrying) message += ` ${retrying} will retry automatically.`;
   if (failed) message += ` ${failed} payout update${failed === 1 ? " needs" : "s need"} attention. Orders can still be processed.`;
   if (Number(data.without_transactions || 0)) message += ` eBay has no transaction data yet for ${Number(data.without_transactions)} order(s).`;
@@ -2715,6 +2751,7 @@ async function refreshFinanceQueueStatus() {
     $("finance-sync-status").textContent = status.message;
     $("finance-sync-retry").hidden = !status.failed;
     if (status.remaining) delay = 15000;
+    void refreshVisiblePendingHolds().catch(()=>{});
   } catch {
     panel.hidden = false;
     $("finance-sync-status").textContent = "Payout update status is temporarily unavailable. You can continue processing orders.";

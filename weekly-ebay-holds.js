@@ -38,7 +38,7 @@
    const packet=await new Promise((resolve,reject)=>{
     listener=e=>{if(e.source!==window||e.origin!==location.origin||e.data?.type!=='INVSTO_HOLD_RESULT'||e.data.id!==id)return;
      e.data.ok?resolve(e.data.packet):reject(Error(e.data.message||'Seller Hub check did not finish.'));};
-    window.addEventListener('message',listener);timer=setTimeout(()=>reject(Error('Seller Hub took too long to respond.')),240000);
+    window.addEventListener('message',listener);timer=setTimeout(()=>reject(Error('Seller Hub took too long to respond.')),330000);
     window.postMessage({type:'INVSTO_HOLD_REFRESH',id},location.origin);
    });
    const {error}=await s.client.rpc('refresh_ebay_hold_ledger',{_at:packet.at,_total:packet.total,_count:packet.count,_rows:packet.rows});

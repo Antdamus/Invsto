@@ -19,7 +19,7 @@
    const job=await db.rpc('claim_ebay_browser_reports');if(job.error){pause=true;return;}if(!job.data)return;
    const work=job.data,notes=[];let observations=[],statementNote=null;
    if(work.ledger){
-    try{const {packet:p}=await request('OG_READ_ACCOUNT_HOLDS');
+    try{const {packet:p}=await request('OG_READ_ACCOUNT_HOLDS',{},330000);
      const saved=await db.rpc('refresh_ebay_hold_ledger',{_at:p.at,_total:p.total,_count:p.count,_rows:p.rows});
      if(saved.error)throw Error('Held list did not reconcile.');
      notes.push(p.count+' hold entries verified.');

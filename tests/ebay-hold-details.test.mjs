@@ -23,6 +23,17 @@ test('only order-scoped held sale credits explain the hold, not labels, other or
  const attack=evidence('<img src=x onerror=alert(1)>');assert.doesNotMatch(api.render(api.model(id,attack,true)),/<img/);
 });
 
+test('pending hold filter updates on release, ignores an older response and defers while a worker edits',async()=>{
+ const e=evidence(),line={id:'a',line_status:'pending',order:{order_number:id,raw_payload:{ebayFinance:e.finance}}},doc={addEventListener(){},querySelectorAll:()=>[],activeElement:{matches:()=>false}};
+ let repaints=0,calls=0,next=evidence();const ctx=vm.createContext({console,URL,URLSearchParams,Date,Intl,window:{OGEbayHoldDetails:api,location:{search:''},addEventListener(){}},document:doc,line,
+  supabase:{rpc:async()=>{calls++;return {data:{[id]:next}};}},paint:()=>{repaints++;}});
+ vm.runInContext(await readFile(file('pending-orders.js'),'utf8'),ctx);vm.runInContext('state.orders=[line];applyOrderFilters=paint;',ctx);
+ const refresh=()=>vm.runInContext('nextPendingHoldCheck=0;refreshVisiblePendingHolds()',ctx);
+ next.finance.syncedAt='2026-11-01T18:00Z';next.finance.transactions[0].transactionStatus='FUNDS_AVAILABLE_FOR_PAYOUT';
+ doc.activeElement.matches=()=>true;await refresh();assert.equal(calls,0);doc.activeElement.matches=()=>false;
+ await refresh();assert.equal(ctx.getLineHoldExplanation(line),null);assert.equal(repaints,1);
+ next=evidence();await refresh();assert.equal(ctx.getLineHoldExplanation(line),null);assert.equal(repaints,1);
+});
 test('pending-order selection uses the newest financial snapshot, filters exact orders and counts each order once',async()=>{
  const elements=new Map([['pending-hold-reason',{value:'return',innerHTML:''}],['pending-hold-release-date',{value:'all',innerHTML:''}]]);
  const context=vm.createContext({console,URL,URLSearchParams,Date,Intl,window:{OGEbayHoldDetails:api,location:{search:''},addEventListener(){}},document:{addEventListener(){},getElementById:id=>elements.get(id)}});
