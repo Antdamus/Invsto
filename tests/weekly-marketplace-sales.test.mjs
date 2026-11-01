@@ -159,6 +159,23 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PAID","ebayFinance":{"orderNumber":"e2","syncedAt":"2025-07-05T12:00:00Z","transactions":[{"transactionId":"tx","transactionType":"SALE","bookingEntry":"CREDIT","orderNumber":"e2","currency":"USD","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":"72.10"}]}}' where id='b'`);
   multi=(await itemReport()).find(o=>o.id==='e2');assert.equal(multi.credit,72.1);assert.equal(multi.fund,'available');assert.equal(multi.held,null);assert.equal(multi.items[0].credit,null);
   assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_item_orders,null);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101074000_weekly_ebay_payout_matches.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101075000_weekly_ebay_payout_coverage.sql',import.meta.url),'utf8'));
+  await db.exec(`insert into weekly_ebay_payout_batches(id,status,amount,currency,reported_day,source,checked_at) values
+    ('balance','SUCCEEDED',500,'USD','2025-06-17','test',now()),
+    ('linked','SUCCEEDED',60,'USD','2025-07-05','test',now()),
+    ('failed','TERMINAL_FAILED',25,'USD','2025-06-10','test',now());`);
+  assert.deepEqual((await itemReport()).find(o=>o.id==='e2').payouts,[]);
+  const receipt=async(raw)=>(await one("select weekly_ebay_order_payout('12-12345-12345',$1) as receipts",[JSON.stringify(raw)])).receipts;
+  const original={transactionId:'tx',transactionType:'SALE',bookingEntry:'CREDIT',orderNumber:'12-12345-12345',currency:'USD',amount:74,transactionStatus:'PAYOUT',payoutId:'linked'};
+  const rawPayout={ebayFinance:{transactions:[original,original,{...original,orderNumber:'unrelated',transactionId:'other'}]}};
+  const save=(arr)=>db.query("select save_weekly_ebay_payout_entries('linked',$1)",[JSON.stringify(arr)]);
+  const saleEntry={txn:'tx',kind:'SALE',order_number:original.orderNumber,signed_amount:74,currency:'USD'};
+  const ledger=[saleEntry,{...saleEntry,txn:'rf',kind:'REFUND',signed_amount:-14}];
+  await save(ledger);await save(ledger);assert.deepEqual(await receipt(rawPayout),[{id:'linked',status:'SUCCEEDED',date:'2025-07-05',net:60,sale:74}]);
+  assert.deepEqual(await receipt({ebayFinance:{transactions:[{...original,payoutId:'failed'}]}}),[
+   {id:'failed',status:'TERMINAL_FAILED',date:'2025-06-10',net:74,sale:74},{id:'linked',status:'SUCCEEDED',date:'2025-07-05',net:60,sale:74}]);
+  assert.deepEqual((await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_account_payouts,[{id:'balance',day:'2025-06-17',amount:500}]);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });
