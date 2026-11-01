@@ -6,6 +6,29 @@ import {PGlite} from '@electric-sql/pglite';
 import {chromium} from '@playwright/test';
 import {deliveryResults} from '../supabase/functions/ebay-order-sync/report-delivery.ts';
 const file=p=>new URL('../'+p,import.meta.url);
+test('signed-in worker certifies a new reader, retries a transient page, and skips a fresh verified list on the next run',async()=>{
+ const source=await readFile(file('ebay-report-refresh.js'),'utf8'),local=new Map();
+ async function run({replies=[],failSave=false,ledger=false}={}){
+  let boot,handler,reads=0,saves=0,note;const origin='https://antdamus.github.io';
+  const db={auth:{getSession:async()=>({data:{session:{}}})},rpc:async(name,p)=>{
+   if(name==='claim_ebay_browser_reports')return {data:{ticket:'t',orders:[],ledger}};
+   if(name==='refresh_ebay_hold_ledger'){saves++;return {error:failSave};}
+   if(name==='finish_ebay_browser_reports'){note=p._note;return {};}
+   assert.fail(name);}};
+  const win={supabaseClient:db,addEventListener(k,f){if(k==='load')boot=f;else handler=f;},removeEventListener(){},
+   postMessage(m){if(m.type==='OG_REPORT_FINISH')return;assert.equal(m.type,'OG_READ_ACCOUNT_HOLDS');const reply=replies[reads++];
+    queueMicrotask(()=>handler({origin,source:win,data:{channel:'invstoReportResult',id:m.id,reply}}));}};
+  win.top=win;runInNewContext(source,{window:win,location:{origin,href:origin+'/Invsto/ebay-report-refresh.html?job=1'},URL,crypto:{randomUUID:()=> 'msg'},
+   localStorage:{getItem:k=>local.get(k),setItem:(k,v)=>local.set(k,v)},setTimeout:()=>0,clearTimeout:()=>{},Date,document:{querySelector:()=>({})}});
+  await boot();return {reads,saves,note};
+ }
+ const ok={ok:true,packet:{count:1,total:100,rows:[{}]}},transient={ok:false,message:'Waiting for the Seller Hub On hold list.'};
+ assert.deepEqual(await run({replies:[transient,ok]}),{reads:2,saves:1,note:'1 hold entry verified.'});
+ assert.deepEqual(await run(),{reads:0,saves:0,note:''});
+ const failed=await run({replies:[ok],ledger:true,failSave:true});assert.match(failed.note,/did not reconcile/);
+ assert.equal((await run()).reads,0,'an unverified reader cools down before a new certification attempt');
+ const auth=await run({replies:[{ok:false,message:'Sign in to the ogjewelers Seller Hub account.'}],ledger:true});assert.equal(auth.reads,1);
+});
 test('held-list worker requests exact ranges in its own tab and never publishes a partial or changing ledger',async()=>{
  const src=await readFile(file('tools/ebay-og-order-link-extension/holds-background.js'),'utf8');
  async function run(bad){

@@ -11,6 +11,17 @@
    window.addEventListener('message',listener);window.postMessage({channel:'invstoReportRequest',type,id,...args},location.origin);
   });
  }
+ // Verify a new reader on this browser even if another browser recently saved
+ // a list. Store only a reader revision and an attempt time, never account data.
+ const readerCheckKey='invsto-ogjewelers-holds-offset30-v1';
+ function firstReaderCheckDue(){
+  try{const previous=JSON.parse(localStorage.getItem(readerCheckKey)||'{}');
+   return !previous.verified&&(!previous.at||Date.now()-previous.at>=3600000);
+  }catch{return false;}
+ }
+ function markReaderCheck(verified){
+  try{localStorage.setItem(readerCheckKey,JSON.stringify({verified,at:Date.now()}));}catch{}
+ }
  async function run(){
   if(!new URL(location.href).searchParams.has('job')||window.top!==window)return;
   let pause=false;
@@ -18,11 +29,17 @@
    const db=window.supabaseClient;if(!db||!(await db.auth.getSession()).data?.session){pause=true;return;}
    const job=await db.rpc('claim_ebay_browser_reports');if(job.error){pause=true;return;}if(!job.data)return;
    const work=job.data,notes=[];let observations=[],statementNote=null;
-   if(work.ledger){
-    try{const {packet:p}=await request('OG_READ_ACCOUNT_HOLDS',{},330000);
+   if(work.ledger||firstReaderCheckDue()){
+    markReaderCheck(false);
+    try{const started=Date.now();let packet;
+     try{packet=(await request('OG_READ_ACCOUNT_HOLDS',{},330000)).packet;}
+     catch(e){if(Date.now()-started>100000||!/Waiting for (the )?Seller Hub|Seller Hub changed during the check|Could not read the Seller Hub On hold list/i.test(e.message))throw e;
+      packet=(await request('OG_READ_ACCOUNT_HOLDS',{},330000)).packet;}
+     const p=packet;
      const saved=await db.rpc('refresh_ebay_hold_ledger',{_at:p.at,_total:p.total,_count:p.count,_rows:p.rows});
      if(saved.error)throw Error('Held list did not reconcile.');
-     notes.push(p.count+' hold entries verified.');
+     markReaderCheck(true);
+     notes.push(p.count+(p.count===1?' hold entry verified.':' hold entries verified.'));
     }catch(e){notes.push(e.message);}
    }
    if(work.orders.length||work.statement||work.claim_month){
