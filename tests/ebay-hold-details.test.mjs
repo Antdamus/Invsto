@@ -24,7 +24,7 @@ test('only order-scoped held sale credits explain the hold, not labels, other or
 });
 
 test('pending-order selection uses the newest financial snapshot, filters exact orders and counts each order once',async()=>{
- const elements=new Map([['pending-hold-reason',{value:'return',innerHTML:''}]]);
+ const elements=new Map([['pending-hold-reason',{value:'return',innerHTML:''}],['pending-hold-release-date',{value:'all',innerHTML:''}]]);
  const context=vm.createContext({console,URL,URLSearchParams,Date,Intl,window:{OGEbayHoldDetails:api,location:{search:''},addEventListener(){}},document:{addEventListener(){},getElementById:id=>elements.get(id)}});
  vm.runInContext(await readFile(file('pending-orders.js'),'utf8'),context);
  const e=evidence(),order={order_number:id,buyer_username:'same-buyer',raw_payload:{order:{paymentSummary:{payments:e.payments}},ebayFinance:e.finance}};
@@ -32,10 +32,31 @@ test('pending-order selection uses the newest financial snapshot, filters exact 
  assert.deepEqual(context.filterOrderHoldReasons(lines).map(l=>l.id),['a','b']);
  assert.match(elements.get('pending-hold-reason').innerHTML,/Open return · 1/);assert.match(elements.get('pending-hold-reason').innerHTML,/Waiting for delivery · 1/);
  assert.match(context.renderGroupHoldReasons(lines),/2 orders with funds on hold/);
+ elements.get('pending-hold-release-date').value='day:2026-11-28';assert.equal(context.filterOrderHoldReasons(lines).length,2);
+ elements.get('pending-hold-release-date').value='day:2026-11-29';assert.equal(context.filterOrderHoldReasons(lines).length,0);
+ assert.match(elements.get('pending-hold-release-date').innerHTML,/Nov 29, 2026 · 0/);elements.get('pending-hold-release-date').value='all';
  lines[0].raw_payload={ebayFinance:{...e.finance,syncedAt:'2026-10-01T00:00Z',transactions:[transaction('Old explanation')]}};
  assert.deepEqual(api.fromLine(lines[0]).memos,['Funds on hold: open return']);
  order.raw_payload.ebayFinance={...e.finance,syncedAt:'2026-11-02T16:30Z',transactions:[transaction('Released',{transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT'})]};
  assert.equal(context.filterOrderHoldReasons(lines).length,0);assert.match(elements.get('pending-hold-reason').innerHTML,/Open return · 0/);
+});
+
+test('estimated-release filters prefer payment memo dates, preserve omitted years, and fall back to Eastern order dates',()=>{
+ const current=api.model(id,evidence('Estimated release on Nov 3'),true),unknown=api.model(id,evidence('Funds on Hold'),true);
+ assert.deepEqual(api.releaseDates(current).map(d=>d.key),['month-day:11-03']);
+ assert.equal(api.matchesDate(current,'day:2026-11-28'),false,'older structured estimate cannot override the payment memo');
+ assert.equal(api.matchesDate(current,'day:2026-11-03'),false,'do not invent a year');
+ assert.match(api.dateOptions([current]),/Nov 3 · year not supplied · 1/);
+ assert.deepEqual(api.releaseDates(unknown).map(d=>d.key),['day:2026-11-28']);
+ const explicit=api.model(id,evidence('Funds on hold, Estimated release on November 3, 2026'),true);
+ assert.deepEqual(api.releaseDates(explicit).map(d=>d.key),['day:2026-11-03']);
+ const midnight=evidence('Funds on Hold');midnight.payments[0].paymentHolds[0].expectedReleaseDate='2026-11-03T02:00:00Z';
+ assert.deepEqual(api.releaseDates(api.model(id,midnight,true)).map(d=>d.key),['day:2026-11-02']);
+ const unparsed=api.model(id,evidence('Estimated release on Feb 31'),true);assert.equal(api.releaseDates(unparsed).length,0);
+ assert.equal(api.matchesDate(unparsed,'undated'),true);assert.equal(api.matchesDate(null,'undated'),false);
+ assert.match(api.dateOptions([], 'month-day:11-03'),/Nov 3 · year not supplied · 0/);
+ assert.match(api.dateOptions([], 'day:2026-11-03'),/Nov 3, 2026 · 0/);
+ const changed={...current,snapshot:'2026-10-31T00:00Z',releaseObserved:true,financeChecked:'2026-11-01T00:00Z'};assert.deepEqual(api.releaseDates(changed),[]);
 });
 
 test('report includes only hold evidence and account snapshot enrichment leaves verified totals unchanged',async()=>{
@@ -69,10 +90,16 @@ test('phone report shows reasons, keeps a reason filter through refresh and remo
  assert.equal(await p.locator('.wi-order').count(),1);assert.match(await p.locator('.wi-order').innerText(),/Funds on hold: open return/);
  await p.locator('.wi-order .ebay-hold-detail summary').click();assert.match(await p.locator('.wi-order').innerText(),/2:00 AM EST/);
  await draw();assert.equal(await p.locator('.wi-hold-reason').inputValue(),'return');assert.equal(await p.locator('.wi-order').count(),1);
+ await p.locator('.wi-release-date').selectOption('day:2026-11-28');await draw();assert.equal(await p.locator('.wi-release-date').inputValue(),'day:2026-11-28');assert.equal(await p.locator('.wi-order').count(),1);
  await p.locator('.wh-browser>summary').click();await p.locator('.wh-reason').selectOption('return');assert.equal(await p.locator('.wh-list article').count(),2);
+ await p.locator('.wh-date').selectOption('day:2026-11-28');assert.equal(await p.locator('.wh-list article').count(),1);await draw();assert.equal(await p.locator('.wh-date').inputValue(),'day:2026-11-28');
+ // Newly supplied payment-message estimate replaces the older structured date without resetting the user's filter.
+ d.ebay_item_orders[0].hold_detail=evidence('Estimated release on Nov 3');await draw();assert.equal(await p.locator('.wi-order').count(),0);
+ await p.locator('.wi-hold-reason').selectOption('scheduled');assert.equal(await p.locator('.wi-release-date').inputValue(),'all');
+ await p.locator('.wi-release-date').selectOption('month-day:11-03');assert.equal(await p.locator('.wi-order').count(),1);assert.match(await p.locator('.wi-order').innerText(),/Estimated release on Nov 3/);
  assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  if(process.env.HOLD_PREVIEW)await p.locator('.wi-order').screenshot({path:process.env.HOLD_PREVIEW});
- d.ebay_item_orders[0].fund='available';await draw();assert.equal(await p.locator('.wi-order').count(),0);assert.equal(await p.locator('.wi-hold-reason').inputValue(),'return');
- await p.locator('.wi-total [data-bucket="released"]').click();assert.equal(await p.locator('.wi-hold-reason').inputValue(),'all');assert.equal(await p.locator('.wi-order .ebay-hold-detail').count(),0);
+ d.ebay_item_orders[0].fund='available';await draw();assert.equal(await p.locator('.wi-order').count(),0);assert.equal(await p.locator('.wi-hold-reason').inputValue(),'scheduled');
+ await p.locator('.wi-total [data-bucket="released"]').click();assert.equal(await p.locator('.wi-hold-reason').inputValue(),'all');assert.equal(await p.locator('.wi-release-date').inputValue(),'all');assert.equal(await p.locator('.wi-order .ebay-hold-detail').count(),0);
  }finally{await b.close();}
 });

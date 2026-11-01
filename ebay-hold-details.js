@@ -1,7 +1,7 @@
 /* Display eBay's saved explanations verbatim. A hold is not a refund or an unpaid buyer. */
 (function(root){
  'use strict';
- const labels={delivery:'Waiting for delivery',authentication:'Waiting for authentication',return:'Open return',request:'Open buyer request',dispute:'Dispute / claim',scheduled:'Release date only',releasing:'Release in progress',other:'Other eBay explanation',unknown:'Reason not provided'};
+ const labels={delivery:'Waiting for delivery',authentication:'Waiting for authentication',return:'Open return',request:'Open buyer request',dispute:'Dispute / claim',scheduled:'Estimated release date · reason not provided',releasing:'Release in progress',other:'Other eBay explanation',unknown:'Reason not provided'};
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const array=a=>Array.isArray(a)?a:[],text=s=>typeof s==='string'?s.trim():'';
  const stamp=s=>Number.isFinite(Date.parse(s))?new Date(s).toLocaleString('en-US',{timeZone:'America/New_York',year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'';
@@ -54,9 +54,43 @@
    (/^\d{2}-\d{5}-\d{5}$/.test(m.id)?'<a href="https://www.ebay.com/mesh/ord/details?orderid='+encodeURIComponent(m.id)+'" target="_blank" rel="noopener">Check this order on eBay ↗</a>':'')+'</aside>';
  }
  const matches=(m,value)=>value==='all'||Boolean(m)&&(value==='held'||m.categories.includes(value));
+ const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+ function memoDate(memo){
+  const hit=text(memo).match(/\bestimated release(?:\s+(?:on|date(?: is)?))?\s*:?\s+([a-z]+)\.?\s+(\d{1,2})(?:,?\s+(\d{4}))?\b/i);
+  if(!hit)return null;
+  const month=months.findIndex(m=>m.toLowerCase()===hit[1].slice(0,3).toLowerCase()),day=Number(hit[2]),year=hit[3]?Number(hit[3]):null;
+  if(month<0||day<1||day>new Date(Date.UTC(year??2000,month+1,0)).getUTCDate())return null;
+  const md=String(month+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+  // The payment memo often omits a year and timezone. Preserve that uncertainty;
+  // neither today's year nor an older order estimate can supply those facts.
+  return {key:year?'day:'+year+'-'+md:'month-day:'+md,label:months[month]+' '+day+(year?', '+year:' · year not supplied'),source:'eBay payment message',sort:year?'1:'+year+'-'+md:'0:'+md};
+ }
+ function releaseDates(m){
+  if(!m||m.snapshot&&m.releaseObserved&&Date.parse(m.financeChecked)>Date.parse(m.snapshot))return [];
+  const scheduled=m.memos.filter(s=>category(s)==='scheduled'),parsed=scheduled.map(memoDate).filter(Boolean);
+  if(scheduled.length)return [...new Map(parsed.map(d=>[d.key,d])).values()];
+  // A saved order estimate is a fallback only when the payment message has no dated estimate.
+  return [...new Map(m.estimates.map(s=>{
+   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(s));
+   const part=k=>parts.find(p=>p.type===k)?.value,md=part('month')+'-'+part('day'),year=part('year');
+   return {key:'day:'+year+'-'+md,label:months[Number(part('month'))-1]+' '+Number(part('day'))+', '+year,source:'Saved order estimate · Eastern',sort:'1:'+year+'-'+md};
+  }).map(d=>[d.key,d])).values()];
+ }
+ const matchesDate=(m,value)=>value==='all'||Boolean(m)&&(value==='undated'?releaseDates(m).length===0:releaseDates(m).some(d=>d.key===value));
+ function dateOptions(models,value='all'){
+  const rows=models.filter(Boolean),dates=new Map();let undated=0;
+  for(const m of rows){const found=releaseDates(m);if(!found.length)undated++;for(const d of found){const prior=dates.get(d.key);dates.set(d.key,{...d,count:(prior?.count||0)+1});}}
+  if(value!=='all'&&value!=='undated'&&!dates.has(value)){
+   const memo=value.startsWith('month-day:')?value.slice(10):value.startsWith('day:')?value.slice(9):'';
+   const y=value.startsWith('day:')?value.slice(4,8):'';
+   if(/^\d{2}-\d{2}$/.test(memo))dates.set(value,{key:value,label:months[Number(memo.slice(0,2))-1]+' '+Number(memo.slice(3))+(y?', '+y:' · year not supplied'),sort:y?'1:'+y+'-'+memo:'0:'+memo,count:0});
+  }
+  return '<option value="all">All estimated dates</option>'+[...dates.values()].sort((a,b)=>a.sort.localeCompare(b.sort)).map(d=>'<option value="'+esc(d.key)+'">'+esc(d.label)+' · '+d.count+'</option>').join('')+
+   (undated||value==='undated'?'<option value="undated">No dated estimate available · '+undated+'</option>':'');
+ }
  function options(models,value='all',unit='orders'){
   const rows=models.filter(Boolean),count=k=>rows.filter(m=>m.categories.includes(k)).length;
   return '<option value="all">All '+esc(unit)+'</option><option value="held">All on hold · '+rows.length+'</option>'+Object.entries(labels).filter(([k])=>count(k)||k===value).map(([k,v])=>'<option value="'+k+'">'+esc(v)+' · '+count(k)+'</option>').join('');
  }
- root.OGEbayHoldDetails={model,fromLine,render,category,labels,matches,options};
+ root.OGEbayHoldDetails={model,fromLine,render,category,labels,matches,options,releaseDates,matchesDate,dateOptions};
 })(typeof window==='undefined'?globalThis:window);

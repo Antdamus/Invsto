@@ -806,7 +806,15 @@ function filterOrderHoldReasons(lines) {
   }
   select.innerHTML = api.options([...orders.values()], value);
   select.value = value;
-  return lines.filter(line => api.matches(orders.get(getOrderFromLine(line).order_number), value));
+  const dateSelect = $("pending-hold-release-date"), date = dateSelect?.value || "all";
+  if (dateSelect) {
+    dateSelect.innerHTML = api.dateOptions([...orders.values()].filter(m => api.matches(m, value)), date);
+    dateSelect.value = date;
+  }
+  return lines.filter(line => {
+    const info = orders.get(getOrderFromLine(line).order_number);
+    return api.matches(info, value) && api.matchesDate(info, date);
+  });
 }
 
 function renderGroupHoldReasons(lines) {
@@ -13180,6 +13188,11 @@ function setupListeners() {
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
   $("pending-hold-reason")?.addEventListener("change", () => {
+    if ($("pending-hold-release-date")) $("pending-hold-release-date").value = "all";
+    clearEbayLaunchFilter({ apply: false });
+    applyOrderFilters();
+  });
+  $("pending-hold-release-date")?.addEventListener("change", () => {
     clearEbayLaunchFilter({ apply: false });
     applyOrderFilters();
   });
