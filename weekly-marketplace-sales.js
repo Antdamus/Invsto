@@ -47,6 +47,36 @@
  function cell(label,value){return '<div><small>'+label+'</small><strong>'+value+'</strong></div>';}
  function deduction(rows,key){const value=sum(rows,key);return value?'−'+fmt(value):fmt(0);}
  function postedProceeds(rows){return sum(rows,'settled_orders')||sum(rows,'proceeds')!==0?fmt(sum(rows,'proceeds')):'Awaiting records';}
+ const buyerStates={paid:'Paid',partial:'Paid, then partly refunded',refunded:'Paid, then fully refunded',date_only:'Saved paid date only',unknown:'No payment confirmation'};
+ const fundsStates={paid_out:'Paid out by eBay',initiated:'Payout started',available:'Available for payout',held:'On hold',processing:'Processing',mixed:'Multiple sale states',unknown:'Payout status unconfirmed'};
+ function paymentBreakdown(list,period){
+  if(!list?.length)return '';
+  function disclosure(label,items){
+   if(!items.length)return '';
+   const links=items.map(o=>{
+    if(!/^\d{2}-\d{5}-\d{5}$/.test(o.id))return '';
+    const checked=o.checked?' · '+etStamp(o.checked):'';
+    return '<li><a target="_blank" rel="noopener" href="https://www.ebay.com/mesh/ord/details?orderid='+o.id+'">'+o.id+' ↗</a> <small>'+buyerStates[o.buyer]+' · '+fundsStates[o.funds]+(o.fedex?' · FedEx':'')+
+     (o.source?' · '+(o.source==='Seller Hub'?'Seller Hub':'Finances API'):'')+checked+'</small></li>';
+   }).join('');
+   return '<details class="ws-pay-group" data-pay-key="'+period+'-'+label+'"><summary>'+label+' <b>'+items.length+'</b></summary><ul>'+links+'</ul></details>';
+  }
+  const categories=(key,labels)=>Object.entries(labels).map(([value,label])=>{
+   const items=list.filter(o=>o[key]===value);
+   if(!items.length&&key==='funds'&&['available','held','paid_out','processing'].includes(value)){
+    return '<div class="ws-pay-zero">'+label+' <b>0</b></div>';
+   }
+   return disclosure(label,items);
+  }).join('');
+  const paidCount=list.filter(o=>['paid','partial','refunded'].includes(o.buyer)).length;
+  const times=list.map(o=>Date.parse(o.checked)).filter(Number.isFinite);
+  const latest=times.length?' Latest funds check '+etStamp(Math.max(...times))+'.':'';
+  return '<section class="ws-payments"><h4>Payments on '+list.length+' eBay orders awaiting final proceeds</h4>'+
+   '<p><strong>'+paidCount+' with confirmed buyer payment</strong>, including orders later refunded. Each order appears once in each column. Open a count to see the order numbers.</p>'+
+   '<div class="ws-pay-columns"><div><h5>Buyer payment</h5>'+categories('buyer',buyerStates)+'</div><div><h5>Seller funds · last reported by eBay</h5>'+categories('funds',fundsStates)+'</div></div>'+
+   disclosure('FedEx outbound tracking',list.filter(o=>o.fedex))+
+   '<p>eBay reports the funds status of the original sale. A later refund reduces what you keep. Available funds can still be waiting for a payout. An outside label can leave postage unknown even when the buyer paid. FedEx tracking identifies the carrier only.'+latest+' <a target="_blank" rel="noopener" href="https://www.ebay.com/mes/summary">Check current funds in Seller Hub ↗</a></p></section>';
+ }
  function salesCalculation(rows,period){
   const booked=sum(rows,'booked'),afterCancellations=booked-sum(rows,'cancelled'),afterRefunds=afterCancellations-sum(rows,'refunded');
   const step=(label,amount,balance)=>'<tr><th scope="row">'+label+'</th><td>'+amount+'</td><td>'+fmt(balance)+'</td></tr>';
@@ -70,7 +100,8 @@
     '<div class="ws-inner">'+salesCalculation(part,'Week')+
     '<table><thead><tr><th>Marketplace</th><th>Net sales</th><th>Awaiting verification</th><th>Proceeds</th></tr></thead><tbody>'+details+'</tbody></table>'+
     '<p>'+sum(part,'settled_orders')+' of '+sum(part,'orders')+' included orders have reconciled proceeds. '+
-    (comparable?'At the same point in the comparison week, verified net item sales were '+fmt(sum(part,'comparable'))+'.':'This partial week does not supply a full same-days comparison.')+'</p></div></details>';
+    (comparable?'At the same point in the comparison week, verified net item sales were '+fmt(sum(part,'comparable'))+'.':'This partial week does not supply a full same-days comparison.')+'</p>'+
+    paymentBreakdown(data.ebay_pending_payments?.filter(o=>o.week===week),week)+'</div></details>';
   };
   const caption=data.current_month?'This week so far':'Last week in this month';
   const period=dayLabel(data.anchor)+' through '+etStamp(data.as_of);
@@ -81,7 +112,7 @@
   return '<h3 class="ws-source-title">Sales by original purchase week (Eastern)</h3><p class="ws-intro">A later refund reduces the week the item was bought. A fully canceled or fully refunded item contributes $0 in item sales. A partial refund leaves only the portion kept.'+scanNote+'</p>'+
    '<div class="ws-headline"><div><small>MONTH · NET ITEM SALES AFTER REFUNDS AND CANCELLATIONS</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>Merchandise only · '+fmt(sum(rows,'held'))+' excluded pending verification</p></div>'+
    '<div><small>MONTH · '+(unresolved?'CONFIRMED PROCEEDS SO FAR':'CONFIRMED SELLER PROCEEDS')+'</small><strong>'+postedProceeds(rows)+'</strong><p>'+(unresolved?'Final proceeds pending for '+unresolved+' of '+sum(rows,'orders')+' orders. ':'All included orders reconciled. ')+'Includes shipping collected, less marketplace fees and recorded postage. Before inventory cost.</p></div></div>'+
-   salesCalculation(rows,'Month')+
+   salesCalculation(rows,'Month')+paymentBreakdown(data.ebay_pending_payments,'month')+
    (market==='all'&&sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
    '<div class="ws-comparison"><h3>'+caption+'</h3><p>'+(data.current_month?period:'Through '+dayLabel(rows.at(-1).end_day,-1))+' · compared with the same elapsed days and time one week earlier.</p>'+
    '<div>'+cell('Verified net item sales',fmt(data.focus_net))+ '<span>'+change(data.focus_net,data.previous_net)+' · previous '+fmt(data.previous_net)+'</span></div>'+
@@ -117,7 +148,10 @@
    try{
     const {data,error}=await client.rpc('get_weekly_sales_for_market',{_month:month.value+'-01',_market:market.value});if(error||!data)throw error||Error();
     if(seq!==version||!panel.open)return;
-    $('ws-results').innerHTML=render(data,market.value);$('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
+    const expanded=new Set(Array.from($('ws-results').querySelectorAll('.ws-pay-group[open]'),d=>d.dataset.payKey));
+    $('ws-results').innerHTML=render(data,market.value);
+    for(const group of $('ws-results').querySelectorAll('.ws-pay-group'))group.open=expanded.has(group.dataset.payKey);
+    $('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
    }catch{if(seq===version){$('ws-results').replaceChildren();$('ws-status').textContent='Could not verify these totals. Use Refresh sales to retry.';}}
   }
   panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();load();};

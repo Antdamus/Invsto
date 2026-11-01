@@ -1,5 +1,12 @@
 #weekly-sales-report{grid-column:1/-1;min-width:0}
 #weekly-sales-report .dash-report-body{display:grid;gap:1rem}
+.ws-payments{padding:1rem;margin:1rem 0;border:1px solid var(--dash-line);border-radius:10px;background:#1b2420}
+.ws-payments h4,.ws-payments h5{margin:0 0 .4rem}.ws-payments p{font-size:.86rem;line-height:1.5;color:var(--dash-muted)}
+.ws-pay-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr));gap:.75rem 1.5rem}
+.ws-pay-group{border-top:1px solid var(--dash-line);margin:.25rem 0}.ws-pay-group summary{cursor:pointer;padding:.5rem .2rem;color:var(--dash-text)}
+.ws-pay-group summary b{float:right;font-variant-numeric:tabular-nums}.ws-pay-group ul{list-style:none;margin:0;padding:0;max-height:15rem;overflow:auto}
+.ws-pay-zero{color:var(--dash-muted);font-size:.86rem;padding:.4rem .2rem;border-top:1px solid var(--dash-line)}.ws-pay-zero b{float:right}
+.ws-pay-group li{padding:.5rem;border-bottom:1px solid var(--dash-line)}.ws-pay-group small{display:block;color:var(--dash-muted);margin:.25rem 0}.ws-payments a{color:#c6e8ce}
 .ws-scan{display:block;margin-top:.3rem;color:var(--dash-muted)}
 .ws-intro{color:var(--dash-muted);line-height:1.5;margin:0 0 .85rem}.ws-hub-reference{margin-top:1.2rem}.ws-hub-reference>summary{cursor:pointer;color:#c6e8ce}.ws-hub-reference[open]>summary{margin-bottom:.75rem}
 .ws-calculation{margin:1rem 0;border:1px solid var(--dash-line);border-radius:9px;overflow:hidden}.ws-calculation table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ws-calculation caption{text-align:left;font-weight:650;padding:.8rem;background:#202a22}.ws-calculation th,.ws-calculation td{text-align:right;padding:.55rem .65rem;border-bottom:1px solid var(--dash-line);font-size:.87rem}.ws-calculation tr>:first-child{text-align:left}.ws-calculation thead th,.ws-calculation small{color:var(--dash-muted);font-size:.76rem}.ws-calculation small{display:block;font-weight:400}.ws-calculation .ws-kept{background:#20362b;font-weight:700}

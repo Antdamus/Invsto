@@ -32,6 +32,8 @@ test('weekly report revises the original ET week, separates cancellation and ref
    create function dispatch_ebay_finance_worker() returns void language plpgsql as $$begin if not exists(select 1 from ebay_finance_jobs where (state='working' and lease_until<=now())) then return; end if; end$$;`);
   await db.exec(await readFile(new URL('../supabase/migrations/20261101061000_weekly_ebay_sale_updates.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101062000_weekly_ebay_refund_history.sql',import.meta.url),'utf8'));
+  await db.exec("alter table ebay_orders add column label_metadata jsonb");
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101063000_weekly_ebay_payment_status.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -118,6 +120,23 @@ test('weekly report revises the original ET week, separates cancellation and ref
   assert.equal(Number((await one("select posted from weekly_sales_proceeds('2025-06-09','2025-06-10') where order_number='combined-B'")).posted),9.97);
   await db.exec("insert into weekly_ebay_order_earnings(order_number,purchased_at,earnings,checked_at) values ('combined-B',now(),8.44,now())");
   assert.equal(Number((await one("select posted from weekly_sales_proceeds('2025-06-09','2025-06-10') where order_number='combined-B'")).posted),8.44);
+  // A buyer can have paid and been refunded while the seller's original credit
+  // is still held. External tracking must never change the proceeds calculation.
+  const inspect=async(raw,hub,at)=>(await one(
+   "select weekly_ebay_payment_detail('e1',$1,now(),100,0,$2,$3,true) d",[JSON.stringify(raw),hub,at])).d;
+  const raw={orderPaymentStatus:'PARTIALLY_REFUNDED',ebayFinance:{syncedAt:'2025-06-02T04:00:00Z',transactions:[
+   {transactionType:'SALE',bookingEntry:'CREDIT',orderNumber:'e1',transactionStatus:'FUNDS_ON_HOLD'},
+   {transactionType:'SHIPPING_LABEL',bookingEntry:'DEBIT',transactionStatus:'COMPLETED'}]}};
+  let detail=await inspect(raw,'available','2025-06-01T00:00:00Z');
+  assert.deepEqual([detail.buyer,detail.funds,detail.source,detail.fedex],['partial','held','Finances API',true]);
+  detail=await inspect(raw,'paid_out','2025-06-05T00:00:00Z');
+  assert.deepEqual([detail.buyer,detail.funds,detail.source],['partial','paid_out','Seller Hub']);
+  detail=await inspect({},null,null);assert.deepEqual([detail.buyer,detail.funds],['date_only','unknown']);
+  await db.exec("insert into weekly_ebay_payment_observations values('e3','held',now());insert into weekly_ebay_outbound_fedex values('e3','123',now())");
+  const list=(await report()).ebay_pending_payments,entry=list.find(o=>o.id==='e3');
+  assert.equal(list.filter(o=>o.id==='e3').length,1);assert.equal(entry.week,'2025-06-02');assert.equal(entry.funds,'held');assert.equal(entry.fedex,true);
+  assert.equal(list.some(o=>o.id==='combined-A'),false);
+  assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_pending_payments,null);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });

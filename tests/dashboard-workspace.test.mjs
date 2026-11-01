@@ -102,6 +102,8 @@ test('weekly sales on a phone refreshes late adjustments and displays proceeds s
    return {data:{month:'2026-10-01',cutoff:'2026-10-31T17:00:00',as_of:'2026-10-31T21:00:00Z',anchor:'2026-10-26',current_month:true,
     seller_hub:[{first_day:'2026-10-01',last_day:'2026-10-31',item_sales:110,reported_net:91,checked_at:'2026-10-31T20:30:00Z'}],
     focus_net:100-refund,previous_net:75,focus_proceeds:64-refund,previous_proceeds:60,focus_unsettled:2,previous_unsettled:0,feeds:{},
+    ebay_pending_payments:[{id:'01-12345-12345',week:'2026-10-26',buyer:'paid',funds:'held',source:'Seller Hub',checked:'2026-10-31T20:00:00Z',fedex:true},
+     {id:'02-12345-12345',week:'2026-10-26',buyer:'refunded',funds:'unknown',fedex:false}],
     rows:[{market:'ebay',week:'2026-10-26',first_day:'2026-10-26',end_day:'2026-11-01',net:100-refund,booked:200,cancelled:50,refunded:refund,held:50,proceeds:64-refund,orders:3,settled_orders:1,comparable:100-refund,comparable_proceeds:64-refund}]}};
   };
  });
@@ -110,6 +112,11 @@ test('weekly sales on a phone refreshes late adjustments and displays proceeds s
   await expect(page.locator('#ws-results>.ws-source-title')).toContainText('original purchase week');
   await expect(page.locator('#ws-results>.ws-headline')).toContainText('Final proceeds pending for 2 of 3 orders');
   const balance=page.locator('#ws-results>.ws-calculation');
+  const funds=page.locator('#ws-results>.ws-payments');
+  await expect(funds).toContainText('2 with confirmed buyer payment');
+  const hold=funds.locator('details[data-pay-key="month-On hold"]');
+  await hold.locator('summary').click();
+  await expect(hold.getByRole('link')).toHaveAttribute('href','https://www.ebay.com/mesh/ord/details?orderid=01-12345-12345');
   await expect(balance.getByRole('row',{name:/After cancellations/})).toContainText('−$50.00$150.00');
   await expect(page.locator('.ws-comparison')).toContainText('when both periods are fully reconciled');
   await expect(page.locator('.ws-hub')).toBeHidden();
@@ -125,6 +132,7 @@ test('weekly sales on a phone refreshes late adjustments and displays proceeds s
  await expect(balance.getByRole('row',{name:/After refunds/})).toContainText('−$22.00$128.00');
  await expect(page.locator('.ws-inner .ws-calculation')).toContainText('$128.00');
  await expect(page.locator('.ws-hub-reference')).toHaveAttribute('open','');
+ await expect(hold).toHaveAttribute('open','');
  await page.locator('#ws-market').selectOption('all');await expect(page.locator('#ws-status')).toContainText('All marketplaces');
  assert.equal(await page.evaluate(()=>window.lastMarket),'all');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
