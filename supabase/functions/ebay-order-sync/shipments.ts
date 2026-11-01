@@ -1,7 +1,7 @@
 // Read-only shipping evidence. Never infers shipment time from order modification
 // or purchase time, and never changes local fulfillment or inventory.
 export async function inspectShippingFulfillments(db: any, body: any, read: (path: string) => Promise<any>) {
-  const ids = [...new Set((Array.isArray(body.orderIds) ? body.orderIds : []).map(String))];
+  const ids = [...new Set<string>((Array.isArray(body.orderIds) ? body.orderIds : []).map(String))];
   if (!ids.length || ids.length > 50 || ids.some(id => !/^\d{2}-\d{5}-\d{5}$/.test(id))) {
     throw new Error('Choose between 1 and 50 explicit eBay order numbers.');
   }

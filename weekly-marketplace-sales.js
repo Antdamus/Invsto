@@ -45,35 +45,51 @@
   return name+' refund reconciliation is incomplete. Unverified sales are held out.';
  }
  function cell(label,value){return '<div><small>'+label+'</small><strong>'+value+'</strong></div>';}
+ function deduction(rows,key){const value=sum(rows,key);return value?'−'+fmt(value):fmt(0);}
+ function postedProceeds(rows){return sum(rows,'settled_orders')||sum(rows,'proceeds')!==0?fmt(sum(rows,'proceeds')):'Awaiting records';}
+ function salesCalculation(rows,period){
+  const booked=sum(rows,'booked'),afterCancellations=booked-sum(rows,'cancelled'),afterRefunds=afterCancellations-sum(rows,'refunded');
+  const step=(label,amount,balance)=>'<tr><th scope="row">'+label+'</th><td>'+amount+'</td><td>'+fmt(balance)+'</td></tr>';
+  return '<div class="ws-calculation"><table><caption>'+period+' · from original sales to sales kept</caption><thead><tr><th>Item sales</th><th>Deduction</th><th>Balance</th></tr></thead><tbody>'+
+   step('Originally recorded', '—',booked)+step('After cancellations',deduction(rows,'cancelled'),afterCancellations)+step('After refunds',deduction(rows,'refunded'),afterRefunds)+
+   '<tr class="ws-kept"><th scope="row">Verified net item sales<small>After setting aside amounts under review</small></th><td>'+deduction(rows,'held')+'</td><td>'+fmt(sum(rows,'net'))+'</td></tr></tbody></table></div>';
+ }
  function render(data,market){
-  const rows=data.rows,open=new Set(Array.from($('ws-results').querySelectorAll('details[open]'),d=>d.dataset.week));
+  const rows=data.rows,open=new Set(Array.from($('ws-results').querySelectorAll('.ws-week[open]'),d=>d.dataset.week));
+  const hubOpen=Boolean($('ws-results').querySelector('.ws-hub-reference[open]'));
   const groups=new Map();for(const r of rows){if(!groups.has(r.week))groups.set(r.week,[]);groups.get(r.week).push(r);}
   const weekCard=([week,part])=>{
    const r=part[0],current=week===data.anchor,scope=dayLabel(r.first_day)+' – '+dayLabel(r.end_day,-1);
    const range=dayLabel(week)+' – '+dayLabel(week,6);
    const comparable=r.comparable!=null;
-   const proceeds=(list)=>sum(list,'settled_orders')||sum(list,'proceeds')!==0?fmt(sum(list,'proceeds')):'Awaiting settlement';
-   const details=part.map(m=>'<tr><th scope="row">'+marketNames[m.market]+'</th><td>'+(m.net===0&&m.held>0?'Awaiting check':fmt(m.net))+'</td><td>'+fmt(m.held)+'</td><td>'+proceeds([m])+'</td></tr>').join('');
+   const partial=sum(part,'settled_orders')<sum(part,'orders');
+   const details=part.map(m=>'<tr><th scope="row">'+marketNames[m.market]+'</th><td>'+(m.net===0&&m.held>0?'Awaiting check':fmt(m.net))+'</td><td>'+fmt(m.held)+'</td><td>'+postedProceeds([m])+'</td></tr>').join('');
    return '<details class="ws-week" data-week="'+week+'" '+(open.has(week)?'open':'')+'><summary><span><strong>'+range+'</strong><small>'+
     (current&&data.current_month?'This week so far':scope!==range?'In this month · '+scope:'Monday–Sunday')+'</small></span>'+
-    '<span><small>Net item sales</small><b>'+fmt(sum(part,'net'))+'</b></span><span><small>Seller proceeds</small><b>'+proceeds(part)+'</b></span><span class="ws-arrow" aria-hidden="true">⌄</span></summary>'+
-    '<div class="ws-inner"><div class="ws-facts">'+cell('Booked items',fmt(sum(part,'booked')))+cell('Cancellations',fmt(sum(part,'cancelled')))+cell('Merchandise refunds',fmt(sum(part,'refunded')))+cell('Awaiting verification',fmt(sum(part,'held')))+'</div>'+
+    '<span><small>Verified net item sales</small><b>'+fmt(sum(part,'net'))+'</b></span><span><small>'+(partial?'Proceeds so far · partial':'Seller proceeds')+'</small><b>'+postedProceeds(part)+'</b></span><span class="ws-arrow" aria-hidden="true">⌄</span></summary>'+
+    '<div class="ws-inner">'+salesCalculation(part,'Week')+
     '<table><thead><tr><th>Marketplace</th><th>Net sales</th><th>Awaiting verification</th><th>Proceeds</th></tr></thead><tbody>'+details+'</tbody></table>'+
     '<p>'+sum(part,'settled_orders')+' of '+sum(part,'orders')+' included orders have reconciled proceeds. '+
-    (comparable?'At the same point in the week as the comparison date, verified sales were '+fmt(sum(part,'comparable'))+' and recorded proceeds were '+fmt(sum(part,'comparable_proceeds'))+'.':'This partial week does not supply a full same-days comparison.')+'</p></div></details>';
+    (comparable?'At the same point in the comparison week, verified net item sales were '+fmt(sum(part,'comparable'))+'.':'This partial week does not supply a full same-days comparison.')+'</p></div></details>';
   };
   const caption=data.current_month?'This week so far':'Last week in this month';
   const period=dayLabel(data.anchor)+' through '+etStamp(data.as_of);
-  return (market==='ebay'&&data.month&&data.cutoff?hubOverview(data,groups)+'<h3 class="ws-source-title">Invsto · by original purchase week (Eastern)</h3>':'')+'<div class="ws-headline"><div><small>MONTH · VERIFIED NET ITEM SALES</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>'+fmt(sum(rows,'held'))+' awaiting verification</p></div>'+
-   '<div><small>MONTH · RECORDED SELLER PROCEEDS</small><strong>'+(sum(rows,'settled_orders')||sum(rows,'proceeds')!==0?fmt(sum(rows,'proceeds')):'Awaiting settlement')+'</strong><p>'+sum(rows,'settled_orders')+' of '+sum(rows,'orders')+' included orders reconciled</p></div></div>'+
-   (sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).filter(k=>market==='all'||market===k).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
+  const unresolved=sum(rows,'orders')-sum(rows,'settled_orders');
+  const scan=data.ebay_adjustments;
+  const scanNote=scan?' <small class="ws-scan">'+(scan.checked?'eBay order changes checked through '+etStamp(scan.through)+'.':'The first eBay change scan is pending.')+(scan.error?' A retry is scheduled.':'')+'</small>':'';
+  const hub=market==='ebay'&&data.month&&data.cutoff?'<details class="ws-hub-reference" '+(hubOpen?'open':'')+'><summary>Compare with eBay Seller Hub · by posting date (Pacific)</summary>'+hubOverview(data,groups)+'</details>':'';
+  return '<h3 class="ws-source-title">Sales by original purchase week (Eastern)</h3><p class="ws-intro">A later refund reduces the week the item was bought. A fully canceled or fully refunded item contributes $0 in item sales. A partial refund leaves only the portion kept.'+scanNote+'</p>'+
+   '<div class="ws-headline"><div><small>MONTH · NET ITEM SALES AFTER REFUNDS AND CANCELLATIONS</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>Merchandise only · '+fmt(sum(rows,'held'))+' excluded pending verification</p></div>'+
+   '<div><small>MONTH · '+(unresolved?'CONFIRMED PROCEEDS SO FAR':'CONFIRMED SELLER PROCEEDS')+'</small><strong>'+postedProceeds(rows)+'</strong><p>'+(unresolved?'Final proceeds pending for '+unresolved+' of '+sum(rows,'orders')+' orders. ':'All included orders reconciled. ')+'Includes shipping collected, less marketplace fees and recorded postage. Before inventory cost.</p></div></div>'+
+   salesCalculation(rows,'Month')+
+   (market==='all'&&sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
    '<div class="ws-comparison"><h3>'+caption+'</h3><p>'+(data.current_month?period:'Through '+dayLabel(rows.at(-1).end_day,-1))+' · compared with the same elapsed days and time one week earlier.</p>'+
-   '<div>'+cell('Net sales',fmt(data.focus_net))+ '<span>'+change(data.focus_net,data.previous_net)+' · previous '+fmt(data.previous_net)+'</span></div>'+
-   '<div>'+cell('Seller proceeds',fmt(data.focus_proceeds))+'<span>'+change(data.focus_proceeds,data.previous_proceeds)+' · previous '+fmt(data.previous_proceeds)+'</span></div></div>'+
+   '<div>'+cell('Verified net item sales',fmt(data.focus_net))+ '<span>'+change(data.focus_net,data.previous_net)+' · previous '+fmt(data.previous_net)+'</span></div>'+
+   (data.focus_unsettled===0&&data.previous_unsettled===0?'<div>'+cell('Seller proceeds',fmt(data.focus_proceeds))+'<span>'+change(data.focus_proceeds,data.previous_proceeds)+' · previous '+fmt(data.previous_proceeds)+'</span></div>':'<p>The proceeds comparison will appear when both periods are fully reconciled.</p>')+'</div>'+
    '<div class="ws-list">'+Array.from(groups).reverse().map(weekCard).join('')+'</div>'+
    '<details class="ws-method"><summary>Adjustments and coverage</summary><p>USD orders from eBay, TikTok Shop, and Whatnot are counted once by purchase week in Eastern time. Booked items include cancellations. Confirmed merchandise refunds and cancellations reduce that week once. Failed payments, buyer tax, and shipping collected are outside net item sales.</p>'+
    '<p>Seller proceeds include buyer shipping credited by the marketplace, less fees, refunds, adjustments, and recorded postage. A shared eBay label is split once across its linked orders. eBay funds on hold or processing are included when costs are recorded. Positive balances with incomplete costs stay out. Recorded losses can appear before an order fully settles. This shows the reconciled portion of sales. It excludes inventory cost, off-platform postage, and account-wide charges without an order.</p>'+
-   (market==='ebay'?'':'<p>'+(['all','tiktok'].includes(market)?feedNote('TikTok Shop',data.feeds?.tiktok)+' ':'')+(['all','whatnot'].includes(market)?feedNote('Whatnot',data.feeds?.whatnot)+(data.whatnot_backfill?' Whatnot order history is still importing.':''):'')+'</p>')+'</details>';
+   (market==='ebay'?'':'<p>'+(['all','tiktok'].includes(market)?feedNote('TikTok Shop',data.feeds?.tiktok)+' ':'')+(['all','whatnot'].includes(market)?feedNote('Whatnot',data.feeds?.whatnot)+(data.whatnot_backfill?' Whatnot order history is still importing.':''):'')+'</p>')+'</details>'+hub;
  }
  function init(client){
   const panel=$('weekly-sales-report'),month=$('ws-month');if(!panel||month.dataset.ready)return;month.dataset.ready='true';

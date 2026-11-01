@@ -25,6 +25,12 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await db.exec(await readFile(new URL('../supabase/migrations/20261101051000_weekly_ebay_seller_hub.sql',import.meta.url),'utf8'));
   await db.exec("create schema cron;create function cron.schedule(text,text,text) returns bigint language sql as 'select 1::bigint'");
   await db.exec(await readFile(new URL('../supabase/migrations/20261101053000_ebay_order_earnings.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101060000_weekly_sales_reversed_orders.sql',import.meta.url),'utf8'));
+  await db.exec(`create table ebay_finance_worker(singleton boolean,dispatch_token uuid,claimed_at timestamptz,lease_until timestamptz);
+   create table ebay_finance_jobs(state text,lease_until timestamptz);
+   create function enqueue_ebay_finance_jobs(text[],boolean) returns integer language sql as 'select 1';
+   create function dispatch_ebay_finance_worker() returns void language plpgsql as $$begin if not exists(select 1 from ebay_finance_jobs where (state='working' and lease_until<=now())) then return; end if; end$$;`);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101061000_weekly_ebay_sale_updates.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -51,13 +57,50 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await db.exec("update ebay_orders set raw_payload='{\"orderPaymentStatus\":\"FULLY_REFUNDED\"}' where id='a'");
   r=await report();assert.equal(row(r,'2025-05-26','ebay').refunded,100);assert.equal(row(r,'2025-05-26','ebay').net,0);
   await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PAID","ebayFinance":{"transactionIds":["x","y","z"],"transactions":[{"transactionId":"x","orderNumber":"e1","transactionType":"SALE","transactionStatus":"FUNDS_ON_HOLD","amount":90,"bookingEntry":"CREDIT"},{"transactionId":"y","orderNumber":"e1","transactionType":"SHIPPING_LABEL","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":6,"bookingEntry":"DEBIT"},{"transactionId":"z","orderNumber":"e1","transactionType":"REFUND","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":15,"bookingEntry":"DEBIT"}]}}' where id='a'`);
-  r=await report();assert.equal(row(r,'2025-05-26','ebay').proceeds,69);assert.equal(row(r,'2025-05-26','ebay').settled_orders,1);
+  r=await report();assert.equal(row(r,'2025-05-26','ebay').proceeds,0);assert.equal(row(r,'2025-05-26','ebay').settled_orders,0);
+  // Post the reversal in July. The original June week changes immediately,
+  // even if the payment ledger or an earnings snapshot still shows a profit.
+  const paid=(await one("select raw_payload r from ebay_orders where id='a'")).r;
+  const originalLedger=structuredClone(paid.ebayFinance);originalLedger.transactions=originalLedger.transactions.filter(t=>t.transactionType!=='REFUND');originalLedger.transactionIds=['x','y'];
+  const setOrder=(value)=>db.query("update ebay_orders set raw_payload=$1 where id='a'",[JSON.stringify(value)]);
+  const saleWeek=async()=>row((await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r,'2025-05-26','ebay');
+  const checkSale=async(net,posted,eligible)=>{const w=await saleWeek();assert.equal(w.net,net);assert.equal(w.proceeds,posted);assert.equal(w.settled_orders,eligible);return w;};
+  await setOrder({orderPaymentStatus:'PAID',ebayFinance:originalLedger});await checkSale(100,84,1);
+  await setOrder({orderPaymentStatus:'PAID',orderCancelStatus:'CANCELED',ebayFinance:originalLedger});
+  let adjusted=await checkSale(0,0,0);assert.equal(adjusted.cancelled,100);assert.equal(adjusted.refunded,0);
+  await db.exec("insert into weekly_ebay_order_earnings(order_number,purchased_at,earnings,refunds,checked_at) values('e1','2025-06-02 03:59Z',84,0,now())");
+  await setOrder({orderPaymentStatus:'FULLY_REFUNDED',orderCancelStatus:'CANCELED',ebayFinance:originalLedger});
+  adjusted=await checkSale(0,0,0);assert.equal(adjusted.cancelled+adjusted.refunded,100);
+  const julyRefund={refundReferenceId:'r-july',refundStatus:'REFUNDED',refundDate:'2025-07-03T12:00:00Z',amount:{currency:'USD',value:'25.00'}};
+  const partial={orderPaymentStatus:'PARTIALLY_REFUNDED',order:{pricingSummary:{total:{value:'100.00'}},paymentSummary:{refunds:[julyRefund,julyRefund]}},ebayFinance:originalLedger};
+  await setOrder(partial);adjusted=await checkSale(75,0,0);assert.equal(adjusted.refunded,25);
+  const refundDebit={transactionId:'new-r',orderNumber:'e1',transactionType:'REFUND',transactionStatus:'COMPLETED',bookingEntry:'DEBIT',amount:25};
+  partial.ebayFinance={...originalLedger,transactionIds:['x','y','new-r'],transactions:[...originalLedger.transactions,refundDebit]};
+  await setOrder(partial);await checkSale(75,59,1);
+  assert.equal((await one("select count(*) n from weekly_sales_order_rows('2025-07-01','2025-08-01') where order_number='e1'")).n,0);
+  // A refunded line snapshot cannot wipe out its siblings' sales.
+  await db.exec("update ebay_order_lines set raw_payload=jsonb_set(raw_payload,'{orderPaymentStatus}','\"FULLY_REFUNDED\"') where id='1'");
+  await db.exec("insert into ebay_order_lines values('extra','a','fulfilled',1,10,'{\"Sold For\":\"10.00\",\"orderPaymentStatus\":\"PAID\"}')");
+  partial.order.pricingSummary.total.value='110.00';await setOrder(partial);adjusted=await checkSale(85,59,1);assert.equal(adjusted.refunded,25);
+  await db.exec("delete from ebay_order_lines where id='extra'");
+  partial.orderPaymentStatus='FULLY_REFUNDED';partial.ebayFinance.transactions.at(-1).amount=100;
+  await setOrder(partial);await checkSale(0,-16,1);
+  await setOrder({orderPaymentStatus:'PAID',ebayFinance:originalLedger});
+  await db.exec("update ebay_order_lines set raw_payload=raw_payload-'orderPaymentStatus' where id='1'");
+  await checkSale(100,84,1);
+  await db.exec("update weekly_ebay_change_cursor set through_at='2025-07-01';insert into ebay_finance_worker values(true,auth.uid(),now(),now()+interval '1 minute')");
+  const change={order_number:'e1',modified_at:'2025-07-03T12:00:00Z',changes:{orderPaymentStatus:'PARTIALLY_REFUNDED',refunds:[julyRefund],total:{value:'100.00',currency:'USD'}}};
+  const apply=()=>db.query("select save_weekly_ebay_change_page(auth.uid(),'2025-07-01','2025-07-05',$1,true,false)",[JSON.stringify([change])]);
+  await apply();await apply();await checkSale(75,0,0);
+  assert.equal((await one("select status from ebay_orders where id='a'")).status,'fulfilled');
+  assert.equal((await one("select count(*) n from weekly_ebay_sale_updates")).n,1);
   // One shared debit spans two purchase weeks; only one copy of its seven cents is deducted.
   for(const [order,id,day] of [['combined-A','aa','2025-06-08 12:00Z'],['combined-B','bb','2025-06-09 12:00Z']]){
    const raw={orderPaymentStatus:'PAID',ebayFinance:{source:'ebay_finances_api',orderNumber:order,transactionIds:[id,'shared-label'],transactions:[
     {transactionId:id,orderNumber:order,transactionType:'SALE',bookingEntry:'CREDIT',transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT',amount:10},
     {transactionId:'shared-label',transactionType:'SHIPPING_LABEL',bookingEntry:'DEBIT',transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT',amount:.07}]}};
    await db.query('insert into ebay_orders values($1,$2,$3,$4,now(),$5,10,null)',[id,order,'fulfilled',day,JSON.stringify(raw)]);
+   await db.query('insert into ebay_order_lines values($1,$2,$3,1,10,$4)',[id+'-line',id,'fulfilled',JSON.stringify({'Sold For':'10.00'})]);
   }
   const postage=(await db.query("select order_number,posted,complete from weekly_sales_proceeds('2025-06-01','2025-06-09') where order_number='combined-A'")).rows[0];
   assert.equal(Number(postage.posted),9.96);assert.equal(postage.complete,true);

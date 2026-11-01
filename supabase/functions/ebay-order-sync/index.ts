@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { inspectShippingFulfillments } from "./shipments.ts";
+import { syncWeeklySaleUpdates } from "./weekly-sale-updates.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -216,10 +217,10 @@ async function getEbayAccessToken(): Promise<string> {
   return payload.access_token;
 }
 
-async function ebayRequest(token: string, path: string): Promise<any> {
+async function ebayRequest(token: string, path: string, timeoutMs=EBAY_FETCH_TIMEOUT_MS): Promise<any> {
   const res = await fetch(`${EBAY_API_BASE}${path}`, {
     method: "GET",
-    signal: AbortSignal.timeout(EBAY_FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       "Authorization": `Bearer ${token}`,
       "Accept": "application/json",
@@ -1284,6 +1285,15 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
       if (error) { retrying++; return; } // A durable lease recovers a failed save.
       if (saved && !failure) completed++; else retrying++;
     });
+    try{
+      for(let i=0;i<3&&Date.now()+8000<deadline;i++){
+        const more=await syncWeeklySaleUpdates(supabase,dispatchToken as string,path=>{
+          const remaining=deadline-Date.now();if(!token||remaining<500)throw Error('Retry adjustment window');
+          return ebayRequest(token,path,Math.min(EBAY_FETCH_TIMEOUT_MS,remaining));
+        });
+        if(!more)break;
+      }
+    }catch{console.warn('Weekly eBay adjustments will retry.');}
   } finally {
     await supabase.rpc("finish_ebay_finance_worker", {_dispatch_token:dispatchToken});
   }
