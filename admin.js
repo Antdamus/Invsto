@@ -1335,7 +1335,7 @@ async function saveWaiveNote(){
 
 
 let editingShift = null, editTimeZone = 'America/New_York', editReturnFocus = null;
-async function openLiveCorrection(entryId, displayName){
+async function openShiftCorrection(entryId, displayName){
   try {
     await ensureStoresCache();
     const {data, error} = await supabaseClient.from('time_entries').select('id,employee_id,store_id,clock_in,clock_out').eq('id',entryId).single();
@@ -1421,11 +1421,12 @@ async function saveEdit(){
   if(!saved) return;
   closeEditModal(); showToast('Time corrected. The reason and original times are saved in the audit trail.','ok');
   try {
-    if(drawerContext.employeeId===shift.employee_id){
-      const shifts=await fetchWorkerShifts(drawerContext.employeeId,drawerContext.monthStart);
+    const refreshDrawer = async () => {
+      if (drawerContext.employeeId !== shift.employee_id || !qs('drawer').classList.contains('open')) return;
+      const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
       renderDrawerSummary(shifts); renderDrawerList(shifts);
-    }
-    await Promise.all([refreshOverviewSummary(),overviewApi?.loadLiveNow()]);
+    };
+    await Promise.all([refreshOverviewSummary(), overviewApi?.loadLiveNow(), refreshDrawer()]);
   } catch(err){ console.warn(err); showToast('Correction saved. Refresh to reload the latest totals.','ok'); }
 }
 function wireEditModal(){
@@ -1511,6 +1512,11 @@ function defaultManualShiftWindow(){
   return { start, end };
 }
 
+function shiftAdminInputISO(value) {
+  return shiftAdminContext?.periodStart
+    ? TimeCorrection.toISO(value, 'America/New_York') : localInputToOffsetISO(value);
+}
+
 function updateShiftAdminDuration(){
   const el = shiftAdminEl('shiftAdminDuration');
   if (!el) return;
@@ -1529,10 +1535,12 @@ function updateShiftAdminDuration(){
     endVal = shiftAdminEl('shiftAdminOutOnly')?.value || '';
   }
 
-  const start = startVal ? new Date(startVal) : null;
-  const end = endVal ? new Date(endVal) : null;
-  const diff = start && end ? (end.getTime() - start.getTime()) : NaN;
-  el.textContent = Number.isFinite(diff) && diff > 0 ? `Duration: ${fmtDurationHM(diff)}` : 'Duration: -';
+  try {
+    const start = shiftAdminMode === 'manual' ? shiftAdminInputISO(startVal) : startVal;
+    const end = shiftAdminInputISO(endVal);
+    const diff = Date.parse(end) - Date.parse(start);
+    el.textContent = Number.isFinite(diff) && diff > 0 ? `Duration: ${fmtDurationHM(diff)}` : 'Duration: -';
+  } catch (err) { el.textContent = err.message; }
 }
 
 async function openShiftAdminModal(mode, shift = null, context = drawerContext){
@@ -1553,9 +1561,9 @@ async function openShiftAdminModal(mode, shift = null, context = drawerContext){
   setShiftAdminError('');
 
   const workerName = context.displayName || 'Worker';
-  const monthText = context.monthStart ? monthLabel(context.monthStart) : '';
+  const periodText = context.periodLabel || (context.monthStart ? monthLabel(context.monthStart) : '');
   const workerEl = shiftAdminEl('shiftAdminWorker');
-  if (workerEl) workerEl.textContent = monthText ? `${workerName} / ${monthText}` : workerName;
+  if (workerEl) workerEl.textContent = periodText ? `${workerName} / ${periodText}` : workerName;
 
   const title = shiftAdminEl('shiftAdminTitle');
   const subtitle = shiftAdminEl('shiftAdminSubtitle');
@@ -1577,20 +1585,32 @@ async function openShiftAdminModal(mode, shift = null, context = drawerContext){
   setShiftAdminVisible('shiftAdminWarning', mode === 'delete');
 
   if (mode === 'manual'){
-    const defaults = defaultManualShiftWindow();
-    shiftAdminEl('shiftAdminIn').value = dateToLocalInput(defaults.start);
-    shiftAdminEl('shiftAdminOut').value = dateToLocalInput(defaults.end);
+    if (context.periodStart) {
+      const today = TimeCorrection.localValue(Date.now(), 'America/New_York').slice(0, 10);
+      const day = today >= context.periodStart && today <= context.periodEnd ? today : context.periodStart;
+      shiftAdminEl('shiftAdminIn').value = day + 'T09:00';
+      shiftAdminEl('shiftAdminOut').value = day + 'T13:00';
+    } else {
+      const defaults = defaultManualShiftWindow();
+      shiftAdminEl('shiftAdminIn').value = dateToLocalInput(defaults.start);
+      shiftAdminEl('shiftAdminOut').value = dateToLocalInput(defaults.end);
+    }
     if (title) title.textContent = 'Add manual shift';
-    if (subtitle) subtitle.textContent = 'Creates a closed time entry and records who made it, when, and why.';
+    if (subtitle) subtitle.textContent = context.periodStart
+      ? 'Enter times in Eastern time. Your name and reason are saved with the shift.'
+      : 'Creates a closed time entry and records who made it, when, and why.';
     if (saveBtn) saveBtn.textContent = 'Create shift';
   }
 
   if (mode === 'close'){
     const out = new Date();
     out.setSeconds(0, 0);
-    shiftAdminEl('shiftAdminOutOnly').value = dateToLocalInput(out);
+    shiftAdminEl('shiftAdminOutOnly').value = context.periodStart
+      ? TimeCorrection.localValue(out, 'America/New_York') : dateToLocalInput(out);
     if (title) title.textContent = 'Close open shift';
-    if (subtitle) subtitle.textContent = 'Sets the clock-out time, clears prior review, and writes an audit entry.';
+    if (subtitle) subtitle.textContent = context.periodStart
+      ? 'Enter the clock-out in Eastern time. Your name and reason are saved with the shift.'
+      : 'Sets the clock-out time, clears prior review, and writes an audit entry.';
     if (saveBtn) saveBtn.textContent = 'Close shift';
   }
 
@@ -1684,17 +1704,16 @@ async function saveShiftAdminAction(){
     if (shiftAdminMode === 'manual'){
       const inValue = shiftAdminEl('shiftAdminIn')?.value || '';
       const outValue = shiftAdminEl('shiftAdminOut')?.value || '';
-      const inDate = new Date(inValue);
-      const outDate = new Date(outValue);
-      if (!inValue || !outValue || Number.isNaN(inDate.getTime()) || Number.isNaN(outDate.getTime())){
+      const clockIn = shiftAdminInputISO(inValue), clockOut = shiftAdminInputISO(outValue);
+      if (!clockIn || !clockOut){
         throw new Error('Clock-in and clock-out are required.');
       }
-      if (outDate <= inDate) throw new Error('Clock-out must be after clock-in.');
+      if (Date.parse(clockOut) <= Date.parse(clockIn)) throw new Error('Clock-out must be after clock-in.');
 
       const { data, error } = await supabaseClient.rpc('admin_create_manual_shift', {
         _employee_id: shiftAdminContext.employeeId,
-        _clock_in: localInputToOffsetISO(inValue),
-        _clock_out: localInputToOffsetISO(outValue),
+        _clock_in: clockIn,
+        _clock_out: clockOut,
         _store_id: shiftAdminEl('shiftAdminStore')?.value || null,
         _reason: reason
       });
@@ -1706,14 +1725,14 @@ async function saveShiftAdminAction(){
     if (shiftAdminMode === 'close'){
       const shift = shiftAdminShift;
       const outValue = shiftAdminEl('shiftAdminOutOnly')?.value || '';
-      const outDate = new Date(outValue);
       if (!shift) throw new Error('Shift not found.');
-      if (!outValue || Number.isNaN(outDate.getTime())) throw new Error('Clock-out is required.');
-      if (outDate <= new Date(shift.clock_in)) throw new Error('Clock-out must be after clock-in.');
+      const clockOut = shiftAdminInputISO(outValue);
+      if (!clockOut) throw new Error('Clock-out is required.');
+      if (Date.parse(clockOut) <= Date.parse(shift.clock_in)) throw new Error('Clock-out must be after clock-in.');
 
       const { data, error } = await supabaseClient.rpc('admin_close_open_shift', {
         _time_entry_id: shiftAdminShiftId,
-        _clock_out: localInputToOffsetISO(outValue),
+        _clock_out: clockOut,
         _reason: reason
       });
       if (error) throw error;
@@ -2164,11 +2183,8 @@ if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
       // Edit shift
       const editBtn = t.closest('button[data-edit-id]');
       if (editBtn) {
-const id = editBtn.getAttribute('data-edit-id');
-
-await openLiveCorrection(id, drawerContext.displayName);
-return;
-
+        await openShiftCorrection(editBtn.dataset.editId, drawerContext.displayName);
+        return;
       }
 
       const closeShiftBtn = t.closest('button[data-close-id]');
@@ -3375,9 +3391,14 @@ function setupOverview() {
     monthInputToStart,
     fetchMonthlySummary,
     fetchMonthlyPendingReviewCounts,
+    weeklyHours: initWeeklyHours({
+      client: supabaseClient, getActiveEmployees, storeNameById,
+      correctShift: openShiftCorrection,
+      manageShift: openShiftAdminModal,
+    }),
 
     // This is the bridge into your existing drawer system:
-    correctLiveTime: openLiveCorrection,
+    correctLiveTime: openShiftCorrection,
     deleteLiveShift: openLiveShiftDeletion,
     openWorkerDrawer: ({ employeeId, monthStart, displayName }) => {
       // Reuse the exact drawer open flow you already have

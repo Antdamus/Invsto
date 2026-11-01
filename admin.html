@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
   <link rel="stylesheet" href="admin-overview-drawer.css?v=20261018-delete-shift" />
+  <link rel="stylesheet" href="admin-weekly-hours.css" />
   <link rel="stylesheet" href="admin-schedule.css?v=20260901-schedule-time-selects" />
   <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
@@ -64,22 +65,83 @@
       </div>
 
       <!-- ===== Overview panel ===== -->
-      <section id="panelOverview" class="panel" role="tabpanel" aria-labelledby="tabOverview">
+      <section id="panelOverview" class="panel" role="tabpanel" aria-labelledby="tabOverview" data-hours-view="week">
         <section class="overview-hero" aria-label="Time overview">
           <div class="overview-hero-copy">
-            <span class="overview-eyebrow">Time Command Center</span>
+            <span class="overview-eyebrow">Time overview</span>
             <h1>Worker hours at a glance</h1>
-            <p>Live clock-ins, review flags, monthly totals, and worker drill-downs in one clean place.</p>
+            <p>Review registered hours and adjust individual shifts.</p>
           </div>
-          <div id="overviewPulse" class="overview-pulse" aria-live="polite">
-            <span><b id="overviewAllCount">0</b> workers</span>
-            <span><b id="overviewReviewCount">0</b> need review</span>
-            <span><b id="overviewExceptionCount">0</b> exceptions</span>
+          <div class="hours-view-switch" role="group" aria-label="Hours summary period">
+            <button type="button" data-hours-mode="week" aria-pressed="true">Weekly</button>
+            <button type="button" data-hours-mode="month" aria-pressed="false">Monthly</button>
           </div>
         </section>
 
+        <section id="weeklyHours" class="wh-panel" aria-labelledby="whRange">
+          <header class="wh-header">
+            <div>
+              <span id="whEyebrow" class="overview-eyebrow">Weekly hours</span>
+              <h2 id="whRange" aria-live="polite">This week</h2>
+              <p>Closed shifts count from clock-in to clock-out, including breaks. Times are Eastern.</p>
+            </div>
+            <div class="wh-total">
+              <span>Team hours</span>
+              <strong id="whTotal">—</strong>
+              <small id="whShiftCount"></small>
+            </div>
+          </header>
+          <div class="wh-toolbar">
+            <div class="wh-nav" role="group" aria-label="Period navigation">
+              <button id="whPrev" class="btn" type="button" aria-label="Previous week" title="Previous week">‹</button>
+              <button id="whToday" class="btn" type="button">This week</button>
+              <button id="whNext" class="btn" type="button" aria-label="Next week" title="Next week">›</button>
+            </div>
+            <div class="wh-presets" role="group" aria-label="Quick week options">
+              <button class="btn" type="button" data-wh-preset="0" aria-pressed="true" aria-label="Sunday through Saturday">Sun–Sat</button>
+              <button class="btn" type="button" data-wh-preset="1" aria-pressed="false" aria-label="Monday through Sunday">Mon–Sun</button>
+            </div>
+            <button id="whSetDates" class="btn" type="button" aria-expanded="false" aria-controls="whDateSettings">Set dates</button>
+            <input id="whSearch" type="search" aria-label="Search weekly workers" placeholder="Search workers…" />
+          </div>
+          <form id="whDateSettings" class="wh-settings" hidden>
+            <fieldset>
+              <legend>How should hours be grouped?</legend>
+              <label><input type="radio" name="whPeriod" value="week" checked /> Repeating week</label>
+              <label><input type="radio" name="whPeriod" value="custom" /> Custom date range</label>
+            </fieldset>
+            <div id="whWeekFields" class="wh-fields">
+              <label>Week starts on
+                <select id="whStartDay">
+                  <option value="0">Sunday</option><option value="1">Monday</option>
+                  <option value="2">Tuesday</option><option value="3">Wednesday</option>
+                  <option value="4">Thursday</option><option value="5">Friday</option>
+                  <option value="6">Saturday</option>
+                </select>
+              </label>
+              <label>Week containing <input id="whDate" type="date" required /></label>
+            </div>
+            <div id="whCustomFields" class="wh-fields" hidden>
+              <label>From <input id="whFrom" type="date" required disabled /></label>
+              <label>To (inclusive) <input id="whTo" type="date" required disabled /></label>
+            </div>
+            <div class="wh-settings-actions">
+              <button class="btn" type="submit">Apply dates</button>
+              <button id="whCancelDates" class="btn ghost" type="button">Cancel</button>
+            </div>
+          </form>
+          <div class="wh-columns" aria-hidden="true"><span>Worker</span><span>Registered hours</span></div>
+          <div id="whWorkers"><p class="wh-empty" role="status">Loading shifts…</p></div>
+        </section>
+
+        <div id="overviewPulse" class="overview-pulse" data-monthly-hours aria-live="polite">
+          <span><b id="overviewAllCount">0</b> workers</span>
+          <span><b id="overviewReviewCount">0</b> need review</span>
+          <span><b id="overviewExceptionCount">0</b> exceptions</span>
+        </div>
+
         <!-- Mobile quick bar (filters live in sheet) -->
-        <div class="mobile-bar" role="region" aria-label="Quick actions">
+        <div class="mobile-bar" data-monthly-hours role="region" aria-label="Quick actions">
           <button id="openFiltersBtn" class="btn ghost mobile-only" type="button">Filters</button>
           <label class="mobile-search" aria-label="Search worker">
             <span class="sr-only">Search worker</span>
@@ -88,7 +150,7 @@
         </div>
 
         <!-- Filters (desktop/tablet) -->
-        <div class="filters" role="region" aria-label="Filters">
+        <div class="filters" data-monthly-hours role="region" aria-label="Filters">
           <label class="filter">
             <span>Month</span>
             <input id="monthInput" type="month" />
@@ -99,7 +161,7 @@
           </label>
         </div>
 
-        <div class="overview-focus-row" aria-label="Worker hour filters">
+        <div class="overview-focus-row" data-monthly-hours aria-label="Worker hour filters">
           <button class="overview-focus active" type="button" data-overview-focus="all">
             All workers <span id="overviewAllChip">0</span>
           </button>
@@ -127,7 +189,7 @@
 
         <section id="offsiteAdmin" aria-label="Off-site assignments and review"></section>
         <!-- KPI strip -->
-        <div class="kpis" role="region" aria-label="Summary KPIs">
+        <div class="kpis" data-monthly-hours role="region" aria-label="Summary KPIs">
           <div class="kpi">
             <div class="kpi-label">Total Hours</div>
             <div id="kpiTotalHours" class="kpi-value">—</div>
@@ -143,16 +205,16 @@
         </div>
 
         <!-- Print-only heading -->
-        <div class="print-header" aria-hidden="true">
+        <div class="print-header" data-monthly-hours aria-hidden="true">
           <h1 id="pageTitle">OG Jewelry — Monthly Hours Summary</h1>
           <div id="printMonthLabel">—</div>
         </div>
 
         <!-- Mobile cards (JS renders the same summary here on small screens) -->
-        <div id="summaryCards" class="summary-cards" aria-label="Monthly summary cards"></div>
+        <div id="summaryCards" class="summary-cards" data-monthly-hours aria-label="Monthly summary cards"></div>
 
         <!-- Summary table (desktop/tablet) -->
-        <div class="table-wrapper">
+        <div class="table-wrapper" data-monthly-hours>
           <table class="table" aria-describedby="printMonthLabel">
             <thead>
               <tr>
@@ -1483,10 +1545,11 @@
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
   <script src="offsite-work.js?v=20261011-outings"></script>
-  <script src="admin-overview.js?v=20261018-delete-shift"></script>
+  <script src="admin-weekly-hours.js"></script>
+  <script src="admin-overview.js?v=20261101-weekly-hours"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>
-  <script src="admin.js?v=20261018-delete-shift"></script>
+  <script src="admin.js?v=20261101-weekly-hours"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

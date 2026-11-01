@@ -16,6 +16,7 @@ function initOverview(deps) {
     fetchMonthlySummary,
     fetchMonthlyPendingReviewCounts,
     fetchMonthlyExceptionCounts,
+    weeklyHours,
     fetchLiveNow,            // ✅ Live Now data fetcher (kept in admin.js for now)
     correctLiveTime,
     deleteLiveShift,
@@ -254,6 +255,7 @@ function renderSummaryCards(rows) {
 
   // ---------- actions ----------
 async function loadSummary() {
+  if (qs('panelOverview').dataset.hoursView === 'week') return weeklyHours.load();
   if (isLoading) return;
   isLoading = true;
 
@@ -543,6 +545,14 @@ function wireLiveList(){
 
 // ---------- public ----------
 async function bootOverview() {
+  const modes = document.querySelectorAll('[data-hours-mode]');
+  modes.forEach(button => button.addEventListener('click', () => {
+    const mode = button.dataset.hoursMode;
+    if (mode === qs('panelOverview').dataset.hoursView) return;
+    qs('panelOverview').dataset.hoursView = mode;
+    modes.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    loadSummary();
+  }));
   wireFilters();
   wireOverviewFocus();
   wireSorting();
@@ -551,13 +561,11 @@ async function bootOverview() {
 
   // ✅ Live Now
   wireLiveList();
-  await loadLiveNow();
+  await Promise.all([loadSummary(), loadLiveNow()]);
   startLiveTicker(30000);
   setInterval(()=>{if(!document.hidden&&!OffsiteWork.busy())loadLiveNow();},60000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!OffsiteWork.busy())loadLiveNow();});
 
-  // ✅ Monthly summary
-  await loadSummary();
 }
 
   return { bootOverview, loadSummary, loadLiveNow };
