@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
   <link rel="stylesheet" href="admin-overview-drawer.css?v=20261018-delete-shift" />
-  <link rel="stylesheet" href="admin-weekly-hours.css" />
+  <link rel="stylesheet" href="admin-weekly-hours.css?v=20261101-breaks" />
   <link rel="stylesheet" href="admin-schedule.css?v=20260901-schedule-time-selects" />
   <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
@@ -83,10 +83,10 @@
             <div>
               <span id="whEyebrow" class="overview-eyebrow">Weekly hours</span>
               <h2 id="whRange" aria-live="polite">This week</h2>
-              <p>Closed shifts count from clock-in to clock-out, including breaks. Times are Eastern.</p>
+              <p>Closed shifts include up to 30 paid break minutes per worker at each store each day. A single break counts for up to 30 minutes, even overnight. Times are Eastern.</p>
             </div>
             <div class="wh-total">
-              <span>Team hours</span>
+              <span>Team counted hours</span>
               <strong id="whTotal">—</strong>
               <small id="whShiftCount"></small>
             </div>
@@ -130,7 +130,7 @@
               <button id="whCancelDates" class="btn ghost" type="button">Cancel</button>
             </div>
           </form>
-          <div class="wh-columns" aria-hidden="true"><span>Worker</span><span>Registered hours</span></div>
+          <div class="wh-columns" aria-hidden="true"><span>Worker</span><span>Counted hours</span></div>
           <div id="whWorkers"><p class="wh-empty" role="status">Loading shifts…</p></div>
         </section>
 
@@ -1545,7 +1545,7 @@
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
   <script src="offsite-work.js?v=20261011-outings"></script>
-  <script src="admin-weekly-hours.js"></script>
+  <script src="admin-weekly-hours.js?v=20261101-breaks"></script>
   <script src="admin-overview.js?v=20261101-weekly-hours"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>

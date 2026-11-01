@@ -1,6 +1,9 @@
 /* Weekly timesheet on Admin > Overview. Keep totals and shift details on the same read. */
 function initWeeklyHours({ client, getActiveEmployees, storeNameById, correctShift, manageShift }) {
   const zone = 'America/New_York';
+  const paidBreakAllowance = 30 * 60000;
+  // A selected Eastern midnight can fall partway through a store's local day.
+  const breakLookback = 36 * 3600000;
   const rangeFormat = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
   const dayFormat = new Intl.DateTimeFormat(undefined, { timeZone: zone, weekday: 'short', month: 'short', day: 'numeric' });
   const timeFormat = new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
@@ -36,15 +39,15 @@ function initWeeklyHours({ client, getActiveEmployees, storeNameById, correctShi
     return rangeFormat.formatRange(new Date(period.start), new Date(period.end));
   }
 
-  // Read all overlapping shifts, including overnight shifts clocked in before the range.
+  // Include earlier shifts that may already have used the first store day's allowance.
   async function fetchEntries(start, end) {
     const entries = [];
     const pageSize = 500;
     for (let offset = 0; ; offset += pageSize) {
       const { data, error } = await client.from('time_entries')
-        .select('id, employee_id, store_id, clock_in, clock_out, worker:employees!time_entries_employee_id_fkey(display_name)')
+        .select('id, employee_id, store_id, clock_in, clock_out, worker:employees!time_entries_employee_id_fkey(display_name), store:store_locations!time_entries_store_id_fkey(timezone), breaks:time_breaks!time_breaks_time_entry_id_fkey(started_at, ended_at)')
         .lt('clock_in', end)
-        .or(`clock_out.gt.${start},clock_out.is.null`)
+        .or(`clock_out.gt.${new Date(Date.parse(start) - breakLookback).toISOString()},clock_out.is.null`)
         .order('clock_in').order('id').range(offset, offset + pageSize - 1);
       if (error) throw error;
       entries.push(...data);
@@ -52,10 +55,77 @@ function initWeeklyHours({ client, getActiveEmployees, storeNameById, correctShi
     }
   }
 
+  function overlapMs(from, to, start, end) {
+    return Math.max(0, Math.min(to, end) - Math.max(from, start));
+  }
+
+  // Find the first instant of the next store day, including DST changes at midnight.
+  function endOfDaySegment(calendar, from, end, day) {
+    if (calendar.format(end - 1) === day) return end;
+    let low = from, high = end - 1;
+    while (high - low > 1) {
+      const mid = low + Math.floor((high - low) / 2);
+      if (calendar.format(mid) === day) low = mid;
+      else high = mid;
+    }
+    return high;
+  }
+
+  function allocateBreaks(entries, start, end, now) {
+    const byShift = new Map();
+    const timeline = [];
+    for (const shift of entries) {
+      const records = [];
+      byShift.set(shift.id, records);
+      const shiftEnd = shift.clock_out ? Date.parse(shift.clock_out) : now;
+      let coveredUntil = Date.parse(shift.clock_in);
+      const ordered = [...shift.breaks].sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
+      for (const row of ordered) {
+        const from = Date.parse(row.started_at);
+        const to = row.ended_at ? Date.parse(row.ended_at) : null;
+        const record = { from, to, paid: 0, unpaid: 0, asOf: to === null && !shift.clock_out ? now : null };
+        records.push(record);
+        // A missing end on a finished shift requires review. Never guess its duration.
+        if (to === null && !record.asOf) continue;
+        // Count overlapping legacy punches only once and only while clocked in.
+        const begin = Math.max(from, coveredUntil, start - breakLookback);
+        const finish = Math.min(to ?? now, shiftEnd, end);
+        if (finish <= begin) continue;
+        coveredUntil = finish;
+        timeline.push({ begin, finish, shift, record });
+      }
+    }
+
+    const remaining = new Map();
+    const calendars = new Map();
+    timeline.sort((a, b) => a.begin - b.begin);
+    for (const { begin, finish, shift, record } of timeline) {
+      const tz = shift.store?.timezone || zone;
+      if (!calendars.has(tz)) calendars.set(tz, new Intl.DateTimeFormat('en-US', { timeZone: tz }));
+      const calendar = calendars.get(tz);
+      for (let cursor = begin; cursor < finish;) {
+        const day = calendar.format(cursor);
+        const stop = endOfDaySegment(calendar, cursor, finish, day);
+        const key = `${shift.employee_id}/${shift.store_id || ''}/${day}`;
+        const available = remaining.get(key) ?? paidBreakAllowance;
+        // Midnight renews the daily allowance, but a single long break still
+        // has only its first 30 minutes eligible, including before this range.
+        const eligible = Math.max(0, Math.min(stop, record.from + paidBreakAllowance) - cursor);
+        const paid = Math.min(eligible, available);
+        remaining.set(key, available - paid);
+        record.paid += overlapMs(cursor, cursor + paid, start, end);
+        record.unpaid += overlapMs(cursor + paid, stop, start, end);
+        cursor = stop;
+      }
+    }
+    return byShift;
+  }
+
   function buildWorkers(roster, entries, start, end) {
     const workerRow = (id, name) => ({ id, name: name || 'Unnamed worker', shifts: [], duration: 0 });
     const byId = new Map(roster.map(e => [e.id, workerRow(e.id, e.display_name)]));
     const now = Date.now();
+    const breaksByShift = allocateBreaks(entries, start, end, now);
     for (const shift of entries) {
       const clockIn = Date.parse(shift.clock_in);
       const clockOut = shift.clock_out ? Date.parse(shift.clock_out) : now;
@@ -63,11 +133,39 @@ function initWeeklyHours({ client, getActiveEmployees, storeNameById, correctShi
       if (overlap <= 0) continue;
       const worker = byId.get(shift.employee_id) || workerRow(shift.employee_id, shift.worker?.display_name);
       byId.set(worker.id, worker);
-      const duration = shift.clock_out ? overlap : 0;
+      const breaks = breaksByShift.get(shift.id);
+      const unpaid = breaks.reduce((sum, b) => sum + b.unpaid, 0);
+      const duration = shift.clock_out ? Math.max(0, overlap - unpaid) : 0;
       worker.duration += duration;
-      worker.shifts.push({ ...shift, duration, split: clockIn < start || clockOut > end });
+      worker.shifts.push({ ...shift, breaks, duration, gross: overlap, split: clockIn < start || clockOut > end });
     }
     return [...byId.values()].sort((a, b) => b.duration - a.duration || b.shifts.length - a.shifts.length || a.name.localeCompare(b.name));
+  }
+
+  function breakMinutes(ms) {
+    if (ms > 0 && ms < 60000) return '<1 min';
+    return `${Math.round(ms / 60000)} min`;
+  }
+
+  function breakInfo(shift) {
+    if (!shift.breaks.length) return '<div class="wh-break-note">No breaks recorded</div>';
+    const shiftDay = dayFormat.format(new Date(shift.clock_in));
+    const stamp = ms => (dayFormat.format(ms) === shiftDay ? '' : dayFormat.format(ms) + ' · ') + timeFormat.format(ms);
+    const rows = shift.breaks.map(b => {
+      let detail, endLabel;
+      if (b.to === null && !b.asOf) {
+        endLabel = 'End missing';
+        detail = 'Needs review · no deduction calculated';
+      } else {
+        endLabel = b.asOf ? `In progress at ${timeFormat.format(b.asOf)}` : stamp(b.to);
+        const duration = b.paid + b.unpaid;
+        detail = duration > 0
+          ? `${breakMinutes(duration)}${shift.split ? ' in selected dates' : ''} · ${breakMinutes(b.paid)} paid · ${breakMinutes(b.unpaid)} unpaid`
+          : 'No break time counted in these dates';
+      }
+      return `<li><span>${stamp(b.from)} → ${endLabel}</span><span>${escapeHtml(detail)}</span></li>`;
+    }).join('');
+    return `<div class="wh-break-info"><strong>${shift.breaks.length === 1 ? 'Break' : 'Breaks'}</strong><ul>${rows}</ul></div>`;
   }
 
   function shiftRow(shift) {
@@ -83,11 +181,13 @@ function initWeeklyHours({ client, getActiveEmployees, storeNameById, correctShi
       </div>
       <div class="wh-shift-hours"><strong>${end ? fmtDurationHM(shift.duration) : 'Open'}</strong>
         ${shift.split && end ? '<small>in selected dates</small>' : ''}
+        ${end && shift.duration !== shift.gross ? `<small>of ${fmtDurationHM(shift.gross)} clocked</small>` : ''}
       </div>
       <div class="wh-shift-actions">
         <button class="btn small" type="button" data-wh-correct="${escapeHtml(shift.id)}">Correct time</button>
         ${end ? '' : `<button class="btn small" type="button" data-wh-close="${escapeHtml(shift.id)}">Close shift</button>`}
       </div>
+      ${breakInfo(shift)}
     </li>`;
   }
 

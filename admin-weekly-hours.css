@@ -103,6 +103,11 @@
 }
 .wh-shift > div { display: grid; gap: 3px; }
 .wh-shift .wh-shift-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.wh-break-note, .wh-break-info { grid-column: 1 / -1; font-size: .81rem; }
+.wh-break-note { color: var(--muted); }
+.wh-break-info { padding: 8px 12px; border-left: 2px solid var(--og-gold); background: rgba(255,255,255,.025); }
+.wh-break-info li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 3px 0; }
+.wh-break-info li > span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
 .wh-shift-hours { text-align: right; }
 .wh-empty { padding: 8px 12px; font-size: .88rem; }
 
@@ -117,7 +122,7 @@
   .wh-worker summary { padding: 12px 4px; gap: 8px; }
   .wh-breakdown { margin-left: 3px; margin-right: 3px; padding-left: 10px; }
   .wh-shift { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; }
-  .wh-shift .wh-shift-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .wh-shift .wh-shift-actions { grid-column: 1 / -1; order: 1; justify-content: flex-start; }
 }
 @media print {
   .wh-toolbar, .wh-settings, .wh-panel button, .wh-chevron { display: none !important; }

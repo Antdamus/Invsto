@@ -32,7 +32,13 @@ function installClient() {
       let rows = table === 'time_entries' ? [...shifts] : table === 'employees' ? [...roster] : [];
       let end, start;
       return {
-        select() { return this; }, order() { return this; },
+        select(fields) {
+          if (table === 'time_entries' && fields.includes('breaks:time_breaks')) {
+            rows = rows.map(r => ({ ...r, breaks: r.breaks ?? [] }));
+          }
+          return this;
+        },
+        order() { return this; },
         eq(k, v) { rows = rows.filter(r => r[k] === v); return this; },
         is(k, v) { return this.eq(k, v); },
         in(k, vs) { rows = rows.filter(r => vs.includes(r[k])); return this; },
@@ -116,7 +122,8 @@ for (const width of [320, 1200]) test(`${width}px presets, DST boundary, expansi
   await expect(morgan.locator('.wh-shift')).toHaveCount(2);
   await expect(morgan.locator('.wh-shift').first()).toBeVisible();
   await page.locator('#weeklyHours').screenshot({ path: `test-results/admin-weekly-hours-${width}.png` });
-  assert.deepEqual((await page.evaluate(() => weekQueries.at(-1))).start, '2026-10-26T04:00:00.000Z');
+  // Include earlier breaks in store days that straddle the Eastern range boundary.
+  assert.deepEqual((await page.evaluate(() => weekQueries.at(-1))).start, '2026-10-24T16:00:00.000Z');
   assert.deepEqual((await page.evaluate(() => weekQueries.at(-1))).end, '2026-11-02T05:00:00.000Z');
   await page.getByRole('button', { name: 'Previous week' }).click();
   await expect(page.locator('#whTotal')).toHaveText('0h 00m');
@@ -214,4 +221,101 @@ test('another chosen starting day counts all pages and includes former workers w
   await expect(page.locator('.wh-worker')).toHaveCount(1);
   await expect(page.locator('.wh-hours')).toHaveText('8h 21m');
   assert.equal(await page.evaluate(() => weekQueries.at(-1).first), 500);
+});
+
+test('shift breakdown distinguishes no break, paid minutes and the excess deducted from worker and team hours', async t => {
+  const page = await open(t, 390);
+  await page.evaluate(() => {
+    const shift = (id, clock_in, clock_out, breaks = []) => ({ id, employee_id: 'morgan', store_id: 'airport', clock_in, clock_out, breaks });
+    fixtureShifts.splice(0, fixtureShifts.length,
+      shift('wed', '2026-10-29T01:31:00Z', '2026-10-29T08:05:00Z'),
+      shift('sat', '2026-10-31T14:58:00Z', '2026-11-01T02:58:00Z', [
+        { started_at: '2026-10-31T17:00:00Z', ended_at: '2026-10-31T17:45:00Z' },
+      ]));
+  });
+  await page.getByRole('button', { name: 'Monday through Sunday' }).click();
+  await expect(page.locator('#whTotal')).toHaveText('18h 19m');
+  const worker = page.locator('[data-worker=morgan]');
+  await worker.locator('summary').click();
+  await expect(worker.locator('.wh-hours')).toHaveText('18h 19m');
+  await expect(worker.locator('.wh-break-note')).toHaveText('No breaks recorded');
+  await expect(worker.locator('.wh-break-info')).toContainText('1:00 PM EDT → 1:45 PM EDT');
+  await expect(worker.locator('.wh-break-info')).toContainText('45 min · 30 min paid · 15 min unpaid');
+  await expect(worker.locator('.wh-shift-hours').last()).toContainText('11h 45m');
+  await expect(worker.locator('.wh-shift-hours').last()).toContainText('of 12h 00m clocked');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await worker.screenshot({ path: 'test-results/admin-shift-breaks-mobile.png' });
+});
+
+test('split shifts share the allowance for one worker and store; another store has its own allowance', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const shift = (id, store_id, hour, minutes) => {
+      const from = Date.parse('2026-11-01T00:00:00Z') + hour * 3600000;
+      const iso = offset => new Date(from + offset * 60000).toISOString();
+      return { id, store_id, employee_id: 'morgan', clock_in: iso(0), clock_out: iso(60),
+        breaks: [{ started_at: iso(5), ended_at: iso(5 + minutes) }] };
+    };
+    fixtureShifts.splice(0, fixtureShifts.length, shift('1','A',8,20), shift('2','A',10,20), shift('3','B',12,30));
+    return overviewApi.loadSummary();
+  });
+  await expect(page.locator('#whTotal')).toHaveText('2h 50m');
+  await page.locator('[data-worker=morgan] summary').click();
+  const breaks = page.locator('[data-worker=morgan] .wh-break-info');
+  await expect(breaks.nth(0)).toContainText('20 min paid · 0 min unpaid');
+  await expect(breaks.nth(1)).toContainText('10 min paid · 10 min unpaid');
+  await expect(breaks.nth(2)).toContainText('30 min paid · 0 min unpaid');
+});
+
+test('a partial week respects break time already used and resets at the store’s local midnight', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const shift = (id, clock_in, clock_out, intervals) => ({
+      id, store_id: 'west', store: { timezone: 'America/Los_Angeles' }, employee_id: 'morgan', clock_in, clock_out,
+      breaks: intervals.map(([started_at, ended_at]) => ({ started_at, ended_at })),
+    });
+    fixtureShifts.splice(0, fixtureShifts.length,
+      shift('before', '2026-11-01T01:00:00Z', '2026-11-01T03:00:00Z', [['2026-11-01T02:00:00Z','2026-11-01T02:20:00Z']]),
+      shift('inside', '2026-11-01T03:30:00Z', '2026-11-01T08:30:00Z', [
+        ['2026-11-01T03:55:00Z','2026-11-01T04:25:00Z'], ['2026-11-01T06:50:00Z','2026-11-01T07:20:00Z'],
+      ]));
+    return overviewApi.loadSummary();
+  });
+  await expect(page.locator('#whTotal')).toHaveText('4h 00m');
+  await page.locator('[data-worker=morgan] summary').click();
+  await expect(page.locator('.wh-break-info li').nth(0)).toContainText('25 min in selected dates · 5 min paid · 20 min unpaid');
+  await expect(page.locator('.wh-break-info li').nth(1)).toContainText('30 min in selected dates · 20 min paid · 10 min unpaid');
+  await page.getByRole('button', { name: 'Previous week' }).click();
+  await expect(page.locator('#whTotal')).toHaveText('2h 30m');
+});
+
+test('an active break is shown separately from a missing end on a closed shift', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    fixtureShifts.find(s => s.id === 'overnight').breaks = [{ started_at: '2026-11-01T07:00:00Z', ended_at: null }];
+    fixtureShifts.find(s => s.id === 'open').breaks = [{ started_at: '2026-11-01T17:00:00Z', ended_at: null }];
+    return overviewApi.loadSummary();
+  });
+  await page.locator('[data-worker=morgan] summary').click();
+  await expect(page.locator('[data-worker=morgan] .wh-break-info')).toContainText('End missing');
+  await page.locator('[data-worker=alex] summary').click();
+  await expect(page.locator('[data-worker=alex] .wh-break-info')).toContainText('In progress');
+  await expect(page.locator('[data-worker=alex] .wh-break-info')).toContainText('60 min · 30 min paid · 30 min unpaid');
+  await expect(page.locator('#whTotal')).toHaveText('5h 00m');
+});
+
+test('one 45-minute break crossing midnight still counts only 30 minutes across adjacent weeks', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    fixtureShifts.splice(0, fixtureShifts.length, { id: 'night', employee_id: 'morgan',
+      clock_in: '2026-11-01T03:00:00Z', clock_out: '2026-11-01T05:00:00Z',
+      breaks: [{ started_at: '2026-11-01T03:40:00Z', ended_at: '2026-11-01T04:25:00Z' }] });
+    return overviewApi.loadSummary();
+  });
+  await expect(page.locator('#whTotal')).toHaveText('0h 45m');
+  await page.locator('[data-worker=morgan] summary').click();
+  await expect(page.locator('.wh-break-info')).toContainText('25 min in selected dates · 10 min paid · 15 min unpaid');
+  await page.getByRole('button', { name: 'Previous week' }).click();
+  await expect(page.locator('#whTotal')).toHaveText('1h 00m');
+  await expect(page.locator('.wh-break-info')).toContainText('20 min in selected dates · 20 min paid · 0 min unpaid');
 });
