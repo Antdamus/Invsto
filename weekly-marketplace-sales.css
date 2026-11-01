@@ -1,4 +1,9 @@
 #weekly-sales-report{grid-column:1/-1;min-width:0}
+.wc-panel{background:#17241d;border:1px solid #475d4d;border-radius:14px;padding:clamp(14px,2vw,24px);min-width:0}
+.wc-panel h3{margin:.25rem 0 .4rem;font-size:clamp(1.2rem,2vw,1.55rem)}.wc-panel p{margin:.45rem 0 .8rem;color:var(--dash-muted);font-size:.88rem;line-height:1.5}.wc-panel b{color:var(--dash-text)}
+.wc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.6rem}
+.wc-cards>div{padding:.85rem;border-radius:9px;border:1px solid #3e5044;background:#1c2a21}.wc-cards>div:last-child{background:#273525;border-color:#7c8b60}.wc-cards span,.wc-panel small{display:block;color:var(--dash-muted);font-size:.78rem;line-height:1.45}.wc-cards strong{display:block;margin:.3rem 0;font-size:clamp(1.1rem,2vw,1.6rem);font-variant-numeric:tabular-nums}
+.wc-panel .wc-explain{margin:1rem 0}.wc-panel .wc-balance-proof{border-left:2px solid #bda671;padding-left:.7rem}.wc-panel summary,.wc-panel a{color:#dec994}.wc-panel summary{cursor:pointer;padding:.45rem 0;font-weight:650}.wc-ledger dl{margin:.3rem 0 .6rem}.wc-ledger dl>div{display:flex;gap:.7rem;justify-content:space-between;padding:.36rem .5rem;border-bottom:1px solid var(--dash-line,#39493d)}.wc-ledger dd{margin:0;white-space:nowrap;font-variant-numeric:tabular-nums}.wc-subtotal{background:#25392c;font-weight:700}.wc-sources{margin-top:.75rem;font-size:.85rem}.wc-sources input{display:block;margin:.5rem 0;max-width:100%}
 .wi-balance td[data-col="Released to eBay balance"] button,.wi-badges .wi-state-released{color:#b7efc6;font-weight:700}
 .wi-balance td[data-col="On hold"] button{color:#ffe0a0}
 .wi-badges .wi-state-held,.wi-badges .wi-state-mixed{background:#463823;color:#ffe3a7}

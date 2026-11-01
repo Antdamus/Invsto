@@ -214,5 +214,8 @@
   $('.wi-pages span').textContent='Page '+(s.page+1)+' of '+pages;
   $('.wi-pages [data-step="-1"]').disabled=s.page===0;$('.wi-pages [data-step="1"]').disabled=s.page+1>=pages;
  }
- window.WeeklyEbayItems={update};
+ window.WeeklyEbayItems={update,fundsForReport(order){
+  const o=withPayout(order);
+  return {state:balanceState(o),credit:o.credit,onHold:o.held};
+ }};
 })();

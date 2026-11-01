@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="dashboard-workspace.css?v=overview-20261006b" />
-  <link rel="stylesheet" href="weekly-marketplace-sales.css?v=20261101n" />
+  <link rel="stylesheet" href="weekly-marketplace-sales.css?v=20261101p" />
 </head>
 <body data-page="dashboard">
   <a class="dash-skip" href="#dashboard-main">Skip to dashboard</a>
@@ -68,7 +68,7 @@
           <div class="dash-reports">
             <details class="dash-report" id="weekly-sales-report"><summary><span class="dash-report-icon" aria-hidden="true">▥</span><span><strong>Weekly marketplace sales</strong><small>Net item sales and seller proceeds · Monday–Sunday</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary>
               <div class="dash-report-body"><div class="ws-controls"><label>Marketplace <select id="ws-market"><option value="ebay">eBay</option><option value="all">All marketplaces</option><option value="tiktok">TikTok Shop</option><option value="whatnot">Whatnot</option></select></label><label>Report month <input id="ws-month" type="month" min="2000-01"></label><button type="button" id="ws-refresh">Refresh sales</button><button type="button" id="ws-ebay-connect" hidden>Connect eBay Order Earnings</button></div><span id="ws-ebay-status" role="status" hidden></span>
-              <p id="ws-status" role="status"></p><section id="ws-ebay-holds" class="wh-panel" hidden></section><section id="ws-ebay-items" class="wi-panel" hidden></section><div id="ws-results"></div></div>
+              <p id="ws-status" role="status"></p><section id="ws-ebay-cash" class="wc-panel" hidden></section><section id="ws-ebay-holds" class="wh-panel" hidden></section><section id="ws-ebay-items" class="wi-panel" hidden></section><div id="ws-results"></div></div>
             </details>
             <details class="dash-report" id="inventory-report"><summary><span class="dash-report-icon" aria-hidden="true">◇</span><span><strong>Inventory at a glance</strong><small>Stock, cost &amp; estimated retail value</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary><div id="inventory-report-body" class="dash-report-body"><p class="dash-loading">Loading inventory…</p></div></details>
             <details class="dash-report" id="buyers-report"><summary><span class="dash-report-icon" aria-hidden="true">◎</span><span><strong>Top buyers</strong><small>Sales &amp; estimated payouts · last 90 days</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary><div id="buyers-report-body" class="dash-report-body"><p class="dash-loading">Loading buyers…</p></div></details>
@@ -83,9 +83,10 @@
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=20261010-pricing"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
-  <script src="weekly-ebay-items.js?v=20261101n"></script>
+  <script src="weekly-ebay-items.js?v=20261101p"></script>
+  <script src="weekly-ebay-cash.js?v=20261101p"></script>
   <script src="weekly-ebay-holds.js?v=20261101l"></script>
-  <script src="weekly-marketplace-sales.js?v=20261101k"></script>
+  <script src="weekly-marketplace-sales.js?v=20261101p"></script>
   <script src="dashboard.js?v=20261031-weekly-sales"></script>
 </body>
 </html>

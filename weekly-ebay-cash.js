@@ -1,0 +1,142 @@
+(() => {
+  'use strict';
+  const usd = new Intl.NumberFormat('en-US', {style:'currency',currency:'USD'});
+  const money = cents => cents == null ? 'Unconfirmed' : usd.format(cents / 100);
+  const cents = n => n == null || !Number.isFinite(Number(n)) ? null : Math.round(Number(n)*100);
+  const signed = n => n > 0 ? '+' + money(n) : money(n);
+  const escape = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const monthName = day => new Date(day.slice(0,7)+'-01T12:00Z').toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
+  const card = (label,value,info) => '<div><span>'+label+'</span><strong>'+value+'</strong><small>'+info+'</small></div>';
+  const row = (label,value,bold=false) => '<div'+(bold?' class="wc-subtotal"':'')+'><dt>'+escape(label)+'</dt><dd>'+value+'</dd></div>';
+
+  function orderTotals(data) {
+    const rows = data.rows.filter(r => r.market==='ebay');
+    const net = rows.every(r=>cents(r.net)!=null) ? rows.reduce((n,r)=>n+cents(r.net),0) : null;
+    const statusNet={released:0,held:0,other:0};
+    let released=0, held=0, releaseMissing=false, holdMissing=false, netMissing=false;
+    for (const order of data.ebay_item_orders) {
+      const normalized=window.WeeklyEbayItems.fundsForReport(order);
+      const {state,credit,onHold}=normalized;
+      if(state==='released'){released+=cents(credit)??0;releaseMissing ||= credit==null;}
+      if(state==='held'){held+=cents(onHold)??0;holdMissing ||= onHold==null;}
+      const value=cents(order.net_item);
+      if(value!=null) statusNet[state==='released'||state==='held'?state:'other']+=value;
+      else if(order.booked!=null||!Object.hasOwn(order,'net_item')) netMissing=true;
+    }
+    return {net,released:releaseMissing?null:released,held:holdMissing?null:held,statusNet,
+      split:!netMissing&&net!=null&&Object.values(statusNet).reduce((a,b)=>a+b,0)===net};
+  }
+
+  function cashActivity(statement, bank, count, released) {
+    if(!statement) return '<p class="wc-note">A verified financial statement for this month will show the opening balance, refunds, claims, fees, financing repayments, and the funds carried forward.</p>';
+    const lines=statement.movements;
+    const opening=Number(statement.opening), closing=Number(statement.closing);
+    if(!Array.isArray(lines)||!lines.every(m=>Number.isSafeInteger(m.cents))||
+       opening+lines.reduce((a,m)=>a+m.cents,0)!==closing) return '<p>Statement amounts need verification.</p>';
+    const financing=lines.find(m=>/financing repayments|secondary payouts/i.test(m.label));
+    const payout=lines.find(m=>m.label==='Payouts');
+    const fee=statement.bank_fee==null?null:Number(statement.bank_fee);
+    const canSplit=payout&&bank!=null&&fee!=null&&-payout.cents===bank+fee;
+    const source=statement.source==='eBay monthly financial statement'?'eBay monthly financial statement':'eBay Financial overview and the prior month’s closing statement';
+    const groups=lines.filter(m=>/refund|claim|dispute/i.test(m.label)).reduce((n,m)=>n+m.cents,0);
+    const verifiedBalance=statement.observed_at&&statement.observed_held!=null&&statement.observed_available!=null&&
+      Number(statement.observed_held)+Number(statement.observed_available)===closing;
+    const observation=verifiedBalance?'<p class="wc-balance-proof">Seller Hub showed <b>'+money(statement.observed_held)+'</b> on hold across all purchase months and <b>'+money(statement.observed_available)+'</b> available on '+escape(new Date(statement.observed_at).toLocaleDateString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}))+'. Together they equal the closing funds.</p>':'';
+    const isOrder=m=>['Item sales posted','Shipping paid by buyers','Orders'].includes(m.label);
+    const orderActivity=lines.filter(isOrder),canTrace=canSplit&&released!=null&&orderActivity.length>0;
+    const postedOrders=orderActivity.reduce((n,m)=>n+m.cents,0);
+    const trace=canTrace?
+      row('Start · Released original credits for this month’s purchases',money(released),true)+
+      row('Switch to all orders posted during the month ('+money(postedOrders)+')',signed(postedOrders-released))+
+      row('Funds carried in from the previous month',signed(opening))+
+      lines.filter(m=>!isOrder(m)&&m!==payout&&m.cents).map(m=>row(m.label,signed(m.cents))).join('')+
+      row('Funds carried forward at month end',signed(-closing))+
+      (fee?row('Express payout fees',signed(-fee)):'')+row('Sent to your bank · '+count+' payouts',money(bank),true)
+      :row('Opening eBay funds',money(opening),true)+lines.filter(m=>m.cents||m.label==='Payouts').map(m=>{
+        if(m===payout&&canSplit)return row('Sent to your bank · '+count+' payouts',signed(-bank))+(fee?row('Express payout fees',signed(-fee)):'');
+        return row(m.label,signed(m.cents));
+      }).join('')+row('Closing eBay funds',money(closing),true);
+    return '<p class="wc-note">The account opened with <b>'+money(opening)+'</b>. Refunds, claims and disputes totaled <b>'+money(groups)+'</b>. '+
+      (financing&&financing.cents<0?'eBay also sent <b>'+money(-financing.cents)+'</b> in '+(statement.source==='eBay Seller Hub financial overview'?'financing repayments':'secondary payouts')+(/Liberis/i.test(financing.label)?' to Liberis':'')+'. ':'')+
+      'After payouts and other activity, <b>'+money(closing)+'</b> carried forward.</p>'+observation+
+      '<details class="wc-ledger"><summary>'+(canTrace?'Trace '+money(released)+' in released credits to '+money(bank)+' sent to your bank':'How the opening balance became '+money(closing))+'</summary>'+
+      (canTrace?'<p>The first adjustment switches from orders selected by purchase date to all orders posted to the account, including held sales. '+(statement.source==='eBay Seller Hub financial overview'?'The overview reports those sales before fees and lists expenses below.':'The statement reports orders after sale fees.')+'</p>':'')+
+      '<dl>'+trace+'</dl><small>'+escape(source)+'. All account activity posted during this calendar month, Pacific time.</small></details>';
+  }
+
+  function update(host,data,client,refresh) {
+    if(!host)return;
+    if(!Array.isArray(data?.ebay_item_orders)){host.hidden=true;host.replaceChildren();return;}
+    const period=data.month.slice(0,7), name=monthName(period), sales=orderTotals(data), batches=data.ebay_account_payouts;
+    const bank=Array.isArray(batches)&&batches.length&&batches.every(p=>cents(p.amount)!=null)?batches.reduce((n,p)=>n+cents(p.amount),0):null;
+    const batchIds=new Set((batches||[]).map(p=>p.id));
+    const matched=new Set();
+    for(const order of data.ebay_item_orders)for(const receipt of order.payouts||[])if(receipt.status==='SUCCEEDED'&&batchIds.has(receipt.id))matched.add(receipt.id);
+    if(host.dataset.month!==period||!host.querySelector('.wc-body')){
+      host.innerHTML='<header><span class="wi-eyebrow">EBAY · MONTHLY CASH</span><h3>From item sales to your bank</h3></header><div class="wc-body"></div>'+
+        '<details class="wc-sources"><summary>Sources and monthly statements</summary><p><a href="https://www.ebay.com/mes/report-landing" target="_blank" rel="noopener">Financial overview ↗</a> · <a href="https://www.ebay.com/mes/payouts" target="_blank" rel="noopener">Bank payouts ↗</a> · <a href="https://www.ebay.com/mes/transaction-reports?sh=true&amp;q=statement" target="_blank" rel="noopener">Monthly statements ↗</a></p>'+
+        '<label>Import the eBay financial statement for this month <input type="file" accept="application/pdf,.pdf"></label><small>Invsto saves the reconciled monthly totals from OG Jewelers’ statement.</small><p class="wc-message" role="status"></p></details>';
+      host.dataset.month=period;
+      host.querySelector('input').onchange=async event=>{
+        const input=event.target,file=input.files[0],msg=host.querySelector('.wc-message');
+        if(!file)return;
+        input.disabled=true;msg.textContent='Checking statement amounts…';
+        try{
+          const result=await readStatement(file,period);
+          const {error}=await client.rpc('save_ebay_cash_statement',result);
+          if(error)throw Error('Invsto could not save this statement. Check your admin access and try again.');
+          msg.textContent='Statement saved. Its entries reconcile to the closing balance.';await refresh();
+        }catch(e){msg.textContent=e.message||'Could not verify the statement.';}
+        finally{input.disabled=false;input.value='';}
+      };
+    }
+    const body=host.querySelector('.wc-body'),wasOpen=body.querySelector('.wc-ledger')?.open;
+    host.hidden=false;
+    const split=sales.split?'Of these net item sales, <b>'+money(sales.statusNet.held)+'</b> belongs to orders with held credits and <b>'+money(sales.statusNet.released)+'</b> to orders with released credits.'+(sales.statusNet.other?' Another <b>'+money(sales.statusNet.other)+'</b> is on orders with other or mixed statuses.':''):'The order-level split of net sales by funds status is still under verification.';
+    body.innerHTML='<p>Orders purchased in '+name+' and cash transferred in '+name+' follow different dates.</p><div class="wc-cards">'+
+      card('Net item sales',money(sales.net),'Merchandise kept after reversals, before fees.')+
+      card('Original credits released',money(sales.released),'For these purchases. Includes buyer shipping and sale fees, before later debits.')+
+      card('Original credits on hold',money(sales.held),'For orders classified on hold. Mixed orders appear under other funds statuses.')+
+      card('Sent to your bank',bank==null?'No verified total':money(bank),Array.isArray(batches)&&batches.length?batches.length+' recorded transfers by payout date, from the whole account.':'No successful transfers recorded for this period.')+'</div>'+
+      '<p class="wc-explain">'+split+' eBay pays from the shared seller balance, which can include earlier sales. Refunds, expenses and financing repayments also affect how much reaches the bank.</p>'+
+      cashActivity(data.ebay_cash_statement,bank,batches?.length||0,sales.released)+
+      '<small class="wc-matching">'+(batchIds.size?(matched.size?matched.size+' of '+batchIds.size+' bank transfers have a saved payout ID linked to an order purchased this month.':'The saved payout records for these '+batchIds.size+' transfers do not identify any of this month’s orders by payout ID.'):'')+'</small>';
+    if(wasOpen&&body.querySelector('.wc-ledger'))body.querySelector('.wc-ledger').open=true;
+  }
+
+  let loadingPdf;
+  async function readStatement(file,period) {
+    if(file.size>12*1024*1024)throw Error('Choose the monthly statement summary PDF.');
+    if(!window.pdfjsLib){
+      loadingPdf??=new Promise((resolve,reject)=>{
+        const script=document.createElement('script');script.src='pdf.min.js';script.onload=resolve;
+        script.onerror=()=>{loadingPdf=null;reject(Error('Could not load the statement reader. Try again.'));};document.head.append(script);
+      });
+      await loadingPdf;
+    }
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='pdf.worker.min.js';
+    const doc=await window.pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false}).promise;
+    try{
+      const page=await doc.getPage(1),content=await page.getTextContent();
+      return parseStatement(content.items.map(i=>i.str).join(' '),period);
+    }finally{await doc.destroy();}
+  }
+  function parseStatement(text,period){
+    const s=text.replace(/[\s\u00a0]+/g,' ').trim();
+    const dates=s.match(/date range:\s*(\d{1,2})\/1\/(\d{2,4})\s+12:00 AM\s*[-–]\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+11:59 PM/i);
+    if(!/financial statement/i.test(s)||!/eBay username\s+ogjewelers\b/i.test(s)||!dates)throw Error('Choose OG Jewelers’ eBay monthly financial statement summary.');
+    const year=Number(dates[2].length===2?'20'+dates[2]:dates[2]),month=Number(dates[1]);
+    if(period!==year+'-'+String(month).padStart(2,'0')||month!==Number(dates[3])||dates[2]!==dates[5]||Number(dates[4])!==new Date(Date.UTC(year,month,0)).getUTCDate())throw Error('The statement dates do not match the selected month.');
+    const summary=s.split(/Transactions summary/i).pop(), pattern=/([^$]*?)\s*([-−]?\s*\$[\d,]+\.\d{2})/g,entries=[];
+    let opening=null,closing=null;
+    for(const match of summary.matchAll(pattern)){
+      const label=match[1].replace(/\s*\([^)]*\)\s*/g,' ').trim(),value=Number(match[2].replace(/[$,\s]/g,'').replace('−','-').replace('.',''));
+      if(/^Opening funds$/i.test(label)){opening=value;continue;}
+      if(/^Closing funds$/i.test(label)){closing=value;break;}
+      if(opening!=null&&label)entries.push({label,cents:value});
+    }
+    if(opening==null||closing==null||entries.length===0||opening+entries.reduce((n,m)=>n+m.cents,0)!==closing)throw Error('The statement totals could not be reconciled.');
+    return {_month:period+'-01',_opening:opening,_closing:closing,_movements:entries};
+  }
+  window.WeeklyEbayCash={update,parseStatement};
+})();

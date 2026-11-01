@@ -186,6 +186,18 @@ test('weekly report revises the original ET week, separates cancellation and ref
   assert.deepEqual(await checkParts(api,101,parts),{item:100,shipping:4,fees:-3,other:0,credit:101,source:'eBay order'});
   assert.equal(await checkParts(api,102,parts),null);
   api.order.pricingSummary.deliveryCost.currency='CAD';assert.equal(await checkParts(api,101,parts),null);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101080000_ebay_account_holds.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101093000_weekly_ebay_account_cash.sql',import.meta.url),'utf8'));
+  const june=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r;
+  assert.equal(june.ebay_item_orders.reduce((s,o)=>s+(o.net_item||0),0),june.rows.reduce((s,r)=>s+r.net,0));
+  assert.equal(june.ebay_item_orders.find(o=>o.id==='e2').net_item,0);
+  const entries=JSON.stringify([{label:'Orders',cents:20000},{label:'Secondary payouts',cents:-3000},{label:'Payouts',cents:-12000}]);
+  const saveCash=(end)=>db.query("select save_ebay_cash_statement('2025-06-01',1000,$1,$2)",[end,entries]);
+  await assert.rejects(saveCash(6001),/reconcile/);await saveCash(6000);await saveCash(6000);
+  const cash=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_cash_statement;
+  assert.equal(cash.closing,6000);assert.equal(cash.movements.length,3);
+  assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','tiktok') r")).r.ebay_cash_statement,null);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
+  await assert.rejects(saveCash(6000),/admin access/i);
  }finally{await db.close();}
 });
