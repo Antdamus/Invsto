@@ -21,7 +21,7 @@
  async function refresh(el,s,automatic=false){
   if(active||!s)return;
   if(!document.documentElement.hasAttribute('data-invsto-hold-reader')){
-   if(!automatic)el.querySelector('.wh-msg').textContent='To refresh the order breakdown, reload OG eBay Order Link v1.0.28 or newer in Edge, then refresh this dashboard. The latest verified breakdown stays available.';
+   if(!automatic)el.querySelector('.wh-msg').textContent='To refresh the order breakdown, reload the latest OG eBay Order Link in Edge, then refresh this dashboard. The latest verified breakdown stays available.';
    return;
   }
   active=true;nextAttempt=Date.now()+3600000;

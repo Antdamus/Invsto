@@ -29,7 +29,14 @@
    const u=tx?new URL(tx.href):null,type=u?.searchParams.get('type'),uid=u?.searchParams.get('uuid');
    let oid=orderA?new URL(orderA.href).searchParams.get('orderid'):u?.searchParams.get('relatedTransactionId');
    if(oid&&!fullOrder.test(oid))oid=null;
-   if((type==='ORDER'||!u)&&oid&&/^\s*Order\b/.test(text))return {kind:'sale',ref:oid,oid,cents:net,placed};
+   if(type==='ORDER'){
+    const capture=/^CAPTURE__(\d{2}-\d{5}-\d{5})$/.exec(uid||'')?.[1];
+    if(oid&&capture&&oid!==capture)throw Error('The order link and transaction identify different sales.');
+    oid=oid||capture;
+   }
+   // The Open in OG button can sit directly after the word "Order". Trust
+   // the transaction's ORDER type, or the actual order link on grouped rows.
+   if(oid&&(type==='ORDER'||(!u&&/^\s*Order/.test(text))))return {kind:'sale',ref:oid,oid,cents:net,placed};
    if(type!=='RESERVE'||!uid)throw Error('A Seller Hub transaction could not be identified.');
    let kind='other',ref=uid;
    if(/^RETRO_FUNDS_DISPLAY__RETRO_DISPLAY-\d+$/.test(uid)){kind='retro';ref=uid.split('-').pop();}

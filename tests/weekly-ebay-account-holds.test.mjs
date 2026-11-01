@@ -33,7 +33,7 @@ test('Seller Hub page reader counts visible net money once and resolves sale, re
  const b=await chromium.launch();try{
   const p=await b.newPage();
   const oid='01-20000-00001',rows=[
-   [`Order <a href="https://www.ebay.com/sh/ord/details?orderid=${oid}">${oid}</a>`,null,'10.00'],
+   [`Order<button>Open in OG</button><a href="https://www.ebay.com/sh/ord/details?orderid=${oid}">${oid}</a>`,null,'10.00'],
    ['Hold $2.20 held for return ID 111','DISPUTE_DISPLAY__DISPUTE_DISPLAY-111','2.20'],
    ['Hold $3.00 held for payment dispute ID 222','DISPUTE_DISPLAY__DISPUTE_DISPLAY-222','3.00'],
    ['Hold '+oid,'RETRO_FUNDS_DISPLAY__RETRO_DISPLAY-333&relatedTransactionId='+oid,'4.00']];

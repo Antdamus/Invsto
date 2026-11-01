@@ -9,10 +9,11 @@
    tab=await chrome.tabs.create({url:hub,active:false});
    for(let i=0;i<670;i++){
     let p,last;
-    for(let t=0;t<30;t++){
+    for(let t=0;t<95;t++){
      if(Date.now()-Date.parse(at)>205000)throw Error('The Seller Hub list timed out.');
      try{const result=await chrome.tabs.sendMessage(tab.id,{type:'OG_HOLDS_PAGE'});
-      if(result?.ok&&(result.page.start===rows.length+1||result.page.count===0&&!rows.length)){p=result.page;break;}last=result?.message;
+      if(result?.ok&&(result.page.start===rows.length+1||result.page.count===0&&!rows.length)){p=result.page;break;}
+      if(result?.message)last=result.message;else if(result?.ok)last='Waiting for Seller Hub entries starting at '+(rows.length+1)+'.';
      }catch{/* A newly opened page may not have loaded its content script. */}
      await wait(350);
     }
