@@ -2,7 +2,7 @@
 #weekly-sales-report .dash-report-body{display:grid;gap:1rem}
 .ws-controls,.ws-controls label{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
 .ws-controls label,.ws-week small,.ws-headline small,.ws-facts small,.ws-comparison small{color:var(--dash-muted);font-size:.78rem}
-.ws-controls input,.ws-controls button{border:1px solid #627465;border-radius:8px;background:#1c2821;color:var(--dash-text);padding:.55rem .75rem;font:inherit}
+.ws-controls input,.ws-controls select,.ws-controls button{border:1px solid #627465;border-radius:8px;background:#1c2821;color:var(--dash-text);padding:.55rem .75rem;font:inherit;min-height:44px}
 #ws-status{color:var(--dash-muted);font-size:.8rem}.ws-headline{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .ws-headline>div{padding:18px;border-radius:12px;background:#21382c;border:1px solid #537459}.ws-headline>div+div{background:#302e25;border-color:#74694d}
 .ws-headline strong{display:block;font-size:clamp(1.55rem,3.3vw,2.5rem);font-variant-numeric:tabular-nums;color:#f9f1d9}.ws-headline small{letter-spacing:.09em;font-weight:800}

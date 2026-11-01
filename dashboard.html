@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="dashboard-workspace.css?v=overview-20261006b" />
-  <link rel="stylesheet" href="weekly-marketplace-sales.css?v=20261031" />
+  <link rel="stylesheet" href="weekly-marketplace-sales.css?v=20261101b" />
 </head>
 <body data-page="dashboard">
   <a class="dash-skip" href="#dashboard-main">Skip to dashboard</a>
@@ -67,7 +67,7 @@
           <div class="dash-section-head"><div><span class="dash-eyebrow">THE BIGGER PICTURE</span><h2 id="reports-heading">Business snapshot</h2></div><span class="dash-muted">Open a report to see the details</span></div>
           <div class="dash-reports">
             <details class="dash-report" id="weekly-sales-report"><summary><span class="dash-report-icon" aria-hidden="true">▥</span><span><strong>Weekly marketplace sales</strong><small>Net item sales and seller proceeds · Monday–Sunday</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary>
-              <div class="dash-report-body"><div class="ws-controls"><label>Report month <input id="ws-month" type="month" min="2000-01"></label><button type="button" id="ws-refresh">Refresh sales</button></div>
+              <div class="dash-report-body"><div class="ws-controls"><label>Marketplace <select id="ws-market"><option value="ebay">eBay</option><option value="all">All marketplaces</option><option value="tiktok">TikTok Shop</option><option value="whatnot">Whatnot</option></select></label><label>Report month <input id="ws-month" type="month" min="2000-01"></label><button type="button" id="ws-refresh">Refresh sales</button></div>
               <p id="ws-status" role="status"></p><div id="ws-results"></div></div>
             </details>
             <details class="dash-report" id="inventory-report"><summary><span class="dash-report-icon" aria-hidden="true">◇</span><span><strong>Inventory at a glance</strong><small>Stock, cost &amp; estimated retail value</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary><div id="inventory-report-body" class="dash-report-body"><p class="dash-loading">Loading inventory…</p></div></details>
@@ -83,7 +83,7 @@
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=20261010-pricing"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
-  <script src="weekly-marketplace-sales.js?v=20261101"></script>
+  <script src="weekly-marketplace-sales.js?v=20261101b"></script>
   <script src="dashboard.js?v=20261031-weekly-sales"></script>
 </body>
 </html>

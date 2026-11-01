@@ -16,12 +16,18 @@ export async function syncWeeklyTikTok(db:any,c:any,api:any,tokens:any){
   const progress=f.progress||{},coverage=progress.coverage_start||startOfHistory(now);
   const from=progress.from??Math.max(Date.parse(coverage),Date.parse(f.through_at||coverage)-60000);
   const until=progress.until??Math.min(now,from+27*day);
-  const data=await api.read('/return_refund/202602/returns/search',tokens.access_token,{shop_cipher:c.shop_cipher,page_size:'50',
+  let version=progress.version==='202309'?'202309':'202602';
+  const read=()=>api.read(`/return_refund/${version}/returns/search`,tokens.access_token,{shop_cipher:c.shop_cipher,page_size:'50',
    sort_field:'update_time',sort_order:'ASC',...(progress.page?{page_token:progress.page}:{})},
    {update_time_ge:Math.floor(from/1000),update_time_lt:Math.floor(until/1000)});
+  let data;
+  try{data=await read();}catch(e){
+   if(version!=='202602'||progress.page||!['105005','36009009'].includes((e as {code:string}).code))throw e;
+   version='202309';data=await read();
+  }
   if(!data||(!Array.isArray(data.return_orders)&&data.total_count!==0)||data.next_page_token&&data.next_page_token===progress.page)throw Error('Incomplete return page');
   const refunds=(data.return_orders||[]).map(returnFacts),next=data.next_page_token;
-  await commitFeed(db,f,next||until<now-120000?'loading':'ready',next?{coverage_start:coverage,from,until,page:next}:{coverage_start:coverage},
+  await commitFeed(db,f,next||until<now-120000?'loading':'ready',next?{version,coverage_start:coverage,from,until,page:next}:{version,coverage_start:coverage},
    next?f.through_at:new Date(until).toISOString(),refunds);
  });
  if(!scopes.includes('seller.finance.info'))return;

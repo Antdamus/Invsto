@@ -22,7 +22,7 @@
   return name+' refund reconciliation is incomplete. Unverified sales are held out.';
  }
  function cell(label,value){return '<div><small>'+label+'</small><strong>'+value+'</strong></div>';}
- function render(data){
+ function render(data,market){
   const rows=data.rows,open=new Set(Array.from($('ws-results').querySelectorAll('details[open]'),d=>d.dataset.week));
   const groups=new Map();for(const r of rows){if(!groups.has(r.week))groups.set(r.week,[]);groups.get(r.week).push(r);}
   const weekCard=([week,part])=>{
@@ -43,18 +43,19 @@
   const period=dayLabel(data.anchor)+' through '+etStamp(data.as_of);
   return '<div class="ws-headline"><div><small>MONTH · VERIFIED NET ITEM SALES</small><strong>'+fmt(sum(rows,'net'))+'</strong><p>'+fmt(sum(rows,'held'))+' awaiting verification</p></div>'+
    '<div><small>MONTH · RECORDED SELLER PROCEEDS</small><strong>'+(sum(rows,'settled_orders')||sum(rows,'proceeds')!==0?fmt(sum(rows,'proceeds')):'Awaiting settlement')+'</strong><p>'+sum(rows,'settled_orders')+' of '+sum(rows,'orders')+' included orders reconciled</p></div></div>'+
-   (sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
+   (sum(rows,'held')>0?'<p class="ws-coverage"><strong>Excluded from verified net sales</strong> '+Object.keys(marketNames).filter(k=>market==='all'||market===k).map(k=>marketNames[k]+' '+fmt(sum(rows.filter(r=>r.market===k),'held'))).join(' · ')+'.</p>':'')+
    '<div class="ws-comparison"><h3>'+caption+'</h3><p>'+(data.current_month?period:'Through '+dayLabel(rows.at(-1).end_day,-1))+' · compared with the same elapsed days and time one week earlier.</p>'+
    '<div>'+cell('Net sales',fmt(data.focus_net))+ '<span>'+change(data.focus_net,data.previous_net)+' · previous '+fmt(data.previous_net)+'</span></div>'+
    '<div>'+cell('Seller proceeds',fmt(data.focus_proceeds))+'<span>'+change(data.focus_proceeds,data.previous_proceeds)+' · previous '+fmt(data.previous_proceeds)+'</span></div></div>'+
    '<div class="ws-list">'+Array.from(groups).reverse().map(weekCard).join('')+'</div>'+
    '<details class="ws-method"><summary>Adjustments and coverage</summary><p>USD orders from eBay, TikTok Shop, and Whatnot are counted once by purchase week in Eastern time. Booked items include cancellations. Confirmed merchandise refunds and cancellations reduce that week once. Failed payments, buyer tax, and shipping collected are outside net item sales.</p>'+
    '<p>Seller proceeds include buyer shipping credited by the marketplace, less fees, refunds, adjustments, and recorded postage. A shared eBay label is split once across its linked orders. eBay funds on hold or processing are included when costs are recorded. Positive balances with incomplete costs stay out. Recorded losses can appear before an order fully settles. This shows the reconciled portion of sales. It excludes inventory cost, off-platform postage, and account-wide charges without an order.</p>'+
-   '<p>'+feedNote('TikTok Shop',data.feeds?.tiktok)+' '+feedNote('Whatnot',data.feeds?.whatnot)+(data.whatnot_backfill?' Whatnot order history is still importing.':'')+'</p></details>';
+   (market==='ebay'?'':'<p>'+(['all','tiktok'].includes(market)?feedNote('TikTok Shop',data.feeds?.tiktok)+' ':'')+(['all','whatnot'].includes(market)?feedNote('Whatnot',data.feeds?.whatnot)+(data.whatnot_backfill?' Whatnot order history is still importing.':''):'')+'</p>')+'</details>';
  }
  function init(client){
   const panel=$('weekly-sales-report'),month=$('ws-month');if(!panel||month.dataset.ready)return;month.dataset.ready='true';
-  const requested=new URLSearchParams(location.search).get('month');
+  const params=new URLSearchParams(location.search),requested=params.get('month'),market=$('ws-market');
+  market.value=['all','ebay','tiktok','whatnot'].includes(params.get('market'))?params.get('market'):'ebay';
   month.max=etMonth();
   let seq=0,manualMonth=Boolean(requested&&/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)&&requested>='2000-01'&&requested<=month.max);
   month.value=manualMonth?requested:month.max;
@@ -64,12 +65,13 @@
    if(!/^\d{4}-\d{2}$/.test(month.value)||month.value>month.max||month.value<'2000-01'){$('ws-results').replaceChildren();$('ws-status').textContent='Choose the current month or a past month.';return;}
    $('ws-status').textContent='Checking marketplace records…';
    try{
-    const {data,error}=await client.rpc('get_weekly_marketplace_sales',{_month:month.value+'-01'});if(error||!data)throw error||Error();
+    const {data,error}=await client.rpc('get_weekly_sales_for_market',{_month:month.value+'-01',_market:market.value});if(error||!data)throw error||Error();
     if(seq!==version||!panel.open)return;
-    $('ws-results').innerHTML=render(data);$('ws-status').textContent='Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
+    $('ws-results').innerHTML=render(data,market.value);$('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
    }catch{if(seq===version){$('ws-results').replaceChildren();$('ws-status').textContent='Could not verify these totals. Use Refresh sales to retry.';}}
   }
   panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();load();};
+  market.onchange=()=>{$('ws-results').replaceChildren();load();};
   $('ws-refresh').onclick=load;
   document.addEventListener('visibilitychange',()=>{if(panel.open&&!document.hidden)load();});
   setInterval(()=>{if(panel.open&&!document.hidden)load();},60000);

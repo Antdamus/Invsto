@@ -13,5 +13,15 @@ export async function commitFeed(db:any,f:any,state:string,progress=f.progress,t
 export async function syncRefundFeed(db:any,market:string,run:(f:any,now:number)=>Promise<void>){
  const f=await loadFeed(db,market),now=Date.now(),gap=f.state==='permission'?3600000:f.state==='ready'?300000:15000;
  if(f.checked_at&&now-Date.parse(f.checked_at)<gap)return;
- try{await run(f,now);}catch{await commitFeed(db,f,'error');}
+ try{await run(f,now);}catch(e){
+  const message=e instanceof Error?e.message:'';
+  const apiCode=(e as {code?:unknown})?.code;
+  const reason=typeof apiCode==='string'&&/^\d{1,12}$/.test(apiCode)?'api_'+apiCode:
+   /^Whatnot request failed \((\d{3})\)/.exec(message)?.[1]||[
+    'Missing ledger columns','Incomplete ledger schema','Incomplete ledger row','Ambiguous ledger identity','Invalid ledger amount','Invalid financial CSV',
+    'Unknown report host','Report download unavailable','Financial report too large','Invalid report','Invalid return','Incomplete return page',
+    'Sales reconciliation page could not be saved'
+   ].find(s=>s===message)||'request_failed';
+  await commitFeed(db,f,'error',{...f.progress,last_error:reason});
+ }
 }

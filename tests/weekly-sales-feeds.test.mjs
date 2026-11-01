@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {returnFacts} from '../supabase/functions/tiktok-order-sync/weekly-sales.ts';
+import {returnFacts,syncWeeklyTikTok} from '../supabase/functions/tiktok-order-sync/weekly-sales.ts';
 import {financialRows,syncWeeklyWhatnot} from '../supabase/functions/whatnot-order-sync/weekly-sales.ts';
 test('TikTok uses the merchandise component only after a refund succeeds',()=>{
  const sale={return_id:'123456789012',order_id:'234567890123',update_time:1770000000,return_type:'REFUND',return_status:'RETURN_OR_REFUND_REQUEST_PENDING',refund_amount:{currency:'USD',refund_total:'62.20',refund_subtotal:'50.00'}};
@@ -15,6 +15,14 @@ test('Whatnot sends UTC milliseconds for saved Postgres statement cursors',async
  let request;
  await syncWeeklyWhatnot(db,{read:async(_path,_query,body)=>{request=body.report_parameters;return {id:'00000000-0000-0000-0000-000000000001',report_type:'seller_financial_report',status:'pending'};}});
  assert.equal(request.start_date,'2026-09-24T00:00:00.000Z');assert.equal(request.end_date,'2026-10-01T00:00:00.000Z');
+});
+test('TikTok records the authorized return API version and keeps its pagination cursor',async()=>{
+ const calls=[],commits=[];
+ const feed={market:'tiktok',state:'error',progress:{}};
+ const db={from:()=>({select:()=>({eq:()=>({single:async()=>({data:feed})})})}),rpc:async(_name,p)=>{commits.push(p);return {};}};
+ const api={read:async(path)=>{calls.push(path);if(path.includes('202602'))throw Object.assign(Error(),{code:'105005'});return {return_orders:[],next_page_token:'next-page'};}};
+ await syncWeeklyTikTok(db,{shop_cipher:'shop'},api,{granted_scopes:['seller.return_refund.basic']});
+ assert.equal(calls.length,2);assert.equal(commits[0]._progress.version,'202309');assert.equal(commits[0]._progress.page,'next-page');assert.equal(commits[0]._state,'loading');
 });
 test('Whatnot ledger preserves signed amounts and flags refunds without inventing an item allocation',()=>{
  const csv='ledger_transaction_id,order_id,transaction_amount,transaction_currency,transaction_type,transaction_message,transaction_completed_at_utc\n1,112,50,USD,ORDER_EARNINGS,"ring, order",2026-10-04\n2,112,-12.51,USD,REFUND,"partial",2026-10-10\n3,112,25,USD,PAYOUT,payout,2026-10-10';
