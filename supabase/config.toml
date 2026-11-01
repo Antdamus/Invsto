@@ -627,6 +627,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/whatnot-order-sync/index.ts"
 
+[functions.ebay-weekly-earnings]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-weekly-earnings/index.ts"
+
 [functions.tiktok-messages]
 enabled = true
 # Validates active staff access or a single-use worker lease inside the handler.

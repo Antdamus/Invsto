@@ -94,6 +94,18 @@ async function exchangeCode(code: string) {
 Deno.serve(async (req) => {
   const url = new URL(req.url);
 
+  const state=url.searchParams.get('state')||'';
+  if(state.startsWith('earn-')){
+    const target='https://antdamus.github.io/Invsto/dashboard.html?market=ebay#weekly-sales-report';
+    const code=url.searchParams.get('code');
+    if(!code||url.searchParams.has('error'))return html('<h1>eBay Order Earnings was not connected</h1><p>Return to the weekly report to retry.</p>');
+    try{
+      const r=await fetch((Deno.env.get('SUPABASE_URL')||'')+'/functions/v1/ebay-weekly-earnings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'callback',state:state.slice(5),code}),signal:AbortSignal.timeout(45000)});
+      if(!r.ok){const body=await r.json();return html('<h1>Could not connect eBay Order Earnings</h1><p>'+escapeHtml(String(body.error||'Try again in Invsto.'))+'</p><a href="'+target+'">Return to the report</a>',400);}
+      return html('<h1>OG Jewelers · Order Earnings connected</h1><p>Invsto is importing eBay earnings. The October report shows the progress.</p><a href="'+target+'">Open weekly sales</a>');
+    }catch{return html('<h1>Could not finish the eBay earnings connection</h1><p>Return to Invsto and check the connection status.</p>',502);}
+  }
+
   if (url.searchParams.has("privacy")) {
     return html(`<h1>Privacy Policy</h1>
       <p>OG Jewelers uses authorized eBay API access only to manage seller inventory, listings, orders, and related account workflows requested by the account owner.</p>

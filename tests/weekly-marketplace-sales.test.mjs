@@ -23,6 +23,8 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await db.exec(await readFile(new URL('../supabase/migrations/20261101042000_weekly_sales_shared_postage.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101045000_weekly_sales_market_filter.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261101051000_weekly_ebay_seller_hub.sql',import.meta.url),'utf8'));
+  await db.exec("create schema cron;create function cron.schedule(text,text,text) returns bigint language sql as 'select 1::bigint'");
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101053000_ebay_order_earnings.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -60,6 +62,8 @@ test('weekly report revises the original ET week, separates cancellation and ref
   const postage=(await db.query("select order_number,posted,complete from weekly_sales_proceeds('2025-06-01','2025-06-09') where order_number='combined-A'")).rows[0];
   assert.equal(Number(postage.posted),9.96);assert.equal(postage.complete,true);
   assert.equal(Number((await one("select posted from weekly_sales_proceeds('2025-06-09','2025-06-10') where order_number='combined-B'")).posted),9.97);
+  await db.exec("insert into weekly_ebay_order_earnings(order_number,purchased_at,earnings,checked_at) values ('combined-B',now(),8.44,now())");
+  assert.equal(Number((await one("select posted from weekly_sales_proceeds('2025-06-09','2025-06-10') where order_number='combined-B'")).posted),8.44);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });

@@ -82,11 +82,22 @@
   month.max=etMonth();
   let seq=0,manualMonth=Boolean(requested&&/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)&&requested>='2000-01'&&requested<=month.max);
   month.value=manualMonth?requested:month.max;
+  const connect=$('ws-ebay-connect'),earnStatus=$('ws-ebay-status');
+  async function earningsStatus(){
+   connect.hidden=earnStatus.hidden=market.value!=='ebay'||!client.functions;if(connect.hidden)return;
+   try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'status'}});if(error)throw error;
+    if(market.value!=='ebay')return;
+    connect.hidden=Boolean(data.connected_at&&!data.last_error);earnStatus.textContent=data.last_error||(!data.connected_at?'Order Earnings API is available to connect.':data.last_success?'Order Earnings API · Last checked '+etStamp(data.last_success):'Connected · Waiting for the first earnings import.');
+   }catch{earnStatus.textContent='Could not check the eBay earnings connection.';}
+  }
+  connect.onclick=async()=>{connect.disabled=true;try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'connect'}});if(error)throw error;
+   if(data.url&&new URL(data.url).origin==='https://auth.ebay.com'){location.assign(data.url);return;}if(!data.ok)throw Error();await earningsStatus();load();
+  }catch{earnStatus.textContent='Could not start eBay authorization. Try again.';}finally{connect.disabled=false;}};
   async function load(){
    const version=++seq;if(!panel.open||document.hidden)return;
    month.max=etMonth();if(!manualMonth)month.value=month.max;
    if(!/^\d{4}-\d{2}$/.test(month.value)||month.value>month.max||month.value<'2000-01'){$('ws-results').replaceChildren();$('ws-status').textContent='Choose the current month or a past month.';return;}
-   $('ws-status').textContent='Checking marketplace records…';
+   $('ws-status').textContent='Checking marketplace records…';earningsStatus();
    try{
     const {data,error}=await client.rpc('get_weekly_sales_for_market',{_month:month.value+'-01',_market:market.value});if(error||!data)throw error||Error();
     if(seq!==version||!panel.open)return;
