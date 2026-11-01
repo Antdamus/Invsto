@@ -61,6 +61,21 @@ for(const width of [320,390,1366])test(`${width}px worker accordion, New York ti
  await page.locator('#workWorkerSearch').fill('Alex');await expect(worker(page)).not.toBeVisible();await page.locator('#workWorkerSearch').fill('Sandra');await expect(worker(page)).toBeVisible();
 });
 
+test('closed line card shows marketplace totals and opens the right order for each item',async t=>{
+ const page=await open(t,390);
+ await page.evaluate(()=>{
+  Object.assign(testWorker.metrics,{order_lines_closed:3,order_lines_closed_ebay:1,order_lines_closed_tiktok:1,order_lines_closed_whatnot:1});
+  testWorker.categories.closed_lines=3;
+  for(const market of ['ebay','tiktok','whatnot'])testEvents.push({...testEvents[1],category:'closed_lines',action:'order_line_closed',
+   details:{marketplace:market,order_number:'777',record_basis:market==='whatnot'?'admin_authorized_label_closeout':'signed_line_completion',items:[{item_title:'Ring',status:'fulfilled',fulfilled_quantity:1}]}});
+ });
+ const card=await expand(page),button=card.getByRole('button',{name:/Order lines closed/});
+ await expect(button).toContainText('eBay 1 · TikTok 1 · Whatnot 1');await button.click();await expect(card.locator('.work-event')).toHaveCount(3);
+ await expect(card.getByRole('link',{name:'Open Whatnot order'})).toHaveAttribute('href','pending-whatnot-orders.html?view=all&search=777');
+ await expect(card.getByRole('link',{name:'Open TikTok order'})).toHaveAttribute('href','pending-tiktok-orders.html?view=history&search=777');
+ await expect(card.getByRole('link',{name:'Open order history'})).toHaveAttribute('href','ebay-order-history.html?focusOrder=777');
+ await expect(card.locator('.work-events')).toContainText('Credited to Sandra · Admin-authorized closeout');
+});
 test('full pagination, category/search filtering, stable snapshot and separate summary totals',async t=>{
  const page=await open(t),card=await expand(page);
  await card.getByRole('button',{name:'Load more actions'}).click();await expect(card.locator('.work-event')).toHaveCount(100);

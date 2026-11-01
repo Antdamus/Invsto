@@ -14,6 +14,13 @@ before(async()=>{
  await db.exec(await readFile(new URL('fixtures/admin-work-report-schema.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261013170000_admin_employee_work_report.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261013180000_work_report_closed_orders.sql',import.meta.url),'utf8'));
+ await db.exec(`create table tiktok_orders(id uuid primary key,order_number text,buyer_username text);
+ create table tiktok_order_lines(id uuid primary key,order_id uuid,title text,quantity int,fulfilled_at timestamptz,fulfilled_by uuid,cancelled_at timestamptz);
+ create table tiktok_order_events(id uuid primary key default gen_random_uuid(),order_id uuid,actor uuid,created_at timestamptz,action text,details jsonb);
+ create table whatnot_orders(id text primary key,username text);
+ create table whatnot_order_lines(id text primary key,order_id text,title text,quantity int,work_state text,completed_at timestamptz,completed_by uuid);
+ create table whatnot_order_events(id uuid primary key default gen_random_uuid(),order_id text,line_id text,actor uuid,actor_name text,action text,created_at timestamptz,details jsonb);`);
+ await db.exec(await readFile(new URL('../supabase/migrations/20261101020000_marketplace_employee_work.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  const tables=(await db.query("select tablename from pg_tables where schemaname='public'")).rows.map(r=>r.tablename);
@@ -24,6 +31,31 @@ beforeEach(async()=>{
  ('${id(3)}','${id(300)}','Other worker','other@example.test','employee',true);`);
 });
 after(()=>db?.close());
+
+test('marketplace breakdowns separate line credit, final order credit, and admin closeout attribution',async()=>{
+ const t='2026-10-13T15:00Z',first=id(200),last=id(300);
+ await db.exec(`insert into tiktok_orders values('${id(801)}','777','buyer');
+ insert into tiktok_order_lines(id,order_id,title,quantity) values('${id(802)}','${id(801)}','Ring',2),('${id(803)}','${id(801)}','Box',1);
+ set test.actor='${first}';update tiktok_order_lines set fulfilled_at='${t}',fulfilled_by=auth.uid() where id='${id(802)}';
+ set test.actor='${last}';update tiktok_order_lines set fulfilled_at='${t}',fulfilled_by=auth.uid() where id='${id(803)}';
+ insert into tiktok_order_events(order_id,actor,created_at,action,details) values('${id(801)}','${last}','${t}','order_completed','{}');
+ insert into whatnot_orders values('777','buyer');
+ insert into whatnot_order_lines values('100','777','Earrings',1,'completed','${t}','${first}'),('101','777','Watch',1,'pending',null,null);
+ insert into whatnot_order_events(order_id,line_id,actor,action,created_at,details) values('777','100','${first}','complete','${t}','{"quantity":1}');
+ update whatnot_order_lines set work_state='completed',completed_by='${last}',completed_at='${t}' where id='101';
+ insert into whatnot_order_events(order_id,line_id,actor_name,action,created_at,details) values('777','101','Invsto admin automation','complete','${t}','{"record_basis":"admin_authorized_label_closeout","credited_user_id":"${last}","photo_requirement_waived":true}');
+ insert into whatnot_order_events(order_id,line_id,action,created_at,details) values('777','100','status_updated','${t}','{}');
+ update whatnot_order_lines set work_state='pending',completed_by=null,completed_at=null where id='101';
+ set test.actor='${id(100)}';`);
+ const firstWorker=(await report({worker:id(2)})).workers[0];
+ assert.equal(firstWorker.metrics.order_lines_closed,2);assert.equal(firstWorker.metrics.pending_orders_closed,undefined);
+ const result=await report({worker:id(3),category:'closed_orders'}),m=result.workers[0].metrics;
+ assert.equal(m.pending_orders_closed,2);assert.equal(m.pending_orders_closed_tiktok,1);assert.equal(m.pending_orders_closed_whatnot,1);
+ assert.equal(m.order_lines_closed,2);assert.equal(m.order_lines_closed_tiktok,1);assert.equal(m.order_lines_closed_whatnot,1);
+ const adminClose=result.events.find(e=>e.details.marketplace==='whatnot');assert.equal(adminClose.details.photo_requirement_waived,true);
+ assert.equal(adminClose.details.recorded_by,'Invsto admin automation');assert.equal(adminClose.details.items.length,2);
+ assert.equal((await report({worker:id(3),category:'closed_lines'})).total,2);
+});
 
 test('order completions count whole orders once, preserve evidence after reopen, and credit the final signer',async()=>{
  await db.exec(`insert into ebay_orders(id,order_number,buyer_username) values('${id(600)}','09-15269-87504','buyer');

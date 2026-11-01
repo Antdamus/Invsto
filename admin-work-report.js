@@ -3,8 +3,8 @@
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const zone = 'America/New_York';
-  const categories = {closed_orders:'Pending orders closed',tasks:'Tasks',inventory:'Inventory changes',stock:'Stock movements',orders:'Orders & fulfillment',packaging:'Packaging',messages:'Messages',returns:'Returns',transfers:'Trays & transfers',photos:'Photos',pricing:'Pricing',live_sales:'Live sales',sales:'Sales',catalogues:'Catalogues',offsite:'Off-site work',attendance:'Time & breaks',administration:'Administration'};
-  const metrics = {pending_orders_closed:'Pending orders closed',tasks_completed:'Tasks marked completed',tasks_closed:'Tasks closed',items_created:'Item types created',units_checked_in:'Units checked in',replies_sent:'Replies sent',packages_packed:'Packages packed',packages_dispatched:'Packages dispatched',admin_closeouts:'Admin package closeouts'};
+  const categories = {closed_orders:'Pending orders closed',closed_lines:'Order lines closed',tasks:'Tasks',inventory:'Inventory changes',stock:'Stock movements',orders:'Orders & fulfillment',packaging:'Packaging',messages:'Messages',returns:'Returns',transfers:'Trays & transfers',photos:'Photos',pricing:'Pricing',live_sales:'Live sales',sales:'Sales',catalogues:'Catalogues',offsite:'Off-site work',attendance:'Time & breaks',administration:'Administration'};
+  const metrics = {pending_orders_closed:'Pending orders closed',order_lines_closed:'Order lines closed',tasks_completed:'Tasks marked completed',tasks_closed:'Tasks closed',items_created:'Item types created',units_checked_in:'Units checked in',replies_sent:'Replies sent',packages_packed:'Packages packed',packages_dispatched:'Packages dispatched',admin_closeouts:'Admin package closeouts'};
   const actionLabels = {fulfilled_no_inventory:'Order completion recorded',pack:'Package packed',dispatch:'Package dispatched',admin_closeout:'Administrative closeout',prior_dispatch_closeout:'Historical closeout',send_attempt_succeeded:'Reply sent',marked_read:'Explicitly marked read',read_by_reply:'Marked read by replying',marked_unread:'Marked unread',checkin:'Stock checked in',checkout:'Stock checked out',status_changed:'Task status changed',completed_by_employee:'Task marked completed',resolved:'Task closed',batch_recorded:'Batch recorded'};
   const state = {initialized:false,version:0,report:null,focus:null,workers:new Map(),panels:new Map()};
   const human = v => String(v ?? '').replaceAll('_',' ').replace(/^./,s=>s.toUpperCase());
@@ -19,8 +19,14 @@
     if(error) throw new Error(error.message || 'Unable to load the work report.');
     return data;
   }
+  const marketNames={ebay:'eBay',tiktok:'TikTok',whatnot:'Whatnot'};
   function stats(w) {
-    return `<div class="work-stats">${Object.entries(metrics).map(([key,label])=>key==='pending_orders_closed'?`<button class="work-closed-stat" type="button" data-work-closed><strong>${number(w.metrics?.[key])}</strong><span>${label}</span><small>View orders ↗</small></button>`:`<div><strong>${number(w.metrics?.[key])}</strong><span>${label}</span></div>`).join('')}</div>`;
+    return `<div class="work-stats">${Object.entries(metrics).map(([key,label])=>{
+      const orders=key==='pending_orders_closed';
+      if(!orders && key!=='order_lines_closed') return `<div><strong>${number(w.metrics?.[key])}</strong><span>${label}</span></div>`;
+      const breakdown=Object.entries(marketNames).map(([market,name])=>`${name} ${number(w.metrics?.[key+'_'+market])}`).join(' · ');
+      return `<button class="work-closed-stat" type="button" data-work-closed="${orders?'closed_orders':'closed_lines'}"><strong>${number(w.metrics?.[key])}</strong><span>${label}</span><span class="work-markets">${breakdown}</span><small>View ${orders?'orders':'lines'} ↗</small></button>`;
+    }).join('')}</div>`;
   }
   function recordDetails(value,depth=0) {
     if(value===null || value===undefined) return '<span class="muted">Not recorded</span>';
@@ -35,22 +41,27 @@
     if(d.task_id && d.task_source) return ['Open task',`team-tasks.html?${query({taskId:d.task_id,source:d.task_source})}`];
     if(d.conversation_id) return ['Open conversation',`email-triage.html?${query({ebayConversationDbId:d.conversation_id,...(d.buyer_username?{ebayBuyer:d.buyer_username}:{}),...(d.message_id?{ebayMessageDbId:d.message_id}:{})})}`];
     if(e.category==='packaging' && d.shipment_id) return ['Open package',`packaging.html?${query({package:d.shipment_id})}`];
-    if(e.category==='closed_orders' && d.order_number) return ['Open order history',`ebay-order-history.html?${query({focusOrder:d.order_number})}`];
+    if(['closed_orders','closed_lines'].includes(e.category) && d.order_number){
+      if(d.marketplace==='whatnot') return ['Open Whatnot order',`pending-whatnot-orders.html?${query({view:'all',search:d.order_number})}`];
+      if(d.marketplace==='tiktok') return ['Open TikTok order',`pending-tiktok-orders.html?${query({view:'history',search:d.order_number})}`];
+      return ['Open order history',`ebay-order-history.html?${query({focusOrder:d.order_number})}`];
+    }
     const orderNumber=d.payload?.order_number || d.order_numbers?.[0];
     if(orderNumber) return ['Open order',`pending-orders.html?${query({orderId:orderNumber})}`];
     return null;
   }
   function eventHTML(e,w) {
     const link=sourceLink(e), d=e.details || {};
+    const closure=e.category==='closed_orders'||e.category==='closed_lines', credited=d.record_basis==='admin_authorized_label_closeout';
     return `<article class="work-event">
       <div class="work-event-time"><time datetime="${esc(e.occurred_at)}">${esc(date(e.occurred_at))}</time><span>${esc(categories[e.category] || human(e.category))}</span></div>
-      <div class="work-event-body"><h4>${esc(e.action==='pending_order_closed'?'Pending order closed':actionLabels[e.action] || human(e.action))}</h4><p class="work-event-title">${esc(e.title)}</p>
-      ${e.category==='closed_orders'?`<ul class="work-order-items">${(d.items || []).map(item=>`<li><span>${esc(item.item_title || item.item_number || 'Item')}</span><small>${item.status==='fulfilled'?`${number(item.fulfilled_quantity)} fulfilled`:esc(human(item.status))}</small></li>`).join('')}</ul><p class="work-completed-by">Completed by ${esc(name(w))}</p>`:''}
+      <div class="work-event-body"><h4>${esc(e.action==='pending_order_closed'?'Pending order closed':actionLabels[e.action] || human(e.action))}</h4><p class="work-event-title">${closure?(marketNames[d.marketplace||'ebay']||'Marketplace')+' · ':''}${esc(e.title)}</p>
+      ${closure?`<ul class="work-order-items">${(d.items || []).map(item=>`<li><span>${esc(item.item_title || item.item_number || 'Item')}</span><small>${item.status==='fulfilled'?`${number(item.fulfilled_quantity)} fulfilled`:esc(human(item.status))}</small></li>`).join('')}</ul><p class="work-completed-by">${credited?'Credited to':'Completed by'} ${esc(name(w))}${credited?' · Admin-authorized closeout':''}</p>`:''}
       ${d.old_status!==undefined || d.new_status?`<p class="work-transition">${esc(human(d.old_status) || 'New')} → ${esc(human(d.new_status) || 'Unchanged')}</p>`:''}
       ${e.quantity?`<p>Quantity: <strong>${number(e.quantity)}</strong></p>`:''}
       ${e.notes?`<p class="work-note">${esc(e.notes)}</p>`:''}
       ${link?`<a class="work-source" href="${esc(link[1])}" target="_blank" rel="noopener">${link[0]} ↗</a>`:''}
-      <details class="work-evidence"><summary>Details & source record</summary><p>${e.category==='attendance'?'Time record for':'Recorded actor:'} <strong>${esc(name(w))}</strong></p><p class="work-record-id">${esc(e.event_key)}</p>${recordDetails(d)}</details>
+      <details class="work-evidence"><summary>Details & source record</summary><p>${e.category==='attendance'?'Time record for':credited?'Work credited to':'Recorded actor:'} <strong>${esc(name(w))}</strong></p><p class="work-record-id">${esc(e.event_key)}</p>${recordDetails(d)}</details>
       </div></article>`;
   }
   function filterWorkers() {
@@ -70,7 +81,7 @@
   function summaryHTML(w) {
     return `
       <span class="work-person"><strong>${esc(name(w))}</strong><small>${w.active?'':'Inactive · '}${w.shifts.some(s=>!s.clock_out)?'Shift open · ':''}${w.shifts.length?`${duration(w.clocked_seconds)} clocked · ${duration(w.break_seconds)} breaks`:'No shift recorded for this day'}</small></span>
-      <span class="work-mini"><span><b>${number(w.metrics.pending_orders_closed)}</b> order${Number(w.metrics.pending_orders_closed)===1?'':'s'} closed</span><span><b>${number(w.metrics.tasks_completed)}</b> tasks completed</span><span><b>${number(w.metrics.units_checked_in)}</b> units in</span><span><b>${number(w.records)}</b> records</span></span>
+      <span class="work-mini"><span><b>${number(w.metrics.pending_orders_closed)}</b> order${Number(w.metrics.pending_orders_closed)===1?'':'s'} closed</span><span><b>${number(w.metrics.order_lines_closed)}</b> lines closed</span><span><b>${number(w.metrics.tasks_completed)}</b> tasks completed</span><span><b>${number(w.metrics.units_checked_in)}</b> units in</span><span><b>${number(w.records)}</b> records</span></span>
       <span class="work-expand" aria-hidden="true">⌄</span>`;
   }
   function workerHTML(w) {
@@ -92,8 +103,8 @@
     card.querySelector('form').addEventListener('submit',e=>{e.preventDefault();p.search=card.querySelector('[data-work-query]').value.trim();loadWorker(card);});
     card.querySelector('.work-more').addEventListener('click',()=>loadWorker(card,true));
     card.querySelector('.work-detail-summary').addEventListener('click',e=>{
-      if(!e.target.closest('[data-work-closed]')) return;
-      p.category='closed_orders';p.search='';card.querySelector('[data-work-query]').value='';
+      const button=e.target.closest('[data-work-closed]');if(!button) return;
+      p.category=button.dataset.workClosed;p.search='';card.querySelector('[data-work-query]').value='';
       loadWorker(card).then(()=>card.querySelector('.work-detail-status')?.scrollIntoView({block:'start',behavior:'smooth'}));
     });
   }

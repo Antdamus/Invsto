@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="admin-taxdocs.css" />
   <link rel="stylesheet" href="admin-users.css" />
   <link rel="stylesheet" href="admin-changes.css" />
-  <link rel="stylesheet" href="admin-work-report.css?v=20261013-shift-orders" />
+  <link rel="stylesheet" href="admin-work-report.css?v=20261031-marketplace-closures" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
@@ -855,7 +855,7 @@
         <details class="work-coverage"><summary>What the report counts</summary>
           <p>Actions are attributed to the person recorded as performing or signing them, regardless of who is assigned the task. Daily periods use New York time; a selected shift includes its full time range, including overnight work. Use Refresh for the latest progress.</p>
           <p>Task completions and closures count distinct tasks in the selected period. A completion submitted for review and an admin closing that task are separate actions. Stock units are gross check-ins, with later corrections shown separately. Package packing, dispatch, and administrative closeout are separate totals.</p>
-          <p>Pending orders closed counts distinct orders fully completed by that worker during the selected period. Tap the total to see the orders and their items. Partial fulfillment, cancelled-only orders, and package closeouts do not increase this total. Earlier completions are included when the saved fulfillment is supported by a matching signed record; their details identify them as historical snapshots. New completion records remain in the timeline if an order is later reopened.</p>
+          <p>Pending orders closed counts distinct eBay, TikTok, and Whatnot orders credited to the worker who finished the last outstanding line. Order lines closed counts the individual lines that worker finished, including lines from partially completed orders. Each card shows the marketplace breakdown. Tap it for order numbers, items, and recorded times. Administrative exceptions identify who received the credit and why.</p>
           <p>The timeline includes task updates and evidence records, inventory edits with before/after values, stock, trays, transfers, receiving, order checkout, labels, certificates, returns, packaging, explicit message reads and replies, pricing, sales, catalogues, off-site work, and time records. Related audit entries can describe the same operation; record totals are not a count of completed jobs. Automatic message synchronization is excluded.</p>
           <p>Time entries reflect current recorded times; admin corrections have their own audit trail. Older workflows may not have complete history or a recorded actor. An empty report does not establish that no work was done. Source links open the current task, conversation, order, or package; the saved action details remain in this report.</p>
         </details>
@@ -1479,7 +1479,7 @@
   <script src="admin-shell.js?v=20261013-shift-orders" defer></script>
   <script src="admin-schedule.js?v=20260901-schedule-time-selects"></script>
   <script src="admin-changes.js"></script>
-  <script src="admin-work-report.js?v=20261013-shift-orders"></script>
+  <script src="admin-work-report.js?v=20261031-marketplace-closures"></script>
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
   <script src="offsite-work.js?v=20261011-outings"></script>

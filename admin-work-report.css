@@ -69,6 +69,7 @@
 .work-closed-stat:focus-visible { outline:2px solid #c9a7ff; outline-offset:3px; }
 .work-closed-stat strong { color:#e1caff; }
 .work-closed-stat span { color:#ded2ef; }
+.work-closed-stat .work-markets { font-size:12px; color:#c9c1d2; line-height:1.5; }
 .work-closed-stat small { position:absolute; right:14px; top:16px; color:#d0b4f6; font-size:11px; }
 .work-order-items { padding:0; list-style:none; border:1px solid #393144; border-radius:10px; overflow:hidden; margin:12px 0; }
 .work-order-items li { display:flex; justify-content:space-between; gap:12px; padding:12px; background:#ffffff03; }
