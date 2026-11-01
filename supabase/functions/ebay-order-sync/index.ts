@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { inspectShippingFulfillments } from "./shipments.ts";
 import { syncWeeklySaleUpdates } from "./weekly-sale-updates.ts";
 import { syncWeeklyPayouts } from "./weekly-payouts.ts";
+import { checkAccountHolds } from "./account-holds.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1287,6 +1288,9 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
       if (error) { retrying++; return; } // A durable lease recovers a failed save.
       if (saved && !failure) completed++; else retrying++;
     });
+    if(token && Date.now()+8000<deadline){try{
+      await checkAccountHolds(supabase,path=>ebayFinanceRequest(token,path,Math.min(deadline,Date.now()+7000)));
+    }catch{console.warn('eBay account balance check will retry.');}}
     if(token && Date.now()+8000<deadline){try{
       await syncWeeklyPayouts(supabase,path=>ebayFinanceRequest(token,path,Math.min(deadline,Date.now()+8000)),()=>Date.now()+8000<deadline);
     }catch{console.warn('Weekly eBay payout matching will retry.');}}

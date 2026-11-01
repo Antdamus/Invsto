@@ -130,7 +130,7 @@
   let seq=0,manualMonth=Boolean(requested&&/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)&&requested>='2000-01'&&requested<=month.max);
   month.value=manualMonth?requested:month.max;
   const connect=$('ws-ebay-connect'),earnStatus=$('ws-ebay-status');
-  const itemLedger=(data)=>window.WeeklyEbayItems?.update($('ws-ebay-items'),data);
+  const itemLedger=(data)=>{window.WeeklyEbayItems?.update($('ws-ebay-items'),data);window.WeeklyEbayHolds?.update($('ws-ebay-holds'),data,client,load);};
   async function earningsStatus(){
    connect.hidden=earnStatus.hidden=market.value!=='ebay'||!client.functions;if(connect.hidden)return;
    try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'status'}});if(error)throw error;
