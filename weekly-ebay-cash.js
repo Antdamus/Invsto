@@ -27,7 +27,50 @@
       split:!netMissing&&net!=null&&Object.values(statusNet).reduce((a,b)=>a+b,0)===net};
   }
 
-  function cashActivity(statement, bank, count, released) {
+  const easternTime=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+  function postingComparison(data,sales){
+    const proof=data.ebay_posted_orders;
+    const lines=data.ebay_cash_statement?.movements;
+    if(!Array.isArray(proof)||!Array.isArray(lines)||sales.released==null||sales.held==null)return '';
+    const item=lines.find(m=>m.label==='Item sales posted'),shipping=lines.find(m=>m.label==='Shipping paid by buyers');
+    if(!item||!shipping)return '';
+    const period=data.month.slice(0,7),byId=new Map(proof.map(p=>[p.id,p])),orders=new Map(data.ebay_item_orders.map(o=>[o.id,o]));
+    const included=proof.filter(p=>p.day.slice(0,7)===period),netSum=(rows,key)=>rows.reduce((n,p)=>n+p[key],0);
+    // Both published posting controls and every purchase-side original credit must match independently.
+    if(byId.size!==proof.length||netSum(included,'item')!==item.cents||netSum(included,'shipping')!==shipping.cents||
+      proof.some(p=>!['item','shipping','fees','other','credit'].every(k=>Number.isSafeInteger(p[k]))||p.item+p.shipping+p.fees+p.other!==p.credit))return '';
+    const bought=[];
+    for(const o of orders.values()){
+      const p=byId.get(o.id);
+      if(!p){if(o.credit==null&&(o.buyer==='unpaid'||o.buyer==='failed'))continue;return '';}
+      if(cents(o.credit)!==p.credit)return '';
+      bought.push(p);
+    }
+    const excluded=bought.filter(p=>p.day.slice(0,7)!==period),added=included.filter(p=>!orders.has(p.id));
+    const gross=list=>netSum(list,'item')+netSum(list,'shipping'),otherCredits=netSum(bought,'credit')-sales.released-sales.held;
+    const fee=-netSum(bought,'fees'),other=-netSum(bought,'other'),posted=item.cents+shipping.cents;
+    if(sales.released+sales.held+otherCredits+fee+other-gross(excluded)+gross(added)!==posted)return '';
+    function listEvidence(caption,rows){
+      if(!rows.length)return '';
+      return '<details class="wc-orders-proof"><summary>'+caption+' ('+rows.length+')</summary><ul>'+rows.map(p=>{
+        const order=orders.get(p.id);
+        const boughtOn=order?'Purchased '+escape(easternTime.format(new Date(order.date))):p.sold?'Seller Hub sale date '+escape(p.sold):'Purchase date unverified';
+        return '<li><a href="https://www.ebay.com/mesh/ord/details?orderid='+encodeURIComponent(p.id)+'" target="_blank" rel="noopener">'+escape(p.id)+' ↗</a> · '+money(p.item+p.shipping)+'<small>'+boughtOn+' · Posted '+escape(p.day)+' (Pacific)'+(p.refunded?' · Fully refunded':'')+'</small></li>';
+      }).join('')+'</ul></details>';
+    }
+    return '<details class="wc-postings"><summary>Compare released credits with gross sales posted by eBay</summary>'+
+      '<p>Both totals describe original sales. The purchase list uses Eastern dates. Seller Hub uses Pacific posting dates and reports item sales and shipping before fees.</p><dl>'+
+      row('Released original credits on the purchase list',money(sales.released),true)+
+      row('Include original credits still on hold',signed(sales.held))+(otherCredits?row('Include original credits in other funds statuses',signed(otherCredits)):'')+
+      row('Add back fees already deducted from original credits',signed(fee))+(other?row('Remove other net charges or credits to isolate items and shipping',signed(other)):'')+
+      (excluded.length?row('Remove '+excluded.length+' purchase-list orders posted outside the month',signed(-gross(excluded))):'')+
+      (added.length?row('Include '+added.length+' posted '+(added.length===1?'order':'orders')+' outside the purchase list',signed(gross(added))):'')+
+      row('Seller Hub · posted item sales and buyer shipping',money(posted),true)+'</dl>'+
+      listEvidence('Purchase-list orders posted outside the month',excluded)+listEvidence('Posted orders outside the purchase list',added)+
+      '<small>Checked against '+included.length+' order transactions and both Seller Hub totals: '+money(item.cents)+' in items and '+money(shipping.cents)+' in shipping. <a href="https://www.ebay.com/mes/report-landing" target="_blank" rel="noopener">Open Financial overview ↗</a></small></details>';
+  }
+
+  function cashActivity(statement, bank, count) {
     if(!statement) return '<p class="wc-note">A verified financial statement for this month will show the opening balance, refunds, claims, fees, financing repayments, and the funds carried forward.</p>';
     const lines=statement.movements;
     const opening=Number(statement.opening), closing=Number(statement.closing);
@@ -42,25 +85,14 @@
     const verifiedBalance=statement.observed_at&&statement.observed_held!=null&&statement.observed_available!=null&&
       Number(statement.observed_held)+Number(statement.observed_available)===closing;
     const observation=verifiedBalance?'<p class="wc-balance-proof">Seller Hub showed <b>'+money(statement.observed_held)+'</b> on hold across all purchase months and <b>'+money(statement.observed_available)+'</b> available on '+escape(new Date(statement.observed_at).toLocaleDateString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}))+'. Together they equal the closing funds.</p>':'';
-    const isOrder=m=>['Item sales posted','Shipping paid by buyers','Orders'].includes(m.label);
-    const orderActivity=lines.filter(isOrder),canTrace=canSplit&&released!=null&&orderActivity.length>0;
-    const postedOrders=orderActivity.reduce((n,m)=>n+m.cents,0);
-    const trace=canTrace?
-      row('Start · Released original credits for this month’s purchases',money(released),true)+
-      row('Switch to all orders posted during the month ('+money(postedOrders)+')',signed(postedOrders-released))+
-      row('Funds carried in from the previous month',signed(opening))+
-      lines.filter(m=>!isOrder(m)&&m!==payout&&m.cents).map(m=>row(m.label,signed(m.cents))).join('')+
-      row('Funds carried forward at month end',signed(-closing))+
-      (fee?row('Express payout fees',signed(-fee)):'')+row('Sent to your bank · '+count+' payouts',money(bank),true)
-      :row('Opening eBay funds',money(opening),true)+lines.filter(m=>m.cents||m.label==='Payouts').map(m=>{
+    const trace=row('Opening eBay funds carried from the prior month',money(opening),true)+lines.filter(m=>m.cents||m.label==='Payouts').map(m=>{
         if(m===payout&&canSplit)return row('Sent to your bank · '+count+' payouts',signed(-bank))+(fee?row('Express payout fees',signed(-fee)):'');
         return row(m.label,signed(m.cents));
       }).join('')+row('Closing eBay funds',money(closing),true);
     return '<p class="wc-note">The account opened with <b>'+money(opening)+'</b>. Refunds, claims and disputes totaled <b>'+money(groups)+'</b>. '+
       (financing&&financing.cents<0?'eBay also sent <b>'+money(-financing.cents)+'</b> in '+(statement.source==='eBay Seller Hub financial overview'?'financing repayments':'secondary payouts')+(/Liberis/i.test(financing.label)?' to Liberis':'')+'. ':'')+
       'After payouts and other activity, <b>'+money(closing)+'</b> carried forward.</p>'+observation+
-      '<details class="wc-ledger"><summary>'+(canTrace?'Trace '+money(released)+' in released credits to '+money(bank)+' sent to your bank':'How the opening balance became '+money(closing))+'</summary>'+
-      (canTrace?'<p>The first adjustment switches from orders selected by purchase date to all orders posted to the account, including held sales. '+(statement.source==='eBay Seller Hub financial overview'?'The overview reports those sales before fees and lists expenses below.':'The statement reports orders after sale fees.')+'</p>':'')+
+      '<details class="wc-ledger"><summary>Account statement · from '+money(opening)+' opening funds to '+money(closing)+' closing funds</summary>'+
       '<dl>'+trace+'</dl><small>'+escape(source)+'. All account activity posted during this calendar month, Pacific time.</small></details>';
   }
 
@@ -90,7 +122,7 @@
         finally{input.disabled=false;input.value='';}
       };
     }
-    const body=host.querySelector('.wc-body'),wasOpen=body.querySelector('.wc-ledger')?.open;
+    const body=host.querySelector('.wc-body'),expanded=new Set([...body.querySelectorAll('details[open]')].map(d=>d.querySelector('summary').textContent));
     host.hidden=false;
     const split=sales.split?'Of these net item sales, <b>'+money(sales.statusNet.held)+'</b> belongs to orders with held credits and <b>'+money(sales.statusNet.released)+'</b> to orders with released credits.'+(sales.statusNet.other?' Another <b>'+money(sales.statusNet.other)+'</b> is on orders with other or mixed statuses.':''):'The order-level split of net sales by funds status is still under verification.';
     body.innerHTML='<p>Orders purchased in '+name+' and cash transferred in '+name+' follow different dates.</p><div class="wc-cards">'+
@@ -99,9 +131,9 @@
       card('Original credits on hold',money(sales.held),'For orders classified on hold. Mixed orders appear under other funds statuses.')+
       card('Sent to your bank',bank==null?'No verified total':money(bank),Array.isArray(batches)&&batches.length?batches.length+' recorded transfers by payout date, from the whole account.':'No successful transfers recorded for this period.')+'</div>'+
       '<p class="wc-explain">'+split+' eBay pays from the shared seller balance, which can include earlier sales. Refunds, expenses and financing repayments also affect how much reaches the bank.</p>'+
-      cashActivity(data.ebay_cash_statement,bank,batches?.length||0,sales.released)+
+      cashActivity(data.ebay_cash_statement,bank,batches?.length||0)+postingComparison(data,sales)+
       '<small class="wc-matching">'+(batchIds.size?(matched.size?matched.size+' of '+batchIds.size+' bank transfers have a saved payout ID linked to an order purchased this month.':'The saved payout records for these '+batchIds.size+' transfers do not identify any of this month’s orders by payout ID.'):'')+'</small>';
-    if(wasOpen&&body.querySelector('.wc-ledger'))body.querySelector('.wc-ledger').open=true;
+    for(const detail of body.querySelectorAll('details'))detail.open=expanded.has(detail.querySelector('summary').textContent);
   }
 
   let loadingPdf;

@@ -197,6 +197,11 @@ test('weekly report revises the original ET week, separates cancellation and ref
   const cash=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_cash_statement;
   assert.equal(cash.closing,6000);assert.equal(cash.movements.length,3);
   assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','tiktok') r")).r.ebay_cash_statement,null);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101103000_ebay_order_posting_evidence.sql',import.meta.url),'utf8'));
+  await db.exec("insert into weekly_ebay_posted_orders(order_number,posted_on,item,shipping,fees,other,credit,checked_at) values ('e2','2025-05-31',8300,300,-1390,0,7210,now()),('only-posted','2025-06-09',1200,0,-100,0,1100,now()),('neither','2025-04-01',100,0,0,0,100,now())");
+  const posted=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_posted_orders;
+  assert.deepEqual(posted.map(p=>p.id),['e2','only-posted']);
+  assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_posted_orders,null);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
   await assert.rejects(saveCash(6000),/admin access/i);
  }finally{await db.close();}

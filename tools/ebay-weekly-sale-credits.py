@@ -44,7 +44,7 @@ def credit_breakdown(rows, total):
     return {k: str(v) for k, v in {**parts, "credit": credit}.items()}
 
 
-def prepare(scope, sources):
+def prepare(scope, sources, posting_month=None):
     result = {}
     for state, path in sources:
         stamp = re.fullmatch(r"Transaction-(.+)-\d+\.csv", path.name)
@@ -57,7 +57,10 @@ def prepare(scope, sources):
                 if len(row) != len(header):
                     continue
                 rec = dict(zip(header, row))
-                if rec["Type"] == "Order" and rec["Order number"] in scope:
+                if rec["Type"] != "Order":
+                    continue
+                day = datetime.strptime(rec["Transaction creation date"], "%b %d, %Y").date().isoformat()
+                if rec["Order number"] in scope or posting_month and day.startswith(posting_month + "-"):
                     groups[rec["Order number"]].append(rec)
         for order, rows in groups.items():
             if order in result:
@@ -85,8 +88,11 @@ def prepare(scope, sources):
                                       sold=str(sold), credit=str(line_credit)))
                 if sum(Decimal(i["credit"]) for i in items) != total:
                     items.clear()
-            result[order] = (state, checked, total, items, credit_breakdown(rows, totals[0]))
-    if set(result) != scope:
+            posted = {datetime.strptime(r["Transaction creation date"], "%b %d, %Y").date().isoformat() for r in rows}
+            if len(posted) != 1:
+                raise ValueError("Conflicting posting dates for one order")
+            result[order] = (state, checked, total, items, credit_breakdown(rows, totals[0]), posted.pop())
+    if not scope.issubset(result):
         raise ValueError("The status exports do not cover exactly the selected orders")
     return result
 
@@ -97,11 +103,14 @@ def main():
         parser.add_argument("--" + arg, type=Path, required=True)
     parser.add_argument("--breakdown-only", action="store_true",
                         help="Attach verified components only to an existing matching Seller Hub credit.")
+    parser.add_argument("--posting-month", help="Only import original posting evidence, including orders outside the supplied purchase list (YYYY-MM).")
     a = parser.parse_args()
     scope = set(json.loads(a.scope.read_text(encoding="utf-8-sig")))
     if not scope or not all(re.fullmatch(r"\d{2}-\d{5}-\d{5}", n) for n in scope):
         raise ValueError("Invalid eBay order scope")
-    rows = prepare(scope, [(s, getattr(a, s)) for s in ("available", "held", "processing")])
+    if a.posting_month and (a.breakdown_only or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", a.posting_month)):
+        raise ValueError("Choose a valid posting month or breakdown-only mode")
+    rows = prepare(scope, [(s, getattr(a, s)) for s in ("available", "held", "processing")], a.posting_month)
     def q(v):
         return "'" + str(v).replace("'", "''") + "'"
     def values(vals):
@@ -119,6 +128,17 @@ def main():
         sql = ("update public.weekly_ebay_sale_credits c set breakdown=d.b::jsonb from (values\n"
                + values(components) + ") as d(n,v,t,b) where c.order_number=d.n and c.credit=d.v::numeric "
                "and c.checked_at=d.t::timestamptz and c.breakdown is distinct from d.b::jsonb;\n")
+    if a.posting_month:
+        fields = []
+        for n, (_, at, _, _, p, day) in sorted(rows.items()):
+            if p is None:
+                raise ValueError("Incomplete USD posting breakdown")
+            parts = [int(Decimal(p[k])*100) for k in ("item", "shipping", "fees", "other", "credit")]
+            fields.append((n, day, *parts, at))
+        sql = ("insert into public.weekly_ebay_posted_orders as p(order_number,posted_on,item,shipping,fees,other,credit,checked_at) values\n"
+               + values(fields) + "\non conflict(order_number) do update set posted_on=excluded.posted_on,item=excluded.item,"
+               "shipping=excluded.shipping,fees=excluded.fees,other=excluded.other,credit=excluded.credit,checked_at=excluded.checked_at "
+               "where excluded.checked_at>=p.checked_at;\n")
     a.out.write_text(sql, encoding="utf-8")
     print(f"{len(rows)} order credits; {sum(len(v[3]) for v in rows.values())} reconciled itemized credits on multi-item orders; {sum(v[4] is not None for v in rows.values())} with verified shipping and fee detail.")
 
