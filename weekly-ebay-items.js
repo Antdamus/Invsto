@@ -7,7 +7,21 @@
  const paid=o=>['paid','partial','refunded'].includes(o.buyer),unpaid=o=>['unpaid','pending','failed'].includes(o.buyer);
  const funds={held:'On hold',available:'Available for payout',processing:'Processing',paid_out:'Paid out',initiated:'Payout started',mixed:'Mixed funds status',unknown:'Funds status unconfirmed'};
  const pay={paid:'Paid',refunded:'Paid · fully refunded',partial:'Paid · order partly refunded',unpaid:'Not paid',pending:'Payment pending',failed:'Payment failed',date_only:'Paid date only',unknown:'Payment not confirmed'};
- const filters={all:'All lines',paid:'Buyer paid (including refunds)',unpaid:'Not paid / pending / failed',unknown:'No buyer payment confirmation',sent:'Order linked to a sent payout',off:'Not on hold · no confirmed payout (all or part)',held:'Funds on hold',unclear:'Seller payout status unclear',refund:'Order refunded or partly refunded',cancel:'Canceled lines'};
+ const balanceLabels={released:'Released to eBay balance',held:'On hold',processing:'Still processing',unpaid:'Buyer payment outstanding',mixed:'Mixed funds status',unknown:'Release unconfirmed'};
+ const filters={all:'All lines',released:'Released to eBay balance',held:'Funds on hold',processing:'Still processing',outstanding:'Awaiting buyer payment',review:'Mixed or unconfirmed release',paid:'Buyer paid (including refunds)',unpaid:'Not paid / pending / failed',unknown:'No buyer payment confirmation',sent:'Order linked to a sent payout',off:'Not on hold · no confirmed payout (all or part)',unclear:'Seller payout status unclear',refund:'Order refunded or partly refunded',cancel:'Canceled lines'};
+ // Use positive release evidence. Processing and a missing hold flag do not establish availability.
+ function balanceState(o){
+  if(['available','initiated','paid_out'].includes(o.fund))return 'released';
+  const partialHold=o.fund==='held'&&o.held!=null&&o.credit!=null&&Math.round(o.held*100)<Math.round(o.credit*100);
+  if(partialHold||o.fund==='mixed'||(o.payouts||[]).some(r=>r.status==='SUCCEEDED'&&r.sale>0))return 'mixed';
+  if(o.fund==='held'||o.fund==='processing')return o.fund;
+  return unpaid(o)?'unpaid':'unknown';
+ }
+ function matchesBalance(o,filter){
+  const state=balanceState(o);
+  if(filter==='review')return ['mixed','unknown'].includes(state);
+  return state===(filter==='outstanding'?'unpaid':filter);
+ }
  function payout(o){
   const receipts=o.payouts||[],sent=receipts.filter(r=>r.status==='SUCCEEDED');
   const sum=(key)=>sent.every(r=>r[key]!=null)?sent.reduce((n,r)=>n+Math.round(r[key]*100),0)/100:null;
@@ -24,22 +38,21 @@
   return o.fund==='held'&&o.held!=null?{...o,held:Math.min(o.held,remaining/100)}:o;
  }
  function stats(orders){
-  const held=orders.filter(o=>o.fund==='held'),checked=held.filter(o=>o.held!=null),refundHeld=checked.filter(o=>['partial','refunded'].includes(o.buyer));
   return {paid:orders.reduce((n,o)=>n+(paid(o)?o.items.length:0),0),unpaid:orders.reduce((n,o)=>n+(unpaid(o)?o.items.length:0),0),
-   unknown:orders.reduce((n,o)=>n+(!unpaid(o)&&!paid(o)?o.items.length:0),0),
-   held:checked.reduce((s,o)=>s+Number(o.held),0),missing:held.length-checked.length,heldN:held.length,refundHeld:refundHeld.reduce((s,o)=>s+Number(o.held),0),refundN:refundHeld.length,
-   unknownFunds:orders.filter(o=>['unknown','mixed'].includes(o.fund)).length};
+   unknown:orders.reduce((n,o)=>n+(!unpaid(o)&&!paid(o)?o.items.length:0),0)};
  }
- const matches=(o,i,f)=>f==='all'||(f==='paid'?paid(o):f==='unpaid'?unpaid(o):f==='unknown'?!paid(o)&&!unpaid(o):f==='held'?o.fund==='held':f==='sent'?payout(o).sent:f==='off'?payout(o).off:f==='unclear'?payout(o).unclear:f==='refund'?['partial','refunded'].includes(o.buyer):i.cancel);
+ const matches=(o,i,f)=>f==='all'||(f==='paid'?paid(o):f==='unpaid'?unpaid(o):f==='unknown'?!paid(o)&&!unpaid(o):['released','held','processing','outstanding','review'].includes(f)?matchesBalance(o,f):f==='sent'?payout(o).sent:f==='off'?payout(o).off:f==='unclear'?payout(o).unclear:f==='refund'?['partial','refunded'].includes(o.buyer):i.cancel);
  function update(host,data){
   if(!Array.isArray(data?.ebay_item_orders)){host.hidden=true;host.replaceChildren();delete host.itemState;return;}
   const fresh=!host.itemState||host.itemState.month!==data.month;
   if(fresh){
-   host.innerHTML='<h3>eBay payments by purchase week</h3><p>Every saved eBay order line for the selected month. Select a week, or a payout figure to see just the orders behind it.</p><div class="wi-summary"></div><details class="wi-transfers"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
+   host.innerHTML='<h3>eBay balance by purchase week</h3><p>See which sales eBay released to your seller balance and which it still shows on hold. Select a dollar amount to see its order lines, or select a week to see every line.</p><div class="wi-summary wi-balance"></div>'+
+    '<details class="wi-transfers wi-matches"><summary>Bank transfers matched to specific orders</summary><div class="wi-summary"></div></details>'+
+    '<details class="wi-transfers wi-bank"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
     '<details class="wi-browser"><summary>Browse order lines and payments</summary><div class="ws-controls"><label>Purchase week <select class="wi-week"></select></label>'+
     '<label>Show <select class="wi-filter">'+Object.entries(filters).map(([k,t])=>'<option value="'+k+'">'+t+'</option>').join('')+'</select></label>'+
     '<label>Find <input class="wi-find" type="search" placeholder="Order, item title, or username"></label></div>'+
-    '<p class="wi-key">Item sales kept excludes cancellations and merchandise refunds, before fees. The original sale credit includes buyer shipping and is after sale fees, before later refunds, postage, or adjustments. It is not a bank deposit. Final proceeds are shown once per order.</p>'+
+    '<p class="wi-key">Each line shows the latest funds status of its order. Item sales kept reflects cancellations and merchandise refunds before fees. Original sale credits include buyer shipping and sale fees. When eBay provides only one credit for several lines, the amount appears once in the order footer.</p>'+
     '<div class="wi-count" role="status"></div><div class="wi-orders"></div><div class="ws-controls wi-pages"><button type="button" data-step="-1">Previous</button><span></span><button type="button" data-step="1">Next</button></div></details>';
    host.itemState={month:data.month,page:0};
    host.onchange=e=>{if(e.target.matches('select')){host.itemState.page=0;list(host);}};
@@ -55,34 +68,55 @@
   const label=r=>day(r.first_day)+' – '+day(new Date(Date.parse(r.end_day+'T12:00Z')-86400000).toISOString().slice(0,10));
   wk.innerHTML='<option value="">Whole month</option>'+[...rows].reverse().map(r=>'<option value="'+r.week+'">'+label(r)+'</option>').join('');
   wk.value=weeks.includes(before)?before:'';
-  const summaryRow=(name,w,orders,cn,rf,total=false)=>{
-   const st=stats(orders),cell=(k,v)=>'<td data-col="'+k+'">'+v+'</td>';
-   const amountCell=(bucket,value)=>'<button type="button" data-item-week="'+w+'" data-bucket="'+bucket+'" aria-label="'+esc(name+' · '+filters[bucket]+': '+value)+'">'+value+'</button>';
+  const lineCount=orders=>orders.reduce((n,o)=>n+o.items.length,0);
+  const info=a=>a.length+' '+(a.length===1?'order':'orders')+' · '+lineCount(a)+' '+(lineCount(a)===1?'line':'lines');
+  const cell=(k,v)=>'<td data-col="'+k+'">'+v+'</td>';
+  const drill=(name,w,bucket,value)=>'<button type="button" data-item-week="'+w+'" data-bucket="'+bucket+'" aria-label="'+esc(name+' · '+filters[bucket]+': '+value)+'">'+value+'</button>';
+  const weekCell=(name,w,orders)=>'<th scope="row"><button type="button" data-item-week="'+w+'">'+name+'</button><small>'+info(orders)+'</small></th>';
+  function balanceRow(name,w,orders,cn,rf,total){
+   const st=stats(orders);
+   function amountCell(bucket){
+    const group=orders.filter(o=>matchesBalance(o,bucket));
+    const key=bucket==='held'?'held':'credit',known=group.filter(o=>o[key]!=null);
+    const missing=group.length-known.length;
+    const value=group.length&&!known.length?'Amount unconfirmed':money(known.reduce((n,o)=>n+Math.round(o[key]*100),0)/100);
+    const reversed=known.filter(o=>o.cancel||['partial','refunded'].includes(o.buyer));
+    const flagged=reversed.length?'<small>'+money(reversed.reduce((n,o)=>n+Math.round(o[key]*100),0)/100)+' in original credits on '+reversed.length+' canceled or refunded '+(reversed.length===1?'order':'orders')+'</small>':'';
+    return drill(name,w,bucket,value)+'<small>'+info(group)+'</small>'+(missing?'<small>'+missing+' '+(missing===1?'order amount':'order amounts')+' unconfirmed</small>':'')+flagged;
+   }
+   const other=['processing','outstanding','review'].map(bucket=>{
+    const group=orders.filter(o=>matchesBalance(o,bucket));
+    return group.length?'<div>'+drill(name,w,bucket,lineCount(group)+' lines · '+filters[bucket])+'</div>':'';
+   }).join('');
+   return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders)+
+    cell('Released to eBay balance',amountCell('released'))+cell('On hold',amountCell('held'))+
+    cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+
+    cell('Item deductions',money(cn)+' canceled<small>'+money(rf)+' refunded</small><small>Combined '+money(cn+rf)+'</small>')+'</tr>';
+  }
+  const payoutRow=(name,w,orders,cn,rf,total)=>{
+   const amountCell=(bucket,value)=>drill(name,w,bucket,value);
    const groups=(key)=>orders.filter(o=>payout(o)[key]),sent=groups('sent'),off=groups('off'),unclear=groups('unclear');
    const subtotal=(a,key)=>a.reduce((n,o)=>n+Math.round((payout(o)[key]??0)*100),0)/100;
-   const info=a=>a.length+' orders · '+a.reduce((n,o)=>n+o.items.length,0)+' lines';
    const missing=(a,key)=>a.filter(o=>payout(o)[key]==null).length;
    const scopedAmount=(a,key)=>a.length&&missing(a,key)===a.length?'Amount unknown':money(subtotal(a,key));
    const reversed=off.filter(o=>o.cancel||['partial','refunded'].includes(o.buyer));
-   return '<tr'+(total?' class="wi-total"':'')+'><th scope="row"><button type="button" data-item-week="'+w+'">'+name+'</button><small>'+orders.length+' orders</small></th>'+
-    cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+cell('Canceled / refunded',money(cn)+' canceled<small>'+money(rf)+' refunded</small><small>Combined '+money(cn+rf)+'</small>')+
+   return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders)+
     cell('Paid out · order matched',amountCell('sent',sent.length?scopedAmount(sent,'net'):'No match')+'<small>'+info(sent)+(missing(sent,'net')?' · incomplete amounts':'')+'</small>')+
     cell('Not on hold · payout unconfirmed',amountCell('off',scopedAmount(off,'remaining'))+'<small>'+info(off)+(missing(off,'remaining')?' · '+missing(off,'remaining')+' missing amounts':'')+'</small>'+
     (reversed.length?'<small>Includes '+reversed.length+' canceled / refunded orders</small>':'')+
-    (unclear.length?amountCell('unclear',unclear.length+' other orders · status unclear'):'') )+
-    cell('Credits on hold',amountCell('held',st.heldN&&st.missing===st.heldN?'Amount unknown':money(st.held))+'<small>'+st.heldN+' orders'+(st.missing?' · '+st.missing+' missing amounts':'')+'</small>'+
-    (st.refundN?'<small>Includes '+money(st.refundHeld)+' on '+st.refundN+' later-refunded '+(st.refundN===1?'order':'orders')+'</small>':'')+
-    (st.unknownFunds?'<small>'+st.unknownFunds+' funds statuses unclear</small>':''))+'</tr>';
+    (unclear.length?amountCell('unclear',unclear.length+' other orders · status unclear'):'') )+'</tr>';
   };
-  host.querySelector('.wi-summary').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Buyer payments</th><th>Canceled / refunded</th><th>Paid out to us<small>Matched to orders</small></th><th>Not on hold<small>Payout not confirmed</small></th><th>Sale credits on hold</th></tr></thead><tbody>'+
-   [...rows].reverse().map(r=>summaryRow(label(r),r.week,s.orders.filter(o=>o.week===r.week),r.cancelled,r.refunded)).join('')+
-   summaryRow('Month total','',s.orders,rows.reduce((n,r)=>n+r.cancelled,0),rows.reduce((n,r)=>n+r.refunded,0),true)+'</tbody></table>'+
-   '<p><b>Paid out to us</b> counts only transactions eBay links to a successful transfer, net of linked debits. <b>No match</b> means eBay has not identified which orders funded a transfer. <b>Not on hold</b> shows original off-hold sale credits without a confirmed payout match, before later refunds and costs. This is not an amount owed. Held credits are shown separately.</p>';
+  const renderRows=render=>[...rows].reverse().map(r=>render(label(r),r.week,s.orders.filter(o=>o.week===r.week),r.cancelled,r.refunded,false)).join('')+
+   render('Month total','',s.orders,rows.reduce((n,r)=>n+r.cancelled,0),rows.reduce((n,r)=>n+r.refunded,0),true);
+  host.querySelector('.wi-balance').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Released to eBay balance</th><th>On hold</th><th>Other funds statuses</th><th>Buyer payments</th><th>Canceled / refunded items</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
+   '<p>Each week follows orders purchased that week. <b>Released</b> counts their original credits once eBay reports them available for payout, in a payout, or paid out. These credits include buyer shipping and are after sale fees, before later deductions. Refunds and cancellations are shown against the original week. Mixed or unconfirmed orders can be inspected under <b>Other funds statuses</b>.</p>';
+  host.querySelector('.wi-matches>div').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Paid out to us<small>Matched to orders</small></th><th>Not on hold<small>Payout not confirmed</small></th></tr></thead><tbody>'+renderRows(payoutRow)+'</tbody></table>'+
+   '<p><b>Paid out to us</b> counts only transactions eBay links to a successful transfer, net of linked debits. <b>No match</b> means eBay has not identified which orders funded a transfer. Off-hold credits can include processing funds and are shown before later refunds and costs.</p>';
   const batches=data.ebay_account_payouts||[];
-  host.querySelector('.wi-transfers>summary').textContent=batches.length?'Seller-account transfers by date · '+money(batches.reduce((n,b)=>n+Math.round(b.amount*100),0)/100)+' sent · '+batches.length+' transfers':'Seller-account transfers by date';
+  host.querySelector('.wi-bank>summary').textContent=batches.length?'Bank transfers received by date · '+money(batches.reduce((n,b)=>n+Math.round(b.amount*100),0)/100)+' · '+batches.length+' transfers':'Bank transfers received by date';
   const coverage=data.ebay_payout_coverage;
-  if(coverage&&(coverage.error||coverage.retry||coverage.done<batches.length))host.querySelector('.wi-summary').insertAdjacentHTML('beforeend','<p><b>Payout matching is incomplete.</b> '+(coverage.error?.includes('rate limited')?'eBay is limiting payout requests; Invsto will retry automatically. ':'')+Number(coverage.done||0)+' of '+batches.length+' transfers dated in this month have a completed transaction check. An unmatched sale is not proof you were never paid.</p>');
-  host.querySelector('.wi-transfers>div').innerHTML='<p><b>'+money(batches.reduce((n,b)=>n+Math.round(b.amount*100),0)/100)+' across '+batches.length+' recorded USD transfers.</b> These are actual seller-account transfers by eBay’s reporting date, after express payout fees. They can include sales from other weeks or months. Do not add this total to the weekly figures. <a href="https://www.ebay.com/mes/payouts" target="_blank" rel="noopener">Check payouts in Seller Hub ↗</a></p>'+
+  if(coverage&&(coverage.error||coverage.retry||coverage.done<batches.length))host.querySelector('.wi-matches>div').insertAdjacentHTML('beforeend','<p><b>Payout matching is incomplete.</b> '+(coverage.error?.includes('rate limited')?'eBay is limiting payout requests; Invsto will retry automatically. ':'')+Number(coverage.done||0)+' of '+batches.length+' transfers dated in this month have a completed transaction check.</p>');
+  host.querySelector('.wi-bank>div').innerHTML='<p><b>'+money(batches.reduce((n,b)=>n+Math.round(b.amount*100),0)/100)+' across '+batches.length+' recorded USD transfers.</b> Transfers eBay marks sent count as received, after express payout fees. They can include orders from multiple purchase weeks. <a href="https://www.ebay.com/mes/payouts" target="_blank" rel="noopener">Check payouts in Seller Hub ↗</a></p>'+
    (batches.length?'<ul>'+batches.map(b=>'<li>'+day(b.day)+' · Payout '+esc(b.id)+' · <strong>'+money(b.amount)+'</strong></li>').join('')+'</ul>':'<p>No confirmed account transfers recorded for this month.</p>');
   list(host);
  }
@@ -97,12 +131,13 @@
   const val=(label,v)=>'<span><small>'+label+'</small><b>'+esc(v)+'</b></span>';
   $('.wi-orders').innerHTML=orders.slice(s.page*15,s.page*15+15).map(({o,lines})=>{
    const id=esc(o.id),link=/^\d{2}-\d{5}-\d{5}$/.test(o.id)?'<a target="_blank" rel="noopener" href="https://www.ebay.com/mesh/ord/details?orderid='+id+'">'+id+' ↗</a>':id;
+   const state=balanceState(o),creditLabel=state==='released'?'Released credit · line':state==='held'?'On hold · line credit':'Original sale credit';
    return '<article class="wi-order"><header><div><b>'+link+'</b><small>'+esc(o.user||'Buyer name unavailable')+' · '+esc(when.format(new Date(o.date)))+' · '+o.items.length+' order '+(o.items.length===1?'line':'lines')+'</small></div>'+
-    '<div class="wi-badges"><span>'+esc(pay[o.buyer]||pay.unknown)+'</span><span class="'+(o.fund==='held'?'wi-held':'')+'">'+esc(funds[o.fund]||funds.unknown)+'</span></div></header>'+
+    '<div class="wi-badges"><span>'+esc(pay[o.buyer]||pay.unknown)+'</span><span class="wi-state-'+state+'">'+esc(balanceLabels[state])+'</span></div></header>'+
     lines.map(i=>'<div class="wi-line"><div><strong>'+esc(i.title||'Item title not saved')+'</strong><small>Qty '+esc(i.qty)+(i.item?' · Item '+esc(i.item):'')+(i.cancel?' · Canceled':'')+'</small></div>'+
      val('Sold for · line',money(i.sold))+val('Item sales kept',i.kept==null?(o.buyer==='partial'?'Refund not split':'Under review'):money(i.kept))+
-     val('Original sale credit',i.credit==null&&o.items.length>1&&o.credit!=null?'Order total only':money(i.credit))+'</div>').join('')+
-    '<footer>'+val('Order sale credit',money(o.credit))+val('Matched payout · order',payout(o).sent?money(payout(o).net):'No confirmed match')+
+     val(creditLabel,i.credit==null&&o.items.length>1&&o.credit!=null?'Order total only':money(i.credit))+'</div>').join('')+
+    '<footer>'+val('Order sale credit',money(o.credit))+val('Last reported by eBay',funds[o.fund]||funds.unknown)+val('Matched payout · order',payout(o).sent?money(payout(o).net):'No confirmed match')+
     (payout(o).off?val('Not on hold · no payout match',money(payout(o).remaining)):'')+val('Final proceeds · order',o.final==null?'Not verified yet':money(o.final))+
     (o.fund==='held'?val('Sale credit on hold',money(o.held)):'')+
     (o.checked?'<small>'+esc(o.source)+' · '+esc(when.format(new Date(o.checked)))+'</small>':'')+'</footer>'+
