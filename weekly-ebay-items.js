@@ -46,7 +46,7 @@
   if(!Array.isArray(data?.ebay_item_orders)){host.hidden=true;host.replaceChildren();delete host.itemState;return;}
   const fresh=!host.itemState||host.itemState.month!==data.month;
   if(fresh){
-   host.innerHTML='<h3>eBay balance by purchase week</h3><p>See which sales eBay released to your seller balance and which it still shows on hold. Select a dollar amount to see its order lines, or select a week to see every line.</p><div class="wi-summary wi-balance"></div>'+
+   host.innerHTML='<header class="wi-intro"><span class="wi-eyebrow">EBAY · WEEKLY SALES</span><h3>eBay balance by purchase week</h3><p>Compare what you sold, what you kept after deductions, and where the funds stand. Select a week or amount to see the order lines.</p></header><div class="wi-summary wi-balance"></div>'+
     '<details class="wi-transfers wi-matches"><summary>Bank transfers matched to specific orders</summary><div class="wi-summary"></div></details>'+
     '<details class="wi-transfers wi-bank"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
     '<details class="wi-browser"><summary>Browse order lines and payments</summary><div class="ws-controls"><label>Purchase week <select class="wi-week"></select></label>'+
@@ -73,15 +73,22 @@
   const cell=(k,v)=>'<td data-col="'+k+'">'+v+'</td>';
   const drill=(name,w,bucket,value)=>'<button type="button" data-item-week="'+w+'" data-bucket="'+bucket+'" aria-label="'+esc(name+' · '+filters[bucket]+': '+value)+'">'+value+'</button>';
   const weekCell=(name,w,orders)=>'<th scope="row"><button type="button" data-item-week="'+w+'">'+name+'</button><small>'+info(orders)+'</small></th>';
-  function balanceRow(name,w,orders,cn,rf,total){
+  function balanceRow(name,w,orders,sales,total){
    const st=stats(orders);
+   const deduction=n=>n==null?money(null):(n>0?'−':'')+money(n);
+   const combined=sales.cancelled!=null&&sales.refunded!=null?Number(sales.cancelled)+Number(sales.refunded):null;
+   const original='<strong>'+money(sales.booked)+'</strong>'+(combined===0?'<small>No cancellations or refunds</small>':
+    '<div class="wi-deductions"><small>'+deduction(sales.cancelled)+' canceled</small><small>'+deduction(sales.refunded)+' refunded</small></div>'+
+    (combined!=null?'<small class="wi-combined">'+money(combined)+' total deductions</small>':''));
+   const net='<button type="button" data-item-week="'+w+'" data-bucket="all" aria-label="'+esc(name+' · Net item sales: '+money(sales.net)+' · View order lines')+'">'+money(sales.net)+'</button>'+
+    (sales.held>0?'<small>'+money(sales.held)+' excluded pending verification</small>':'');
    function amountCell(bucket){
     const group=orders.filter(o=>matchesBalance(o,bucket));
     const key=bucket==='held'?'held':'credit',known=group.filter(o=>o[key]!=null);
     const missing=group.length-known.length;
     const value=group.length&&!known.length?'Amount unconfirmed':money(known.reduce((n,o)=>n+Math.round(o[key]*100),0)/100);
     const reversed=known.filter(o=>o.cancel||['partial','refunded'].includes(o.buyer));
-    const flagged=reversed.length?'<small>'+money(reversed.reduce((n,o)=>n+Math.round(o[key]*100),0)/100)+' in original credits on '+reversed.length+' canceled or refunded '+(reversed.length===1?'order':'orders')+'</small>':'';
+    const flagged=reversed.length?'<details class="wi-credit-note"><summary>'+reversed.length+' canceled / refunded</summary><small>'+money(reversed.reduce((n,o)=>n+Math.round(o[key]*100),0)/100)+' in original credits on '+(reversed.length===1?'that order':'those orders')+'.</small></details>':'';
     return drill(name,w,bucket,value)+'<small>'+info(group)+'</small>'+(missing?'<small>'+missing+' '+(missing===1?'order amount':'order amounts')+' unconfirmed</small>':'')+flagged;
    }
    const other=['processing','outstanding','review'].map(bucket=>{
@@ -89,11 +96,11 @@
     return group.length?'<div>'+drill(name,w,bucket,lineCount(group)+' lines · '+filters[bucket])+'</div>':'';
    }).join('');
    return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders)+
+    cell('Original item sales',original)+cell('Net item sales',net)+
     cell('Released to eBay balance',amountCell('released'))+cell('On hold',amountCell('held'))+
-    cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+
-    cell('Item deductions',money(cn)+' canceled<small>'+money(rf)+' refunded</small><small>Combined '+money(cn+rf)+'</small>')+'</tr>';
+    cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+'</tr>';
   }
-  const payoutRow=(name,w,orders,cn,rf,total)=>{
+  const payoutRow=(name,w,orders,sales,total)=>{
    const amountCell=(bucket,value)=>drill(name,w,bucket,value);
    const groups=(key)=>orders.filter(o=>payout(o)[key]),sent=groups('sent'),off=groups('off'),unclear=groups('unclear');
    const subtotal=(a,key)=>a.reduce((n,o)=>n+Math.round((payout(o)[key]??0)*100),0)/100;
@@ -106,10 +113,17 @@
     (reversed.length?'<small>Includes '+reversed.length+' canceled / refunded orders</small>':'')+
     (unclear.length?amountCell('unclear',unclear.length+' other orders · status unclear'):'') )+'</tr>';
   };
-  const renderRows=render=>[...rows].reverse().map(r=>render(label(r),r.week,s.orders.filter(o=>o.week===r.week),r.cancelled,r.refunded,false)).join('')+
-   render('Month total','',s.orders,rows.reduce((n,r)=>n+r.cancelled,0),rows.reduce((n,r)=>n+r.refunded,0),true);
-  host.querySelector('.wi-balance').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Released to eBay balance</th><th>On hold</th><th>Other funds statuses</th><th>Buyer payments</th><th>Canceled / refunded items</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
-   '<p>Each week follows orders purchased that week. <b>Released</b> counts their original credits once eBay reports them available for payout, in a payout, or paid out. These credits include buyer shipping and are after sale fees, before later deductions. Refunds and cancellations are shown against the original week. Mixed or unconfirmed orders can be inspected under <b>Other funds statuses</b>.</p>';
+  // Use the same eBay purchase-week totals as the sales report below. Order credits include shipping and fees.
+  const monthSales=Object.fromEntries(['booked','cancelled','refunded','held','net'].map(k=>[k,rows.every(r=>r[k]!=null)?rows.reduce((n,r)=>n+Math.round(r[k]*100),0)/100:null]));
+  const renderRows=render=>[...rows].reverse().map(r=>render(label(r),r.week,s.orders.filter(o=>o.week===r.week),r,false)).join('')+
+   render('Month total','',s.orders,monthSales,true);
+  const noteKey=d=>{const b=d.closest('td').querySelector('button');return b.dataset.itemWeek+':'+b.dataset.bucket;};
+  const balanceTable=host.querySelector('.wi-balance'),expandedNotes=new Set([...balanceTable.querySelectorAll('.wi-credit-note[open]')].map(noteKey));
+  balanceTable.innerHTML='<table aria-label="Item sales and eBay funds by purchase week"><colgroup><col style="width:14%"></colgroup><colgroup><col style="width:16%"><col style="width:15%"></colgroup><colgroup><col style="width:16%"><col style="width:15%"><col style="width:12%"></colgroup><colgroup><col style="width:12%"></colgroup>'+
+   '<thead><tr class="wi-band"><th scope="col" rowspan="2">Purchase week<small>Eastern time</small></th><th scope="colgroup" colspan="2">01 · Item sales</th><th scope="colgroup" colspan="3">02 · eBay funds</th><th scope="col" rowspan="2">Buyer payments</th></tr>'+
+   '<tr><th scope="col">Original item sales</th><th scope="col" class="wi-net-head">Net item sales<small>Verified · before fees</small></th><th scope="col">Released to eBay balance</th><th scope="col">On hold</th><th scope="col">Other funds statuses</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
+   '<p><b>Net item sales</b> exclude cancellations, refunds, and amounts still under review. They cover merchandise only, before selling fees. <b>Released</b> and <b>On hold</b> show original sale credits including buyer shipping and after sale fees. A sale can count in net sales while eBay holds its funds.</p>';
+  for(const d of balanceTable.querySelectorAll('.wi-credit-note'))d.open=expandedNotes.has(noteKey(d));
   host.querySelector('.wi-matches>div').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Paid out to us<small>Matched to orders</small></th><th>Not on hold<small>Payout not confirmed</small></th></tr></thead><tbody>'+renderRows(payoutRow)+'</tbody></table>'+
    '<p><b>Paid out to us</b> counts only transactions eBay links to a successful transfer, net of linked debits. <b>No match</b> means eBay has not identified which orders funded a transfer. Off-hold credits can include processing funds and are shown before later refunds and costs.</p>';
   const batches=data.ebay_account_payouts||[];

@@ -14,8 +14,11 @@ test('purchase-week balance drilldowns keep processing, mixed credits and transf
     function order(id, fund, credit, extras = {}) {
       return {id, week, fund, credit, date: week, buyer: 'paid', items: [{title: id, credit, qty: 1}], ...extras};
     }
-    const data = {month:'2026-10', rows:[{week,first_day:week,end_day:next},{week:next,first_day:next,end_day:'2026-10-19'}]
-      .map(r=>({...r,market:'ebay',cancelled:0,refunded:0})), ebay_item_orders:[
+    const data = {month:'2026-10', rows:[
+      {market:'ebay',week,first_day:week,end_day:next,booked:165.50,cancelled:20.10,refunded:10.25,held:5.05,net:130.10},
+      {market:'ebay',week:next,first_day:next,end_day:'2026-10-19',booked:61.29,cancelled:0,refunded:0,held:0,net:61.29},
+      {market:'tiktok',week,first_day:week,end_day:next,booked:900,cancelled:0,refunded:0,held:0,net:900}
+    ], ebay_item_orders:[
         order('two lines','available',30,{buyer:'refunded',items:[{title:'Ring',credit:12,qty:1},{title:'Chain',credit:18,qty:1}]}),
         order('partial transfer','held',25,{held:20,payouts:[{sale:5,net:4,status:'SUCCEEDED'}]}),
         order('in process','processing',7), order('unknown','unknown',8),
@@ -27,6 +30,16 @@ test('purchase-week balance drilldowns keep processing, mixed credits and transf
     await render();
     const row=page.locator('.wi-balance tbody tr').filter({has:page.locator('th button[data-item-week="'+week+'"]')});
     const released=row.locator('[data-bucket="released"]');
+    const net=row.locator('[data-col="Net item sales"] button'),monthNet=page.locator('.wi-balance .wi-total [data-col="Net item sales"] button');
+    assert.equal(await net.innerText(),'$130.10');
+    assert.equal(await monthNet.innerText(),'$191.39');
+    assert.match(await row.locator('[data-col="Original item sales"]').innerText(),/\$165.50[\s\S]+−\$20.10 canceled[\s\S]+−\$10.25 refunded/);
+    assert.match(await row.locator('[data-col="Net item sales"]').innerText(),/\$5.05 excluded pending verification/);
+    const mobileWeek=await row.locator('th').boundingBox(),mobileNet=await row.locator('[data-col="Net item sales"]').boundingBox();
+    assert.ok(mobileNet.x>mobileWeek.x&&mobileWeek.y<mobileNet.y+mobileNet.height,'week and net share the top of the phone card');
+    await net.click();assert.equal(await page.locator('.wi-week').inputValue(),week);
+    assert.equal(await page.locator('.wi-filter').inputValue(),'all');
+    assert.match(await page.locator('.wi-count').innerText(),/8 matching order lines · 7 orders/);
     assert.equal(await released.innerText(),'$30.00');
     assert.match(await row.innerText(),/1 order amount unconfirmed/);
     assert.equal(await row.locator('[data-bucket="held"]').innerText(),'$35.00');
@@ -39,13 +52,25 @@ test('purchase-week balance drilldowns keep processing, mixed credits and transf
     assert.match(await page.locator('.wi-orders').innerText(),/partial transfer/);
     await row.locator('[data-bucket="processing"]').click();
     assert.match(await page.locator('.wi-orders').innerText(),/in process/);
+    const creditNote=row.locator('[data-col="Released to eBay balance"] details');
+    await creditNote.locator('summary').click();
     data.ebay_item_orders.find(o=>o.id==='in process').fund='available';
     await render();
     assert.equal(await released.innerText(),'$37.00');
+    assert.ok(await creditNote.evaluate(e=>e.open));
     assert.match(await page.locator('.wi-count').innerText(),/0 matching order lines/);
     assert.match(await page.locator('.wi-bank summary').innerText(),/\$99\.00/);
     assert.equal(await page.locator('.wi-balance .wi-total [data-bucket="released"]').innerText(),'$98.00');
+    assert.equal(await net.innerText(),'$130.10'); // A release is not another sale.
+    data.rows[0].refunded=40.30;data.rows[0].net=100.05;await render();
+    assert.equal(await net.innerText(),'$100.05');assert.equal(await monthNet.innerText(),'$161.34');
+    await monthNet.click();assert.equal(await page.locator('.wi-week').inputValue(),'');
+    assert.match(await page.locator('.wi-count').innerText(),/10 matching order lines · 9 orders/);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.setViewportSize({width:1440,height:900});
+    assert.equal(await row.evaluate(e=>getComputedStyle(e).display),'table-row');
+    const original=await row.locator('[data-col="Original item sales"]').boundingBox(),desktopNet=await row.locator('[data-col="Net item sales"]').boundingBox(),releasedBox=await released.boundingBox();
+    assert.ok(original.x<desktopNet.x&&desktopNet.x<releasedBox.x,'desktop sales trail precedes the funds columns');
   } finally {
     await browser.close();
   }
