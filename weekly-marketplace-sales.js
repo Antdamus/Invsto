@@ -153,7 +153,13 @@
    const list=document.createElement('dl');for(const [name,at] of lines){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=name;dd.textContent=at?etStamp(at):'Not yet verified';list.append(dt,dd);}
    const summary=document.createElement('summary');summary.textContent='When each source was last verified';
    const note=document.createElement('p');note.textContent=f.watching+' orders monitored for a funds update · '+f.delivered+' with verified delivery. Order funds, returns and payouts refresh on the server. Seller Hub details refresh while Edge is running and signed in.';
-   const status=document.createElement('p');status.textContent=[f.browser?.note,f.browser?.statement_note,f.claim_note||'Monthly claim details update when a complete Seller Hub export matches the statement.'].filter(Boolean).join(' ');
+   const browser=f.browser||{},last=Date.parse(browser.finished),ledger=Date.parse(data.ebay_account_holds?.verified_at);
+   const status=document.createElement('p');status.textContent=[
+    last?'Last completed Seller Hub check: '+etStamp(browser.finished)+'. '+(browser.note||''):'No signed-in Seller Hub check has completed yet.',
+    last&&ledger>last+1000?'The itemized held list was verified again at '+etStamp(data.ebay_account_holds.verified_at)+'.':'',
+    !last||Date.now()-last>3*3600000?'If this stays out of date, open Edge and sign in to Invsto and OG Jewelers’ Seller Hub. Server checks continue independently.':'',
+    browser.statement_note,f.claim_note||'Monthly claim details update when a complete Seller Hub export matches the statement.'
+   ].filter(Boolean).join(' ');
    el.replaceChildren(summary,list,note,status);
   }
   async function load(){
