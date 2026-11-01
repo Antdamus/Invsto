@@ -87,6 +87,7 @@
     const observation=verifiedBalance?'<p class="wc-balance-proof">Seller Hub showed <b>'+money(statement.observed_held)+'</b> on hold across all purchase months and <b>'+money(statement.observed_available)+'</b> available on '+escape(new Date(statement.observed_at).toLocaleDateString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}))+'. Together they equal the closing funds.</p>':'';
     const trace=row('Opening eBay funds carried from the prior month',money(opening),true)+lines.filter(m=>m.cents||m.label==='Payouts').map(m=>{
         if(m===payout&&canSplit)return row('Sent to your bank · '+count+' payouts',signed(-bank))+(fee?row('Express payout fees',signed(-fee)):'');
+        if(window.WeeklyEbayClaims&&/^(gross claims|claims)$/i.test(m.label))return row(m.label,'<button type="button" class="wcl-jump" data-show-claims>'+signed(m.cents)+' · View claims ↑</button>');
         return row(m.label,signed(m.cents));
       }).join('')+row('Closing eBay funds',money(closing),true);
     return '<p class="wc-note">The account opened with <b>'+money(opening)+'</b>. Refunds, claims and disputes totaled <b>'+money(groups)+'</b>. '+
@@ -107,8 +108,26 @@
     if(host.dataset.month!==period||!host.querySelector('.wc-body')){
       host.innerHTML='<header><span class="wi-eyebrow">EBAY · MONTHLY CASH</span><h3>From item sales to your bank</h3></header><div class="wc-body"></div>'+
         '<details class="wc-sources"><summary>Sources and monthly statements</summary><p><a href="https://www.ebay.com/mes/report-landing" target="_blank" rel="noopener">Financial overview ↗</a> · <a href="https://www.ebay.com/mes/payouts" target="_blank" rel="noopener">Bank payouts ↗</a> · <a href="https://www.ebay.com/mes/transaction-reports?sh=true&amp;q=statement" target="_blank" rel="noopener">Monthly statements ↗</a></p>'+
-        '<label>Import the eBay financial statement for this month <input type="file" accept="application/pdf,.pdf"></label><small>Invsto saves the reconciled monthly totals from OG Jewelers’ statement.</small><p class="wc-message" role="status"></p></details>';
+        '<label>Import the eBay financial statement for this month <input type="file" accept="application/pdf,.pdf"></label><small>Invsto saves the reconciled monthly totals from OG Jewelers’ statement.</small><p class="wc-message" role="status"></p>'+
+        '<label>Import itemized claims for this month <input class="wcl-file" type="file" accept=".csv,text/csv"></label><small>Use OG Jewelers’ Seller Hub transaction CSV covering the full month. Only Claim entries are saved, after they match the statement.</small><p class="wcl-message" role="status"></p></details>';
       host.dataset.month=period;
+      delete host.dataset.claimFilter;delete host.dataset.claimDeepLink;
+      host.onclick=e=>{
+        const filter=e.target.closest('[data-filter]'),section=host.querySelector('.wcl-panel');
+        if(filter&&section){host.dataset.claimFilter=filter.dataset.filter;window.WeeklyEbayClaims.choose(section,filter.dataset.filter);section.querySelector('.wcl-list').open=true;}
+        if(e.target.closest('[data-show-claims]')&&section){const list=section.querySelector('.wcl-list');if(list)list.open=true;section.focus({preventScroll:true});section.scrollIntoView({block:'start'});}
+      };
+      host.querySelector('.wcl-file').onchange=async event=>{
+        const input=event.target,file=input.files[0],msg=host.querySelector('.wcl-message');
+        if(!file)return;input.disabled=true;msg.textContent='Checking claim postings against the monthly statement…';
+        try{
+          if(file.size>40*1024*1024)throw Error('Choose a transaction export under 40 MB.');
+          const entries=window.WeeklyEbayClaims.parseExport(await file.text(),period);
+          const {error}=await client.rpc('save_ebay_claim_export',{_month:period+'-01',_entries:entries});
+          if(error)throw Error(error.message||'Could not verify this export.');
+          msg.textContent=entries.length+' claim postings saved and reconciled.';await refresh();
+        }catch(e){msg.textContent=e.message||'Could not read the claim export.';}finally{input.disabled=false;input.value='';}
+      };
       host.querySelector('input').onchange=async event=>{
         const input=event.target,file=input.files[0],msg=host.querySelector('.wc-message');
         if(!file)return;
@@ -122,7 +141,7 @@
         finally{input.disabled=false;input.value='';}
       };
     }
-    const body=host.querySelector('.wc-body'),expanded=new Set([...body.querySelectorAll('details[open]')].map(d=>d.querySelector('summary').textContent));
+    const body=host.querySelector('.wc-body'),expanded=new Set([...body.querySelectorAll('details[open]')].map(d=>d.dataset.state||d.querySelector('summary').textContent));
     host.hidden=false;
     const split=sales.split?'Of these net item sales, <b>'+money(sales.statusNet.held)+'</b> belongs to orders with held credits and <b>'+money(sales.statusNet.released)+'</b> to orders with released credits.'+(sales.statusNet.other?' Another <b>'+money(sales.statusNet.other)+'</b> is on orders with other or mixed statuses.':''):'The order-level split of net sales by funds status is still under verification.';
     body.innerHTML='<p>Orders purchased in '+name+' and cash transferred in '+name+' follow different dates.</p><div class="wc-cards">'+
@@ -130,10 +149,14 @@
       card('Original credits released',money(sales.released),'For these purchases. Includes buyer shipping and sale fees, before later debits.')+
       card('Original credits on hold',money(sales.held),'For orders classified on hold. Mixed orders appear under other funds statuses.')+
       card('Sent to your bank',bank==null?'No verified total':money(bank),Array.isArray(batches)&&batches.length?batches.length+' recorded transfers by payout date, from the whole account.':'No successful transfers recorded for this period.')+'</div>'+
+      (window.WeeklyEbayClaims?.render(data)||'')+
       '<p class="wc-explain">'+split+' eBay pays from the shared seller balance, which can include earlier sales. Refunds, expenses and financing repayments also affect how much reaches the bank.</p>'+
       cashActivity(data.ebay_cash_statement,bank,batches?.length||0)+postingComparison(data,sales)+
       '<small class="wc-matching">'+(batchIds.size?(matched.size?matched.size+' of '+batchIds.size+' bank transfers have a saved payout ID linked to an order purchased this month.':'The saved payout records for these '+batchIds.size+' transfers do not identify any of this month’s orders by payout ID.'):'')+'</small>';
-    for(const detail of body.querySelectorAll('details'))detail.open=expanded.has(detail.querySelector('summary').textContent);
+    for(const detail of body.querySelectorAll('details'))detail.open=expanded.has(detail.dataset.state||detail.querySelector('summary').textContent)||(detail.classList.contains('wcl-list')&&detail.open&&!host.dataset.claimDeepLink);
+    const claims=body.querySelector('.wcl-panel');
+    if(claims){if(claims.querySelector('.wcl-list')&&!host.dataset.claimDeepLink&&new URLSearchParams(location.search).get('view')==='claims')claims.scrollIntoView({block:'start'});
+      host.dataset.claimDeepLink='1';window.WeeklyEbayClaims.choose(claims,host.dataset.claimFilter||'all');}
   }
 
   let loadingPdf;
