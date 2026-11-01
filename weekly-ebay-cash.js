@@ -109,7 +109,7 @@
       host.innerHTML='<header><span class="wi-eyebrow">EBAY · MONTHLY CASH</span><h3>From item sales to your bank</h3></header><div class="wc-body"></div>'+
         '<details class="wc-sources"><summary>Sources and monthly statements</summary><p><a href="https://www.ebay.com/mes/report-landing" target="_blank" rel="noopener">Financial overview ↗</a> · <a href="https://www.ebay.com/mes/payouts" target="_blank" rel="noopener">Bank payouts ↗</a> · <a href="https://www.ebay.com/mes/transaction-reports?sh=true&amp;q=statement" target="_blank" rel="noopener">Monthly statements ↗</a></p>'+
         '<label>Import the eBay financial statement for this month <input type="file" accept="application/pdf,.pdf"></label><small>Invsto saves the reconciled monthly totals from OG Jewelers’ statement.</small><p class="wc-message" role="status"></p>'+
-        '<label>Import itemized claims for this month <input class="wcl-file" type="file" accept=".csv,text/csv"></label><small>Use OG Jewelers’ Seller Hub transaction CSV covering the full month. Only Claim entries are saved, after they match the statement.</small><p class="wcl-message" role="status"></p></details>';
+        '<label>Import itemized claims for this month <input class="wcl-file" type="file" accept=".csv,text/csv"></label><small>Use OG Jewelers’ <a href="https://www.ebay.com/mes/transaction-reports?q=payment-transaction-report&amp;sh=true" target="_blank" rel="noopener">Seller Hub transaction CSV ↗</a> covering the full month. Only Claim entries are saved, after they match the statement.</small><p class="wcl-message" role="status"></p></details>';
       host.dataset.month=period;
       delete host.dataset.claimFilter;delete host.dataset.claimDeepLink;
       host.onclick=e=>{
