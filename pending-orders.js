@@ -792,6 +792,36 @@ function getFinancePayload(source = {}) {
     .sort((left, right) => getFinancePayloadRank(right) - getFinancePayloadRank(left))[0] || null;
 }
 
+function getLineHoldExplanation(line) {
+  return window.OGEbayHoldDetails?.fromLine(line) || null;
+}
+
+function filterOrderHoldReasons(lines) {
+  const api = window.OGEbayHoldDetails, select = $("pending-hold-reason");
+  if (!api || !select) return lines;
+  const value = select.value || "all", orders = new Map();
+  for (const line of lines) {
+    const order = getOrderFromLine(line);
+    if (!orders.has(order.order_number)) orders.set(order.order_number, getLineHoldExplanation(line));
+  }
+  select.innerHTML = api.options([...orders.values()], value);
+  select.value = value;
+  return lines.filter(line => api.matches(orders.get(getOrderFromLine(line).order_number), value));
+}
+
+function renderGroupHoldReasons(lines) {
+  const api = window.OGEbayHoldDetails;
+  if (!api) return "";
+  const held = new Map();
+  for (const line of lines) { const info = getLineHoldExplanation(line); if (info) held.set(info.id, info); }
+  if (!held.size) return "";
+  const counts = Object.entries(api.labels).map(([key, label]) => {
+    const n = [...held.values()].filter(m => m.categories.includes(key)).length;
+    return n ? `${label}: ${n}` : "";
+  }).filter(Boolean).join(" · ");
+  return `<p class="eh-group-summary"><strong>${held.size} ${held.size === 1 ? "order" : "orders"} with funds on hold</strong> · ${escapeHtml(counts)}</p>`;
+}
+
 function normalizeFinanceStatus(value = "") {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return "";
@@ -3319,6 +3349,7 @@ function applyOrderFilters() {
 
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
   filtered = window.OGPendingBuyerRefunds?.filter?.(filtered) || filtered;
+  filtered = filterOrderHoldReasons(filtered);
 
   state.filteredOrders = window.OGPendingWork?.filter(filtered) || filtered;
   renderSummaryStrip();
@@ -4838,6 +4869,7 @@ function renderOrders(options = {}) {
         <span class="buyer-card-meta-pill buyer-card-date">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
         <span class="buyer-card-meta-pill buyer-card-date">Ship by ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
       </div>
+      ${renderGroupHoldReasons(group.lines)}
       ${window.OGPendingWork?.summary(group) || ""}
       ${window.OGPendingShipments?.groupMarkup(group.lines) || ""}
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
@@ -5100,6 +5132,7 @@ function renderOrders(options = {}) {
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </div>
             ${lineCancellationReviewActionMarkup}
+            ${window.OGEbayHoldDetails?.render(getLineHoldExplanation(line), {compact: true}) || ""}
             ${window.OGPendingShipments?.lineMarkup(line) || ""}
             ${window.OGPartialRefunds?.markup(line) || ""}
             <div class="buyer-line-locate">
@@ -13146,6 +13179,10 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("pending-hold-reason")?.addEventListener("change", () => {
+    clearEbayLaunchFilter({ apply: false });
+    applyOrderFilters();
+  });
   document.querySelectorAll("[data-order-due-filter]").forEach(button => {
     button.addEventListener("click", () => {
       state.orderDueFilter = button.dataset.orderDueFilter;

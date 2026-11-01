@@ -9,6 +9,13 @@
  const url='https://www.ebay.com/mes/transactionlist?sh=true&filter=transactionStatus:%7BFUNDS_ON_HOLD%7D&pillFilterId=FUNDS_ON_HOLD_FILTER';
  const link=(href,label)=>'<a target="_blank" rel="noopener" href="'+h(href)+'">'+h(label)+' ↗</a>';
  const month=r=>r.date?.slice(0,7)||'unknown';
+ function holdInfo(r,checked){
+  const api=window.OGEbayHoldDetails;if(!api)return null;
+  if(r.kind==='sale')return {...api.model(r.oid,r.hold_detail||{},true),snapshot:checked};
+  const category=r.kind==='return'?'return':r.kind==='dispute'?'dispute':'unknown';
+  return {id:'',memos:category==='return'?['eBay reserved these funds for return '+r.ref+'.']:category==='dispute'?['eBay reserved these funds for payment dispute '+r.ref+'.']:[],
+   categories:[category],codes:[],estimates:[],actions:[],checked,source:'Seller Hub hold record'};
+ }
  function proof(r){
   if(r.kind==='sale')return r.oid?'https://www.ebay.com/sh/ord/details?orderid='+encodeURIComponent(r.oid):url;
   const u=new URL('https://www.ebay.com/mes/transactiondetails');u.searchParams.set('sh','true');u.searchParams.set('type','RESERVE');
@@ -42,26 +49,29 @@
  }
  function browse(el){
   const {entries}=el.wh,sel=key=>el.querySelector('.wh-'+key),mo=sel('month').value,kind=sel('kind').value,w=sel('week').value,find=sel('find').value.trim().toLowerCase();
-  const rows=entries.filter(r=>(!mo||month(r)===mo)&&(!w||week(r.date)===w)&&(!kind||(kind==='reserves'?r.kind!=='sale':r.kind===kind))&&(!find||[r.oid,r.ref].some(x=>x?.toLowerCase().includes(find))));
+  const scope=entries.filter(r=>(!mo||month(r)===mo)&&(!w||week(r.date)===w)&&(!kind||(kind==='reserves'?r.kind!=='sale':r.kind===kind))&&(!find||[r.oid,r.ref].some(x=>x?.toLowerCase().includes(find))));
+  const reason=sel('reason').value||'all';
+  if(window.OGEbayHoldDetails){sel('reason').innerHTML=window.OGEbayHoldDetails.options(scope.map(r=>r.holdInfo),reason,'hold entries');sel('reason').value=reason;}
+  const rows=scope.filter(r=>!window.OGEbayHoldDetails||window.OGEbayHoldDetails.matches(r.holdInfo,reason));
   const pages=Math.max(1,Math.ceil(rows.length/25));el.wh.page=Math.min(pages-1,Math.max(0,el.wh.page));const page=el.wh.page;
-  sel('list').innerHTML='<p><b>'+rows.length+(rows.length===1?' entry':' entries')+' · '+usd(sum(rows))+'</b></p>'+rows.slice(page*25,page*25+25).map(r=>'<article><div><b>'+h(kinds[r.kind])+'</b><strong>'+usd(r.cents)+'</strong></div><p>'+(r.oid?link('https://www.ebay.com/sh/ord/details?orderid='+encodeURIComponent(r.oid),'Order '+r.oid):'Order not yet matched')+' · '+(r.date?'Purchased '+date(r.date):'Purchase date unknown')+'</p><small>'+(r.kind==='sale'?'Sale posted ':'Hold placed ')+date(r.placed)+(r.kind==='sale'?'':' · '+link(proof(r),'eBay hold '+r.ref))+'</small></article>').join('');
+  sel('list').innerHTML='<p><b>'+rows.length+(rows.length===1?' entry':' entries')+' · '+usd(sum(rows))+'</b></p>'+rows.slice(page*25,page*25+25).map(r=>'<article><div><b>'+h(kinds[r.kind])+'</b><strong>'+usd(r.cents)+'</strong></div><p>'+(r.oid?link('https://www.ebay.com/sh/ord/details?orderid='+encodeURIComponent(r.oid),'Order '+r.oid):'Order not yet matched')+' · '+(r.date?'Purchased '+date(r.date):'Purchase date unknown')+'</p><small>'+(r.kind==='sale'?'Sale posted ':'Hold placed ')+date(r.placed)+(r.kind==='sale'?'':' · '+link(proof(r),'eBay hold '+r.ref))+'</small>'+(window.OGEbayHoldDetails?.render(r.holdInfo)||'')+'</article>').join('');
   sel('nav').hidden=pages===1;sel('position').textContent='Page '+(page+1)+' of '+pages;sel('prev').disabled=!page;sel('next').disabled=page>=pages-1;
  }
  function update(el,data,client,load){
   if(!el)return;
   const snap=data?.ebay_account_holds;
   if(!snap){el.hidden=true;el.wh=null;el.replaceChildren();return;}
-  const selected=data.month.slice(0,7),fresh=!el.wh,entries=Array.isArray(snap.entries)?snap.entries:[];
+  const selected=data.month.slice(0,7),fresh=!el.wh,entries=(Array.isArray(snap.entries)?snap.entries:[]).map(r=>({...r,holdInfo:holdInfo(r,snap.verified_at)}));
   if(fresh){
    el.innerHTML='<header><small>EBAY PAYMENTS · ALL PURCHASE MONTHS</small><h3>Where the money on hold comes from</h3></header><div class="wh-account"></div><div class="wh-why"></div><div class="wh-cohorts"></div>'+
-   '<details class="wh-browser"><summary>Inspect held orders and eBay evidence</summary><div class="ws-controls"><label>Purchase month<select class="wh-month"></select></label><label>Week of purchase<select class="wh-week"></select></label><label>Reason<select class="wh-kind">'+option('','All hold types')+option('reserves','All separate holds')+Object.entries(kinds).map(([k,v])=>option(k,v)).join('')+'</select></label><label>Order or hold number<input class="wh-find" type="search"></label></div><div class="wh-list"></div><div class="wh-nav"><button class="wh-prev" type="button">Previous</button> <span class="wh-position"></span> <button class="wh-next" type="button">Next</button></div></details>'+
+   '<details class="wh-browser"><summary>Inspect held orders and eBay evidence</summary><div class="ws-controls"><label>Purchase month<select class="wh-month"></select></label><label>Week of purchase<select class="wh-week"></select></label><label>Hold type<select class="wh-kind">'+option('','All hold types')+option('reserves','All separate holds')+Object.entries(kinds).map(([k,v])=>option(k,v)).join('')+'</select></label><label>Hold reason<select class="wh-reason"><option value="all">All hold entries</option></select></label><label>Order or hold number<input class="wh-find" type="search"></label></div><div class="wh-list"></div><div class="wh-nav"><button class="wh-prev" type="button">Previous</button> <span class="wh-position"></span> <button class="wh-next" type="button">Next</button></div></details>'+
    '<footer><button type="button" class="wh-sync">Refresh hold details from eBay</button> '+link(url,'View live holds in Seller Hub')+'<p class="wh-msg" role="status"></p></footer>';
    el.wh={page:0};el.onclick=e=>{
     const b=e.target.closest('button');if(!b)return;
     if(b.matches('.wh-sync')){refresh(el,el.wh);return;}
     if(b.hasAttribute('data-wh-kind')||b.hasAttribute('data-wh-month')){
      el.querySelector('.wh-kind').value=b.dataset.whKind||'';el.querySelector('.wh-month').value=b.dataset.whMonth||'';
-     el.querySelector('.wh-week').value='';el.querySelector('.wh-find').value='';el.querySelector('.wh-browser').open=true;el.wh.page=0;el.querySelector('.wh-browser').scrollIntoView({block:'nearest'});
+     el.querySelector('.wh-week').value='';el.querySelector('.wh-reason').value='all';el.querySelector('.wh-find').value='';el.querySelector('.wh-browser').open=true;el.wh.page=0;el.querySelector('.wh-browser').scrollIntoView({block:'nearest'});
     }else if(b.matches('.wh-prev,.wh-next'))el.wh.page+=b.matches('.wh-next')?1:-1;else return;
     browse(el);
    };el.onchange=e=>{if(e.target.matches('select')){el.wh.page=0;if(e.target.matches('.wh-month'))el.querySelector('.wh-week').value='';browse(el);}};el.oninput=e=>{if(e.target.matches('.wh-find')){el.wh.page=0;browse(el);}};

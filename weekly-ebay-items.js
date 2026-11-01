@@ -99,6 +99,7 @@
     '<details class="wi-transfers wi-bank"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
     '<details class="wi-browser"><summary>Browse order lines and payments</summary><div class="ws-controls"><label>Purchase week <select class="wi-week"></select></label>'+
     '<label>Show <select class="wi-filter">'+Object.entries(filters).map(([k,t])=>'<option value="'+k+'">'+t+'</option>').join('')+'</select></label>'+
+    '<label>Hold reason <select class="wi-hold-reason"><option value="all">All orders</option></select></label>'+
     '<label>Find <input class="wi-find" type="search" placeholder="Order, item title, or username"></label></div>'+
     '<p class="wi-key">Each line shows the latest funds status of its order. Item sales kept reflects cancellations and merchandise refunds before fees. Original sale credits include buyer shipping and sale fees. When eBay provides only one credit for several lines, the amount appears once in the order footer.</p>'+
     '<div class="wi-count" role="status"></div><div class="wi-orders"></div><div class="ws-controls wi-pages"><button type="button" data-step="-1">Previous</button><span></span><button type="button" data-step="1">Next</button></div></details>';
@@ -108,11 +109,11 @@
    host.onclick=e=>{const week=e.target.closest('[data-item-week]'),step=e.target.closest('[data-step]'),bridge=e.target.closest('[data-bridge]');
     if(bridge){const panel=host.querySelector('.wi-balance');host.itemState.bridge=bridge.getAttribute('aria-expanded')==='true'?null:bridge.dataset.bridge;
      for(const b of panel.querySelectorAll('[data-bridge]')){const show=b.dataset.bridge===host.itemState.bridge;b.setAttribute('aria-expanded',String(show));host.querySelector('#'+b.getAttribute('aria-controls')).hidden=!show;}return;}
-    if(week){host.querySelector('.wi-week').value=week.dataset.itemWeek;host.querySelector('.wi-filter').value=week.dataset.bucket||'all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});}
+    if(week){host.querySelector('.wi-week').value=week.dataset.itemWeek;host.querySelector('.wi-filter').value=week.dataset.bucket||'all';host.querySelector('.wi-hold-reason').value='all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});}
     if(step){host.itemState.page+=Number(step.dataset.step);list(host);}};
   }
   host.hidden=false;
-  const s=host.itemState;s.orders=data.ebay_item_orders.map(withPayout);
+  const s=host.itemState;s.orders=data.ebay_item_orders.map(withPayout).map(o=>({...o,holdInfo:window.OGEbayHoldDetails?.model(o.id,o.hold_detail||{},o.fund==='held'?true:o.fund==='mixed'?undefined:false)}));
   const rows=data.rows.filter(r=>r.market==='ebay'),weeks=rows.map(r=>r.week);
   const wk=host.querySelector('.wi-week'),before=wk.value;
   const label=r=>day(r.first_day)+' – '+day(new Date(Date.parse(r.end_day+'T12:00Z')-86400000).toISOString().slice(0,10));
@@ -190,7 +191,9 @@
  }
  function list(host){
   const $=q=>host.querySelector(q),s=host.itemState,w=$('.wi-week').value,f=$('.wi-filter').value,q=$('.wi-find').value.trim().toLowerCase();
-  const orders=s.orders.filter(o=>!w||o.week===w).map(o=>{
+  const holdSelect=$('.wi-hold-reason'),reason=holdSelect.value||'all',scope=s.orders.filter(o=>!w||o.week===w);
+  if(window.OGEbayHoldDetails){holdSelect.innerHTML=window.OGEbayHoldDetails.options(scope.map(o=>o.holdInfo),reason);holdSelect.value=reason;}
+  const orders=scope.filter(o=>!window.OGEbayHoldDetails||window.OGEbayHoldDetails.matches(o.holdInfo,reason)).map(o=>{
    const orderMatch=[o.id,o.user].some(v=>String(v||'').toLowerCase().includes(q));
    return {o,lines:o.items.filter(i=>matches(o,i,f)&&(orderMatch||[i.title,i.item,i.line].some(v=>String(v||'').toLowerCase().includes(q))))};
   }).filter(g=>g.lines.length);
@@ -202,6 +205,7 @@
    const state=balanceState(o),creditLabel=state==='released'?'Released credit · line':state==='held'?'On hold · line credit':'Original sale credit';
    return '<article class="wi-order"><header><div><b>'+link+'</b><small>'+esc(o.user||'Buyer name unavailable')+' · '+esc(when.format(new Date(o.date)))+' · '+o.items.length+' order '+(o.items.length===1?'line':'lines')+'</small></div>'+
     '<div class="wi-badges"><span>'+esc(pay[o.buyer]||pay.unknown)+'</span><span class="wi-state-'+state+'">'+esc(balanceLabels[state])+'</span></div></header>'+
+    (window.OGEbayHoldDetails?.render(o.holdInfo)||'')+
     lines.map(i=>'<div class="wi-line"><div><strong>'+esc(i.title||'Item title not saved')+'</strong><small>Qty '+esc(i.qty)+(i.item?' · Item '+esc(i.item):'')+(i.cancel?' · Canceled':'')+'</small></div>'+
      val('Sold for · line',money(i.sold))+val('Item sales kept',i.kept==null?(o.buyer==='partial'?'Refund not split':'Under review'):money(i.kept))+
      val(creditLabel,i.credit==null&&o.items.length>1&&o.credit!=null?'Order total only':money(i.credit))+'</div>').join('')+

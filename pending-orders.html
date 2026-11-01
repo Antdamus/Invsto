@@ -27,6 +27,7 @@
   <link rel="stylesheet" href="pending-order-chats.css?v=20261009">
   <link rel="stylesheet" href="pending-order-cards.css?v=20261030-group-selection">
   <link rel="stylesheet" href="pending-buyer-refunds.css?v=20261029-timing">
+  <link rel="stylesheet" href="ebay-hold-details.css?v=20261101s">
   <script src="order-certificates.js?v=20261011-work" defer></script>
 </head>
 <body>
@@ -509,6 +510,12 @@
             <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
           </div>
           <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
+          <div class="eh-filter-controls">
+            <label for="pending-hold-reason">eBay funds on hold · reason
+              <select id="pending-hold-reason"><option value="all">All orders</option></select>
+            </label>
+            <p id="pending-hold-status" role="status">Hold reasons come from saved eBay payment records. This filter shows only matching orders’ item lines.</p>
+          </div>
           <div class="buyer-refund-controls" role="group" aria-label="Buyer refund controls">
             <div class="buyer-refund-field">
               <label for="buyer-refund-filter">Buyer refund history</label>
@@ -1369,7 +1376,8 @@
   <script src="live-sales-report-finances.js?v=20261030-pending-totals"></script>
   <script src="order-tracking-search.js?v=20261030"></script>
   <script src="pending-shipment-evidence.js?v=20261030-verified-completion"></script>
-  <script src="pending-orders.js?v=20261031-note-photos"></script>
+  <script src="ebay-hold-details.js?v=20261101s"></script>
+  <script src="pending-orders.js?v=20261101s"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261030-phone-tracking"></script>
