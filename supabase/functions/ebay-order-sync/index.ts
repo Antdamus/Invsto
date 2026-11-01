@@ -593,6 +593,7 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
 async function fetchFundsOnHoldTransactions(token: string, maxTransactions = 1000, deadlineMs = 0): Promise<any[]> {
   const transactions: any[] = [];
   let offset = 0;
+  let expected: number | null = null;
   const limit = Math.min(1000, Math.max(1, maxTransactions));
   while (transactions.length < maxTransactions && hasTimeBudget(deadlineMs)) {
     const params = new URLSearchParams({
@@ -601,11 +602,17 @@ async function fetchFundsOnHoldTransactions(token: string, maxTransactions = 100
       offset: String(offset),
     });
     const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`, deadlineMs);
-    const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
+    const page = payload?.transactions ?? (payload?.total === 0 ? [] : null);
+    if (!Array.isArray(page) || (payload?.total != null && (!Number.isSafeInteger(payload.total)
+      || payload.total < 0 || (expected !== null && expected !== payload.total)))) throw new Error("Incomplete finance page; retry scheduled.");
+    expected = payload?.total ?? expected;
     transactions.push(...page);
-    if (!payload?.next) return transactions;
+    if (!payload?.next) {
+      if (expected !== null && expected !== transactions.length) throw new Error("Incomplete finance page; retry scheduled.");
+      return transactions;
+    }
     if (!page.length) throw new Error("Incomplete finance page; saved for retry.");
-    offset += limit;
+    offset += page.length;
   }
   throw new Error("Finance hold lookup exceeded the safe page or time limit; saved for retry.");
 }
@@ -1262,7 +1269,7 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
         if (tokenError) throw new Error(tokenError);
         if (!hasTimeBudget(deadline)) throw new Error("Finance batch time limit reached; saved for retry.");
         if (!job.order_id) {
-          const held = await fetchFundsOnHoldTransactions(token, 1000, deadline);
+          const held = await fetchFundsOnHoldTransactions(token, 10000, deadline);
           discovered = unique(held.map(getFinanceOrderId).filter(Boolean));
         } else {
           const transactions = await fetchFinanceTransactionsForOrder(token, job.job_key, deadline);
