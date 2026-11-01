@@ -36,7 +36,7 @@
    });
    const {error}=await s.client.rpc('refresh_ebay_hold_ledger',{_at:packet.at,_total:packet.total,_count:packet.count,_rows:packet.rows});
    if(error)throw Error('The entries did not pass the account checks or your admin session expired.');
-   msg.textContent='All '+packet.count+' entries matched Seller Hub. Updating the report…';await s.load();
+   msg.textContent='Verified: all '+packet.count+' entries matched Seller Hub.';await s.load();
   }catch(e){msg.textContent=(e?.message||'Could not check Seller Hub.')+' The previous verified breakdown is preserved.';}
   finally{clearTimeout(timer);window.removeEventListener('message',listener);button.disabled=false;active=false;}
  }
