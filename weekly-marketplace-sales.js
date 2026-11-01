@@ -51,7 +51,7 @@
   const booked=sum(rows,'booked'),afterCancellations=booked-sum(rows,'cancelled'),afterRefunds=afterCancellations-sum(rows,'refunded');
   const step=(label,amount,balance)=>'<tr><th scope="row">'+label+'</th><td>'+amount+'</td><td>'+fmt(balance)+'</td></tr>';
   return '<div class="ws-calculation"><table><caption>'+period+' · from original sales to sales kept</caption><thead><tr><th>Item sales</th><th>Deduction</th><th>Balance</th></tr></thead><tbody>'+
-   step('Originally recorded', '—',booked)+step('After cancellations',deduction(rows,'cancelled'),afterCancellations)+step('After refunds',deduction(rows,'refunded'),afterRefunds)+
+   step('Originally sold<small>Booked item value</small>', '—',booked)+step('After cancellations',deduction(rows,'cancelled'),afterCancellations)+step('After refunds',deduction(rows,'refunded'),afterRefunds)+
    '<tr class="ws-kept"><th scope="row">Verified net item sales<small>After setting aside amounts under review</small></th><td>'+deduction(rows,'held')+'</td><td>'+fmt(sum(rows,'net'))+'</td></tr></tbody></table></div>';
  }
  function render(data,market){

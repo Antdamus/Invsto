@@ -31,6 +31,7 @@ test('weekly report revises the original ET week, separates cancellation and ref
    create function enqueue_ebay_finance_jobs(text[],boolean) returns integer language sql as 'select 1';
    create function dispatch_ebay_finance_worker() returns void language plpgsql as $$begin if not exists(select 1 from ebay_finance_jobs where (state='working' and lease_until<=now())) then return; end if; end$$;`);
   await db.exec(await readFile(new URL('../supabase/migrations/20261101061000_weekly_ebay_sale_updates.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101062000_weekly_ebay_refund_history.sql',import.meta.url),'utf8'));
   await db.exec(`insert into ebay_orders values ('a','e1','fulfilled','2025-06-02 03:59Z',now(),'{"orderPaymentStatus":"PAID"}',112,'b'),
    ('b','e2','cancelled','2025-06-02 04:00Z',now(),'{"orderPaymentStatus":"FULLY_REFUNDED","orderCancelStatus":"CANCELED"}',54,'b'),
    ('c','e3','pending','2025-06-04 17:00Z',now(),'{"orderPaymentStatus":"PAID","ebayFinance":{"transactions":[{"transactionType":"REFUND","transactionStatus":"COMPLETED"}]}}',75,'b');
@@ -94,6 +95,16 @@ test('weekly report revises the original ET week, separates cancellation and ref
   await apply();await apply();await checkSale(75,0,0);
   assert.equal((await one("select status from ebay_orders where id='a'")).status,'fulfilled');
   assert.equal((await one("select count(*) n from weekly_ebay_sale_updates")).n,1);
+  // A later page may repeat one refund, revise its amount, and introduce
+  // another. A newer order snapshot can omit all of them.
+  const nextChange={...change,modified_at:'2025-07-06T12:00:00Z',changes:{...change.changes,refunds:[
+   {...julyRefund,amount:{currency:'USD',value:'20.00'}},{...julyRefund,refundReferenceId:'second',amount:{currency:'USD',value:'10.00'}}]}};
+  await db.query("select save_weekly_ebay_change_page(auth.uid(),'2025-07-05','2025-07-07',$1,true,false)",[JSON.stringify([nextChange])]);
+  await checkSale(70,0,0);
+  nextChange.modified_at='2025-07-08T12:00:00Z';nextChange.changes.refunds=[{...julyRefund,refundReferenceId:'third',amount:{currency:'USD',value:'5.00'}}];
+  await db.query("select save_weekly_ebay_change_page(auth.uid(),'2025-07-07','2025-07-09',$1,true,false)",[JSON.stringify([nextChange])]);
+  await setOrder({orderPaymentStatus:'PARTIALLY_REFUNDED',order:{lastModifiedDate:'2025-07-10T00:00:00Z',pricingSummary:{total:{currency:'USD',value:'100.00'}}},ebayFinance:originalLedger});
+  await checkSale(65,0,0);
   // One shared debit spans two purchase weeks; only one copy of its seven cents is deducted.
   for(const [order,id,day] of [['combined-A','aa','2025-06-08 12:00Z'],['combined-B','bb','2025-06-09 12:00Z']]){
    const raw={orderPaymentStatus:'PAID',ebayFinance:{source:'ebay_finances_api',orderNumber:order,transactionIds:[id,'shared-label'],transactions:[
