@@ -71,6 +71,32 @@ test('purchase-week balance drilldowns keep processing, mixed credits and transf
     assert.equal(await row.evaluate(e=>getComputedStyle(e).display),'table-row');
     const original=await row.locator('[data-col="Original item sales"]').boundingBox(),desktopNet=await row.locator('[data-col="Net item sales"]').boundingBox(),releasedBox=await released.boundingBox();
     assert.ok(original.x<desktopNet.x&&desktopNet.x<releasedBox.x,'desktop sales trail precedes the funds columns');
+    // A complete purchase cohort: the $100 refunded and $50 canceled sales still have
+    // original credits; a different $40 order is on hold. Never count two item lines as two credits.
+    function sale(id,booked,shipping,fee,fund,count=1){
+      const credit=booked+shipping-fee;
+      return order(id,fund,credit,{booked,held:fund==='held'?credit:null,
+        parts:{credit,item:booked,shipping,fees:-fee,other:0},items:Array.from({length:count},()=>({title:id,qty:1}))});
+    }
+    data.rows=[{market:'ebay',week,first_day:week,end_day:next,booked:200,cancelled:50,refunded:100,held:10,net:40}];
+    data.ebay_item_orders=[sale('later refunded',100,8,6,'available',2),sale('canceled',50,0,3,'paid_out'),
+      sale('under review',10,0,1,'available'),sale('on hold',40,3,2,'held')];
+    await render();const toggle=row.locator('[data-bridge]'),detail=page.locator('#wi-bridge-'+week),monthToggle=page.locator('.wi-total [data-bridge]');
+    assert.match(await toggle.innerText(),/\+\$118.00/);assert.match(await row.innerText(),/deduct \$150.00 in cancellations and refunds/);
+    await toggle.click();assert.equal(await detail.isVisible(),true);
+    const terms=()=>detail.locator('.wi-eq-line dd').allTextContents({timeoutMs:3000});
+    assert.deepEqual(await terms(),['$40.00','+$50.00','+$100.00','+$10.00','+$11.00','−$12.00','−$41.00','$158.00']);
+    data.ebay_item_orders[3].fund='available';await render();
+    assert.equal(await detail.isVisible(),true);assert.match(await toggle.innerText(),/\+\$159.00/);
+    assert.equal((await terms()).at(-1),'$199.00');
+    // Itemized proof is incomplete: disclose the unresolved amount instead of naming it a fee.
+    data.ebay_item_orders[0].parts=null;await render();
+    assert.match(await detail.innerText(),/Difference not yet explained[\s\S]+\+\$2.00/);
+    assert.match(await detail.innerText(),/without itemized sale-credit details/);
+    await monthToggle.click();assert.equal(await detail.isVisible(),false);assert.equal(await page.locator('#wi-bridge-month').isVisible(),true);
+    await page.setViewportSize({width:390,height:750});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    data.ebay_item_orders[0].credit=null;await render();
+    assert.match(await monthToggle.innerText(),/Not confirmed/);
   } finally {
     await browser.close();
   }

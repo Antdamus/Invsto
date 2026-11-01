@@ -176,6 +176,16 @@ test('weekly report revises the original ET week, separates cancellation and ref
   assert.deepEqual(await receipt({ebayFinance:{transactions:[{...original,payoutId:'failed'}]}}),[
    {id:'failed',status:'TERMINAL_FAILED',date:'2025-06-10',net:74,sale:74},{id:'linked',status:'SUCCEEDED',date:'2025-07-05',net:60,sale:74}]);
   assert.deepEqual((await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_account_payouts,[{id:'balance',day:'2025-06-17',amount:500}]);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101083000_weekly_ebay_credit_bridge.sql',import.meta.url),'utf8'));
+  const parts={item:83,shipping:3,fees:-13.9,other:0,credit:72.1};
+  await db.query("update weekly_ebay_sale_credits set breakdown=$1 where order_number='e2'",[JSON.stringify(parts)]);
+  let bridged=(await itemReport()).find(o=>o.id==='e2');assert.equal(bridged.booked,83);
+  assert.deepEqual(bridged.parts,{...parts,source:'Seller Hub'});
+  const api={order:{totalMarketplaceFee:{currency:'USD',value:'3'},pricingSummary:{deliveryCost:{currency:'USD',value:'5'},deliveryDiscount:{currency:'USD',value:'-1'}}}};
+  const checkParts=async(raw,credit,exp)=>(await one("select weekly_ebay_credit_parts($1,$2,100,$3) parts",[JSON.stringify(raw),credit,JSON.stringify(exp)])).parts;
+  assert.deepEqual(await checkParts(api,101,parts),{item:100,shipping:4,fees:-3,other:0,credit:101,source:'eBay order'});
+  assert.equal(await checkParts(api,102,parts),null);
+  api.order.pricingSummary.deliveryCost.currency='CAD';assert.equal(await checkParts(api,101,parts),null);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });

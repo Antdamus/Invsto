@@ -41,12 +41,60 @@
   return {paid:orders.reduce((n,o)=>n+(paid(o)?o.items.length:0),0),unpaid:orders.reduce((n,o)=>n+(unpaid(o)?o.items.length:0),0),
    unknown:orders.reduce((n,o)=>n+(!unpaid(o)&&!paid(o)?o.items.length:0),0)};
  }
+ const cents=n=>n==null||!Number.isFinite(Number(n))?null:Math.round(Number(n)*100);
+ const dollars=n=>money(n==null?null:n/100);
+ const signed=n=>(n>0?'+':n<0?'−':'')+dollars(Math.abs(n));
+ function reconciliation(sales,orders){
+  const net=cents(sales.net),canceled=cents(sales.cancelled),refunded=cents(sales.refunded),review=cents(sales.held);
+  let released=0,held=0,other=0,shipping=0,fees=0,ancillary=0,merchDiff=0,missingReleased=0,missingOther=0,missingParts=0;
+  for(const o of orders){
+   const state=balanceState(o),credit=cents(o.credit),p=o.parts;
+   if(state==='released'){if(credit==null)missingReleased++;else released+=credit;}
+   else if(state==='held'){const onHold=cents(o.held);if(onHold==null)missingOther++;else held+=onHold;}
+   else if(credit!=null)other+=credit;
+   else if(state!=='unpaid')missingOther++;
+   if(credit==null)continue;
+   const v=p&&['item','shipping','fees','other'].map(k=>cents(p[k]));
+   if(!v||v.some(n=>n==null)||v.reduce((x,y)=>x+y,0)!==credit||cents(p.credit)!==credit){missingParts++;continue;}
+   shipping+=v[1];fees+=v[2];ancillary+=v[3];
+   if(Object.hasOwn(o,'booked'))merchDiff+=v[0]-(cents(o.booked)??0);
+  }
+  const completeAmounts=[net,canceled,refunded,review,cents(sales.booked)].every(x=>x!=null);
+  const gap=net!=null&&!missingReleased?released-net:null;
+  const steps=[
+   ['Canceled item sales',canceled],['Refunded item sales',refunded],['Item sales pending verification',review],
+   ['Difference in original item subtotals',merchDiff],['Shipping paid by buyers',shipping],
+   ['Fees on original sales',fees],['Other recorded sale charges or credits',ancillary],
+   ['Original credits still on hold',-held],['Credits with other funds statuses',-other]
+  ];
+  const rest=completeAmounts&&gap!=null?gap-steps.reduce((a,s)=>a+s[1],0):null;
+  const reasons=[
+   [(canceled??0)+(refunded??0),'Net sales deduct '+dollars((canceled??0)+(refunded??0))+' in cancellations and refunds. Original credits do not.'],
+   [review,'Includes item sales still under review.'],[shipping,'Buyer-paid shipping adds to sale credits.'],
+   [fees,'Sale fees reduce original credits by '+dollars(Math.abs(fees))+'.'],[-held,dollars(held)+' in original credits is still on hold.'],
+   [-other,'Some credits have another funds status.'],[ancillary,'Other recorded sale charges or credits.'],
+   [merchDiff,'The recorded original item subtotals differ.']
+  ];
+  const main=gap==null?'Released amount is not fully verified.':rest||missingParts||missingOther||!completeAmounts?'Some credit details still need verification.':
+   !gap?'Net sales and released credits match.':(reasons.filter(s=>Math.sign(s[0])===Math.sign(gap)).sort((a,b)=>Math.abs(b[0])-Math.abs(a[0]))[0]?.[1]??'See the calculation below.');
+  return {gap,net,released,steps,rest,missingReleased,missingOther,missingParts,completeAmounts,main};
+ }
+ function reconciliationDetail(name,id,b){
+  const line=(title,value,style='')=>'<div class="wi-eq-line '+style+'"><dt>'+title+'</dt><dd>'+value+'</dd></div>';
+  const partial=b.missingReleased||b.missingOther||b.missingParts||!b.completeAmounts;
+  return '<section id="'+id+'" class="wi-equation" aria-label="'+esc(name)+' reconciliation"><div><span class="wi-eyebrow">FOLLOW THE MONEY · '+esc(name)+'</span><h4>From net item sales to released credits</h4><p>Net sales already deduct reversals. To compare with eBay’s <b>original sale credits</b>, add back those deductions, include shipping and sale fees, then remove credits that were not released.</p><p>Released credits are before later refund debits and postage. They are not final earnings or bank transfers.</p></div><dl>'+
+   line('Start · Verified net item sales',dollars(b.net),'wi-eq-end')+
+   b.steps.filter(s=>s[1]!==0).map(([label,n])=>line(label,n==null?'Not confirmed':signed(n))).join('')+
+   (b.rest?line('Difference not yet explained',signed(b.rest),'wi-eq-review'):'')+
+   line(b.missingReleased?'Known released credits only':'End · Original credits released to eBay balance',dollars(b.released),'wi-eq-end')+
+   '</dl>'+(partial?'<p class="wi-eq-warning">Partial explanation. '+[b.missingReleased&&b.missingReleased+' orders missing released amounts',b.missingOther&&b.missingOther+' orders missing held or other credit amounts',b.missingParts&&b.missingParts+' orders without itemized sale-credit details',!b.completeAmounts&&'incomplete sales totals'].filter(Boolean).join('; ')+'.</p>':'')+'</section>';
+ }
  const matches=(o,i,f)=>f==='all'||(f==='paid'?paid(o):f==='unpaid'?unpaid(o):f==='unknown'?!paid(o)&&!unpaid(o):['released','held','processing','outstanding','review'].includes(f)?matchesBalance(o,f):f==='sent'?payout(o).sent:f==='off'?payout(o).off:f==='unclear'?payout(o).unclear:f==='refund'?['partial','refunded'].includes(o.buyer):i.cancel);
  function update(host,data){
   if(!Array.isArray(data?.ebay_item_orders)){host.hidden=true;host.replaceChildren();delete host.itemState;return;}
   const fresh=!host.itemState||host.itemState.month!==data.month;
   if(fresh){
-   host.innerHTML='<header class="wi-intro"><span class="wi-eyebrow">EBAY · WEEKLY SALES</span><h3>eBay balance by purchase week</h3><p>Compare what you sold, what you kept after deductions, and where the funds stand. Select a week or amount to see the order lines.</p></header><div class="wi-summary wi-balance"></div>'+
+   host.innerHTML='<header class="wi-intro"><span class="wi-eyebrow">EBAY · WEEKLY SALES</span><h3>eBay balance by purchase week</h3><p>Read left to right: what sold, what remained after reversals, then why eBay released more or less. Select the difference for the calculation or a sales or funds amount for its orders.</p></header><div class="wi-summary wi-balance"></div>'+
     '<details class="wi-transfers wi-matches"><summary>Bank transfers matched to specific orders</summary><div class="wi-summary"></div></details>'+
     '<details class="wi-transfers wi-bank"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
     '<details class="wi-browser"><summary>Browse order lines and payments</summary><div class="ws-controls"><label>Purchase week <select class="wi-week"></select></label>'+
@@ -57,7 +105,9 @@
    host.itemState={month:data.month,page:0};
    host.onchange=e=>{if(e.target.matches('select')){host.itemState.page=0;list(host);}};
    host.oninput=e=>{if(e.target.matches('.wi-find')){host.itemState.page=0;list(host);}};
-   host.onclick=e=>{const week=e.target.closest('[data-item-week]'),step=e.target.closest('[data-step]');
+   host.onclick=e=>{const week=e.target.closest('[data-item-week]'),step=e.target.closest('[data-step]'),bridge=e.target.closest('[data-bridge]');
+    if(bridge){const panel=host.querySelector('.wi-balance');host.itemState.bridge=bridge.getAttribute('aria-expanded')==='true'?null:bridge.dataset.bridge;
+     for(const b of panel.querySelectorAll('[data-bridge]')){const show=b.dataset.bridge===host.itemState.bridge;b.setAttribute('aria-expanded',String(show));host.querySelector('#'+b.getAttribute('aria-controls')).hidden=!show;}return;}
     if(week){host.querySelector('.wi-week').value=week.dataset.itemWeek;host.querySelector('.wi-filter').value=week.dataset.bucket||'all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});}
     if(step){host.itemState.page+=Number(step.dataset.step);list(host);}};
   }
@@ -95,10 +145,14 @@
     const group=orders.filter(o=>matchesBalance(o,bucket));
     return group.length?'<div>'+drill(name,w,bucket,lineCount(group)+' lines · '+filters[bucket])+'</div>':'';
    }).join('');
+   const b=reconciliation(sales,orders),id='wi-bridge-'+(w||'month'),open=s.bridge===w;
+   const bridge='<button type="button" class="wi-bridge-toggle" data-bridge="'+w+'" aria-expanded="'+open+'" aria-controls="'+id+'" aria-label="'+esc(name+' · Why released differs: '+(b.gap==null?'Not confirmed':signed(b.gap)))+'">'+(b.gap==null?'Not confirmed':signed(b.gap))+' <span aria-hidden="true">▾</span></button>'+
+    (b.gap?'<small class="wi-gap-direction">'+(b.gap>0?'More':'Less')+' released than net sales</small>':'')+'<small>'+esc(b.main)+'</small>';
    return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders)+
-    cell('Original item sales',original)+cell('Net item sales',net)+
+    cell('Original item sales',original)+cell('Net item sales',net)+cell('Why released differs',bridge)+
     cell('Released to eBay balance',amountCell('released'))+cell('On hold',amountCell('held'))+
-    cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+'</tr>';
+    cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+'</tr>'+
+    '<tr id="'+id+'" class="wi-bridge-detail" '+(open?'':'hidden')+'><td colspan="8">'+reconciliationDetail(name,id+'-math',b)+'</td></tr>';
   }
   const payoutRow=(name,w,orders,sales,total)=>{
    const amountCell=(bucket,value)=>drill(name,w,bucket,value);
@@ -119,9 +173,9 @@
    render('Month total','',s.orders,monthSales,true);
   const noteKey=d=>{const b=d.closest('td').querySelector('button');return b.dataset.itemWeek+':'+b.dataset.bucket;};
   const balanceTable=host.querySelector('.wi-balance'),expandedNotes=new Set([...balanceTable.querySelectorAll('.wi-credit-note[open]')].map(noteKey));
-  balanceTable.innerHTML='<table aria-label="Item sales and eBay funds by purchase week"><colgroup><col style="width:14%"></colgroup><colgroup><col style="width:16%"><col style="width:15%"></colgroup><colgroup><col style="width:16%"><col style="width:15%"><col style="width:12%"></colgroup><colgroup><col style="width:12%"></colgroup>'+
-   '<thead><tr class="wi-band"><th scope="col" rowspan="2">Purchase week<small>Eastern time</small></th><th scope="colgroup" colspan="2">01 · Item sales</th><th scope="colgroup" colspan="3">02 · eBay funds</th><th scope="col" rowspan="2">Buyer payments</th></tr>'+
-   '<tr><th scope="col">Original item sales</th><th scope="col" class="wi-net-head">Net item sales<small>Verified · before fees</small></th><th scope="col">Released to eBay balance</th><th scope="col">On hold</th><th scope="col">Other funds statuses</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
+  balanceTable.innerHTML='<table aria-label="Item sales and eBay funds by purchase week"><colgroup><col style="width:12%"></colgroup><colgroup><col style="width:13%"><col style="width:14%"></colgroup><colgroup><col style="width:17%"><col style="width:14%"><col style="width:12%"><col style="width:8%"></colgroup><colgroup><col style="width:10%"></colgroup>'+
+   '<thead><tr class="wi-band"><th scope="col" rowspan="2">Purchase week<small>Eastern time</small></th><th scope="colgroup" colspan="2">01 · Item sales</th><th scope="colgroup" colspan="4">02 · From sales to eBay funds</th><th scope="col" rowspan="2">Buyer payments</th></tr>'+
+   '<tr><th scope="col">Original item sales</th><th scope="col" class="wi-net-head">Net item sales<small>Verified · before fees</small></th><th scope="col">Why released differs<small>Released minus net sales</small></th><th scope="col">Released to eBay balance<small>Original sale credits</small></th><th scope="col">On hold</th><th scope="col">Other funds statuses</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
    '<p><b>Net item sales</b> exclude cancellations, refunds, and amounts still under review. They cover merchandise only, before selling fees. <b>Released</b> and <b>On hold</b> show original sale credits including buyer shipping and after sale fees. A sale can count in net sales while eBay holds its funds.</p>';
   for(const d of balanceTable.querySelectorAll('.wi-credit-note'))d.open=expandedNotes.has(noteKey(d));
   host.querySelector('.wi-matches>div').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Paid out to us<small>Matched to orders</small></th><th>Not on hold<small>Payout not confirmed</small></th></tr></thead><tbody>'+renderRows(payoutRow)+'</tbody></table>'+
