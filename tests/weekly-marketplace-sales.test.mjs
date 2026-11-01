@@ -137,6 +137,28 @@ test('weekly report revises the original ET week, separates cancellation and ref
   assert.equal(list.filter(o=>o.id==='e3').length,1);assert.equal(entry.week,'2025-06-02');assert.equal(entry.funds,'held');assert.equal(entry.fedex,true);
   assert.equal(list.some(o=>o.id==='combined-A'),false);
   assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_pending_payments,null);
+  await db.exec("alter table ebay_order_lines add column item_title text,add column item_number text,add column transaction_id text");
+  await db.exec(await readFile(new URL('../supabase/migrations/20261101070000_weekly_ebay_item_payments.sql',import.meta.url),'utf8'));
+  await db.exec(`insert into ebay_orders(id,order_number,status,sale_date,raw_payload) values
+   ('unc','unpaid-example','pending','2025-06-10 10:00Z','{"orderPaymentStatus":"UNPAID"}'),
+   ('lim','cancel-unpaid','cancelled','2025-06-11 10:00Z','{"orderPaymentStatus":"FAILED","orderCancelStatus":"CANCELED"}');
+   insert into ebay_order_lines(id,order_id,item_title,item_number,transaction_id,line_status,quantity,sold_for,raw_payload) values
+   ('u','unc','ring','itemU','u','pending',1,18,'{}'),('lim','lim','ring','itemC','c','cancelled',1,25,'{}'),
+   ('extra','b','bracelet','itemB','tB','cancelled',1,33,'{}');
+   update ebay_order_lines set item_number='itemA',transaction_id='tA' where id='2';
+   insert into weekly_ebay_payment_observations values('e2','held','2025-07-01');
+   insert into weekly_ebay_sale_credits values('e2',70,'[{"item":"itemA","txn":"tA","sold":50,"qty":1,"credit":42},{"item":"itemB","txn":"tB","sold":33,"qty":1,"credit":28}]','2025-07-01');`);
+  const itemReport=async()=>(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_item_orders;
+  let all=await itemReport(),multi=all.find(o=>o.id==='e2');
+  assert.equal(all.find(o=>o.id==='unpaid-example').buyer,'unpaid');assert.equal(all.find(o=>o.id==='cancel-unpaid').buyer,'failed');
+  assert.equal(multi.buyer,'refunded');assert.equal(multi.held,70);assert.equal(multi.final,null);
+  assert.deepEqual(multi.items.map(i=>[i.sold,i.kept,i.credit]),[[50,0,42],[33,0,28]]);
+  // Without trustworthy line matching, keep the order amount once; never assign it to both lines.
+  await db.exec("update ebay_order_lines set item_number='mismatch' where id='extra'");
+  all=await itemReport();assert.equal(all.find(o=>o.id==='e2').items[1].credit,null);
+  await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PAID","ebayFinance":{"orderNumber":"e2","syncedAt":"2025-07-05T12:00:00Z","transactions":[{"transactionId":"tx","transactionType":"SALE","bookingEntry":"CREDIT","orderNumber":"e2","currency":"USD","transactionStatus":"FUNDS_AVAILABLE_FOR_PAYOUT","amount":"72.10"}]}}' where id='b'`);
+  multi=(await itemReport()).find(o=>o.id==='e2');assert.equal(multi.credit,72.1);assert.equal(multi.fund,'available');assert.equal(multi.held,null);assert.equal(multi.items[0].credit,null);
+  assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_item_orders,null);
   await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
  }finally{await db.close();}
 });

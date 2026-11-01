@@ -71,11 +71,11 @@
   const paidCount=list.filter(o=>['paid','partial','refunded'].includes(o.buyer)).length;
   const times=list.map(o=>Date.parse(o.checked)).filter(Number.isFinite);
   const latest=times.length?' Latest funds check '+etStamp(Math.max(...times))+'.':'';
-  return '<section class="ws-payments"><h4>Payments on '+list.length+' eBay orders awaiting final proceeds</h4>'+
+  return '<details class="ws-pay-group ws-payments" data-pay-key="'+period+'-exceptions"><summary>Final proceeds still under review · '+list.length+' eBay orders</summary>'+
    '<p><strong>'+paidCount+' with confirmed buyer payment</strong>, including orders later refunded. Each order appears once in each column. Open a count to see the order numbers.</p>'+
    '<div class="ws-pay-columns"><div><h5>Buyer payment</h5>'+categories('buyer',buyerStates)+'</div><div><h5>Seller funds · last reported by eBay</h5>'+categories('funds',fundsStates)+'</div></div>'+
    disclosure('FedEx outbound tracking',list.filter(o=>o.fedex))+
-   '<p>eBay reports the funds status of the original sale. A later refund reduces what you keep. Available funds can still be waiting for a payout. An outside label can leave postage unknown even when the buyer paid. FedEx tracking identifies the carrier only.'+latest+' <a target="_blank" rel="noopener" href="https://www.ebay.com/mes/summary">Check current funds in Seller Hub ↗</a></p></section>';
+   '<p>eBay reports the funds status of the original sale. A later refund reduces what you keep. Available funds can still be waiting for a payout. An outside label can leave postage unknown even when the buyer paid. FedEx tracking identifies the carrier only.'+latest+' <a target="_blank" rel="noopener" href="https://www.ebay.com/mes/summary">Check current funds in Seller Hub ↗</a></p></details>';
  }
  function salesCalculation(rows,period){
   const booked=sum(rows,'booked'),afterCancellations=booked-sum(rows,'cancelled'),afterRefunds=afterCancellations-sum(rows,'refunded');
@@ -130,6 +130,7 @@
   let seq=0,manualMonth=Boolean(requested&&/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)&&requested>='2000-01'&&requested<=month.max);
   month.value=manualMonth?requested:month.max;
   const connect=$('ws-ebay-connect'),earnStatus=$('ws-ebay-status');
+  const itemLedger=(data)=>window.WeeklyEbayItems?.update($('ws-ebay-items'),data);
   async function earningsStatus(){
    connect.hidden=earnStatus.hidden=market.value!=='ebay'||!client.functions;if(connect.hidden)return;
    try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'status'}});if(error)throw error;
@@ -143,19 +144,20 @@
   async function load(){
    const version=++seq;if(!panel.open||document.hidden)return;
    month.max=etMonth();if(!manualMonth)month.value=month.max;
-   if(!/^\d{4}-\d{2}$/.test(month.value)||month.value>month.max||month.value<'2000-01'){$('ws-results').replaceChildren();$('ws-status').textContent='Choose the current month or a past month.';return;}
+   if(!/^\d{4}-\d{2}$/.test(month.value)||month.value>month.max||month.value<'2000-01'){$('ws-results').replaceChildren();itemLedger(null);$('ws-status').textContent='Choose the current month or a past month.';return;}
    $('ws-status').textContent='Checking marketplace records…';earningsStatus();
    try{
     const {data,error}=await client.rpc('get_weekly_sales_for_market',{_month:month.value+'-01',_market:market.value});if(error||!data)throw error||Error();
     if(seq!==version||!panel.open)return;
     const expanded=new Set(Array.from($('ws-results').querySelectorAll('.ws-pay-group[open]'),d=>d.dataset.payKey));
     $('ws-results').innerHTML=render(data,market.value);
+    itemLedger(data);
     for(const group of $('ws-results').querySelectorAll('.ws-pay-group'))group.open=expanded.has(group.dataset.payKey);
     $('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
-   }catch{if(seq===version){$('ws-results').replaceChildren();$('ws-status').textContent='Could not verify these totals. Use Refresh sales to retry.';}}
+   }catch{if(seq===version){$('ws-results').replaceChildren();itemLedger(null);$('ws-status').textContent='Could not verify these totals. Use Refresh sales to retry.';}}
   }
-  panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();load();};
-  market.onchange=()=>{$('ws-results').replaceChildren();load();};
+  panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();itemLedger(null);load();};
+  market.onchange=()=>{$('ws-results').replaceChildren();itemLedger(null);load();};
   $('ws-refresh').onclick=load;
   document.addEventListener('visibilitychange',()=>{if(panel.open&&!document.hidden)load();});
   setInterval(()=>{if(panel.open&&!document.hidden)load();},60000);
