@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OG eBay Order Link",
   "description": "Connects eBay, TikTok and Whatnot orders, receipts and shipping evidence to Invsto.",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "permissions": [
     "alarms",
     "storage",
@@ -44,6 +44,10 @@
     }
   ],
   "content_scripts": [
+    {
+      "matches": ["https://www.ebay.com/sh/ord/*","https://www.ebay.com/mes/transactionlist*","https://www.ebay.com/Cancel/Details*"],
+      "js": ["performance-reader.js"], "run_at": "document_idle"
+    },
     {
       "matches": ["https://www.ebay.com/mes/transaction-reports*"],
       "js": ["claim-export.js","report-csv-probe.js"], "world": "MAIN", "run_at": "document_start"

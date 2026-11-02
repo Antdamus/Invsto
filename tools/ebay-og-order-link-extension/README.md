@@ -14,7 +14,7 @@ This unpacked Chrome/Edge extension adds OG shortcuts to eBay pages that show bu
 
 ## Check and distribute updates
 
-Version 1.0.31 checks OG Jewelers’ Seller Hub in the background while Edge and Invsto are signed in. It reads held entries in exact ranges of 30 and verifies their count and total against eBay before replacing the previous list. It also checks order delivery, published statements and full-month claim exports. A report tab does not need to stay open. Checks use inactive temporary tabs and keep the last verified amounts if a source is unavailable or does not reconcile.
+Version 1.0.32 checks OG Jewelers’ Seller Hub in the background while Edge and Invsto are signed in. It reads held entries in exact ranges of 30 and verifies their count and total against eBay before replacing the previous list. It also checks order delivery, published statements and full-month claim exports. The performance report also checks original sales, completed cancellations and posted refunds. A report tab does not need to stay open. Checks use inactive temporary tabs and keep the last verified amounts if a source is unavailable or does not reconcile.
 
 Open **Extension updates** near the top of OG Pending Orders on each computer, or follow the link in the extension popup. It compares the installed version in that browser with the published release and offers the latest ZIP. Checks run on page load, on request, and every five minutes while the page is visible.
 

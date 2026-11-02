@@ -22,11 +22,28 @@
  function markReaderCheck(verified){
   try{localStorage.setItem(readerCheckKey,JSON.stringify({verified,at:Date.now()}));}catch{}
  }
+ async function updatePerformance(db,started){
+   if(document.documentElement?.dataset?.invstoPerformanceWorker&&Date.now()-started<5*60000){
+    const batch=await db.rpc('claim_ebay_health_jobs');
+    if(batch.error)throw Error('Could not check the performance report schedule.');
+    for(const job of batch.data||[]){
+     if(Date.now()-started>8*60000)break;
+     let rows=[],error=null;
+     try{const result=await request('OG_PERFORMANCE_READ',{job:{kind:job.kind,id:job.id}},185000);rows=result.rows;}
+     catch(e){error=e.message;}
+     const result=await db.rpc('finish_ebay_health_job',{_ticket:job.ticket,_rows:rows,_count:rows.length,_error:error});
+     if(result.error&&!error)await db.rpc('finish_ebay_health_job',{_ticket:job.ticket,_rows:[],_count:0,_error:'The source did not reconcile. The previous figures are preserved.'});
+    }
+   }
+ }
  async function run(){
   if(!new URL(location.href).searchParams.has('job')||window.top!==window)return;
-  let pause=false;
+  const started=Date.now();
+  let pause=false,performanceCheck;
   try{
    const db=window.supabaseClient;if(!db||!(await db.auth.getSession()).data?.session){pause=true;return;}
+   performanceCheck=updatePerformance(db,started).catch(()=>{});
+   if(new URL(location.href).searchParams.has('performance'))return;
    const job=await db.rpc('claim_ebay_browser_reports');if(job.error){pause=true;return;}if(!job.data)return;
    const work=job.data,notes=[];let observations=[],statementNote=null;
    if(work.ledger||firstReaderCheckDue()){
@@ -62,8 +79,10 @@
    }
    const saved=await db.rpc('finish_ebay_browser_reports',{_ticket:work.ticket,_observations:observations,_note:notes.join(' '),_statement_note:statementNote});
    if(saved.error)throw Error('The refresh expired; last verified records are preserved.');
+
   }catch{document.querySelector('#status').textContent='The next check will retry. Previously verified records are preserved.';}
   finally{
+   await performanceCheck;
    window.postMessage({channel:'invstoReportRequest',id:crypto.randomUUID(),type:'OG_REPORT_FINISH',pause},location.origin);
   }
  }

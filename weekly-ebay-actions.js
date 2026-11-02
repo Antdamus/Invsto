@@ -5,6 +5,7 @@
  function describe(a,reader){
   const period=/^\d{4}-\d\d-01$/.test(a.month||'')?nameMonth(a.month):'';
   switch(a.kind){
+   case 'performance':return ['Refresh the eBay performance sources','The signed-in Seller Hub checks are overdue. Open the report for the last verified times and instructions for the Edge workstation.','Open performance reports','ebay-performance.html'];
    case 'seller':return ['Check the OG Jewelers sign-in','The background check could not verify the seller account. In the Edge profile that runs Invsto, open Seller Hub and sign in as ogjewelers. The next successful check clears this reminder.','Open Seller Hub ↗',sellerHub];
    case 'holds':return ['Refresh the itemized hold list',({missing:'Invsto has no verified list of held transactions yet.',changed:'eBay’s latest balance differs from the saved list of held transactions.',stale:'The itemized hold list is more than nine hours old.'}[a.reason]||'The itemized hold list needs a check.')+
      (reader?' Press the button to check every page in Seller Hub.':' On the Edge computer running OG eBay Order Link, sign in to Invsto and Seller Hub, then press “Refresh hold details from eBay.”'),reader?'Refresh hold details':'Show refresh controls'];
