@@ -23,7 +23,7 @@
    const o=orderIndex.orders.get(order),purchase=o?.day||c.purchase_day;
    const req=compatible.map(r=>r.requested_at).filter(Boolean).sort()[0];
    const paid=evidence.payment_times?.[order];
-   const date=req?M.day(req):c.requested;
+   const date=req?pacific.format(new Date(req)):c.requested;
    const purchaseLocal=o?pacific.format(new Date(o.purchased)):c.purchase_day;
    const beforeSale=req&&o?Date.parse(req)<Date.parse(o.purchased):c.requested&&purchaseLocal?c.requested<purchaseLocal:null;
    let timing='Timing unknown';
@@ -31,7 +31,7 @@
    else if(paid&&req)timing=Date.parse(req)<Date.parse(paid)?'Requested before payment':'Requested at or after payment';
    else if(paid&&c.requested){const paymentDay=pacific.format(new Date(paid));timing=c.requested===paymentDay?'Same day · sequence unknown':c.requested<paymentDay?'Requested before payment':'Requested after payment';}
    const actor=actorSet.size===1?[...actorSet][0]:'Unverified';
-   cases.push({id:c.id,order,purchase,date,actor,timing,beforeSale,reason:c.reason,source:compatible.length?compatible.map(r=>r.src).filter((s,i,a)=>a.indexOf(s)===i).join(' + '):'No requestor recorded',paid,requestedAt:req});
+   cases.push({id:c.id,order,purchase,purchaseLocal,date,actor,timing,beforeSale,reason:c.reason,source:compatible.length?compatible.map(r=>r.src).filter((s,i,a)=>a.indexOf(s)===i).join(' + '):'No requestor recorded',paid,requestedAt:req});
   }
   const allPayments=[...data.payments||[],...evidence.older_refunds||[]],seen=new Set();
   for(const t of allPayments){
@@ -50,7 +50,8 @@
    }
    const actor=labels.size===1?[...labels][0]:'Unverified';
    const reason=cancelRef?'Cancellation · '+(cancel?.reason||'Reason unavailable'):r?'Return · '+(reasons.get(t.order_id+'/'+r[1])||'Reason unavailable'):'Direct refund · reason unavailable';
-   refunds.push({...t,purchase,reason,age:purchase?days(purchase,t.day):null,actor,source:sources.length?[...new Set(sources)].join(' + '):'No matched refund-issuer record'});
+   const timestamp=o?.purchased||t.purchased,purchaseLocal=timestamp?pacific.format(new Date(timestamp)):purchase;
+   refunds.push({...t,purchase,purchaseLocal,reason,age:purchaseLocal?days(purchaseLocal,t.day):null,actor,source:sources.length?[...new Set(sources)].join(' + '):'No matched refund-issuer record'});
   }
   return {cases,refunds,orders:orderIndex.orders,decisions:evidence.cases||[],allDecisions:evidence.all_decisions||[],returns:evidence.returns||[],checks:evidence.requestor_checks||[]};
  }
@@ -65,9 +66,9 @@
   }
   for(const r of idx.returns)if(affected.has(r.oid)&&r.history?.some(h=>['SELLER_ESCALATE','BUYER_ESCALATE'].includes(h.action)))escalations.add(r.oid);
   const gross=ts=>ts.reduce((v,t)=>v+Number(t.gross),0),net=refunds.reduce((v,t)=>v+Number(t.net),0);
-  const old=refunds.filter(t=>t.purchase&&t.purchase<p.start),unknown=refunds.filter(t=>!t.purchase),long=refunds.filter(t=>t.age!=null&&t.age>=30);
-  const before=cases.filter(c=>c.purchase&&c.purchase<p.start),unknownCancel=cases.filter(c=>!c.purchase);
-  const allDecisions=idx.allDecisions.filter(r=>{const d=basis==='purchase'?r.purchase:r.decided_at;return d&&inPeriod(M.day(d),p);});
+  const old=refunds.filter(t=>t.purchaseLocal&&t.purchaseLocal<p.start),unknown=refunds.filter(t=>!t.purchaseLocal),long=refunds.filter(t=>t.age!=null&&t.age>=30);
+  const before=cases.filter(c=>c.purchaseLocal&&c.purchaseLocal<p.start),unknownCancel=cases.filter(c=>!c.purchaseLocal);
+  const allDecisions=idx.allDecisions.filter(r=>basis==='purchase'?r.purchase&&inPeriod(M.day(r.purchase),p):r.decided_at&&inPeriod(pacific.format(new Date(r.decided_at)),p));
   return {refunds,cases,refunded,canceled,affected,rulings,escalations,allDecisions,gross:gross(refunds),net,old:old.length,oldGross:gross(old),unknown:unknown.length,unknownGross:gross(unknown),
    long:long.length,longGross:gross(long),before:before.length,unknownCancel:unknownCancel.length,
    soldLines:[...idx.orders.values()].filter(o=>inPeriod(o.day,p)).reduce((n,o)=>n+o.lines.length,0)};

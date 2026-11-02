@@ -23,8 +23,16 @@ test('posting and purchase periods, requestor and refund issuer, and case ruling
 });
 test('account-wide reads verify completeness, do not infer an actor and never treat claim signals as refund dollars',async()=>{
  const now=Date.parse('2026-11-02T12:00Z');
- const rows=await requestorPage('2026-10-01',async p=>{assert.equal(p.get('role'),'SELLER');return {total:2,cancellations:[{cancelId:'1',requestorType:'SELLER'},{cancelId:'2'}]};},now);
+ const rows=await requestorPage('2026-10-01',async p=>{assert.equal(p.get('role'),'SELLER');return {paginationOutput:{offset:1,totalEntries:'2'},cancellations:[{cancelId:'1',requestorType:'SELLER'},{cancelId:'2'}]};},now);
  assert.deepEqual(rows.map(r=>r.actor),['SELLER']);
  await assert.rejects(requestorPage('2026-10-01',async()=>({total:1,cancellations:[]}),now));
- assert.deepEqual(await discoverRefundOrders('2026-10-01',async()=>({total:1,transactions:[{orderId:oid,transactionType:'REFUND',bookingEntry:'DEBIT',transactionDate:'2026-10-22T12:00Z'}]}),now),[{id:oid,posted:'2026-10-22T12:00:00.000Z'}]);
+ assert.deepEqual(await discoverRefundOrders('2026-10-01',async path=>{
+  const filters=new URL(path,'https://example.test').searchParams.getAll('filter');assert.equal(filters.length,2);
+  return {total:1,transactions:[{orderId:oid,transactionType:'REFUND',bookingEntry:'DEBIT',transactionDate:'2026-10-22T12:00Z'}]};
+ },now),[{id:oid,posted:'2026-10-22T12:00:00.000Z'}]);
+});
+test('a late Pacific sale stays in its ledger month even when its Eastern purchase cohort is next month',()=>{
+ const data={orders:[{...o,purchased:'2026-10-01T04:30:00Z'}],cases:[],payments:[{...refund,day:'2026-09-30'}]};
+ const idx=F.index(data,M.index(data)),t=idx.refunds[0];assert.deepEqual([t.purchase,t.purchaseLocal,t.age],['2026-10-01','2026-09-30',0]);
+ assert.equal(F.summarize(idx,p,'purchase').refunds.length,1);assert.equal(F.summarize(idx,p,'activity').refunds.length,0);
 });

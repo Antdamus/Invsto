@@ -1315,14 +1315,19 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
     if(token && Date.now()+8500<deadline){try{await checkDelivery(supabase,token);}
     catch{console.warn('eBay package evidence unavailable; retained the last verified delivery.');}}
     if(token && Date.now()+6000<deadline){try{
-      await syncCancellationActors(supabase,dispatchToken,async params=>{
+      const readCancellations=async (params:URLSearchParams)=>{
         const remaining=deadline-Date.now();if(remaining<1000)throw Error('Cancellation check will retry');
         const response=await fetch(EBAY_API_BASE+'/post-order/v2/cancellation/search?'+params,{
           headers:{Authorization:'IAF '+token,Accept:'application/json','X-EBAY-C-MARKETPLACE-ID':'EBAY_US'},
           signal:AbortSignal.timeout(Math.min(remaining,8000)),redirect:'error'});
         if(!response.ok)throw Error('eBay cancellation API '+response.status);
         return response.json();
-      },path=>ebayFinanceRequest(token,path,Math.min(deadline,Date.now()+8000)));
+      };
+      for(let i=0;i<4&&Date.now()+6000<deadline;i++){
+        const checked=await syncCancellationActors(supabase,dispatchToken,readCancellations,
+          path=>ebayFinanceRequest(token,path,Math.min(deadline,Date.now()+8000)));
+        if(!checked)break;
+      }
     }catch{console.warn('Cancellation attribution will retry.');}}
   } finally {
     await supabase.rpc("finish_ebay_finance_worker", {_dispatch_token:dispatchToken});

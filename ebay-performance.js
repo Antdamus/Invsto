@@ -123,7 +123,8 @@
   if((Date.parse(periods[0].end)-Date.parse(periods[0].start))!==(Date.parse(periods[1].end)-Date.parse(periods[1].start)))warnings.push('The periods contain different numbers of days. Raw totals reflect that difference.');
   if(periods[0].start<=periods[1].end&&periods[1].start<=periods[0].end)warnings.push('The periods overlap.');
   const checks=data.evidence?.requestor_checks||[];
-  if(checks.some(c=>!c.checked||c.error))warnings.push('eBay cancellation-requestor checks are in progress. Requests without a verified actor remain unverified.');
+  if(checks.some(c=>!c.checked||c.error))warnings.push('Some historical source checks are pending. Only verified refund postings and documented initiators are counted as confirmed.');
+  if(checks.some(c=>c.error?.includes('429')))warnings.push('eBay has temporarily limited historical lookups. Invsto will retry automatically.');
   note.textContent=warnings.join(' ');
   const evidence=window.EbayRefundAnalysis.index(data,idx);
   const [a,b]=periods.map(p=>window.EbayRefundAnalysis.summarize(evidence,p,basis));
@@ -138,7 +139,7 @@
    change('Gross refunded to buyers',a.gross,b.gross,true),change('Of which linked by cancellation ID',sum(cancels(a)),sum(cancels(b)),true),
    change('Other refund dollars',a.gross-sum(cancels(a)),b.gross-sum(cancels(b)),true),change('Seller debit after fee credits',a.net,b.net,true)];
   if(!activity)metrics.push(change('Sold order lines',a.soldLines,b.soldLines));
-  const purchaseMonth=t=>t.purchase?.slice(0,7)||'Unknown';
+  const purchaseMonth=t=>t.purchaseLocal?.slice(0,7)||'Unknown';
   const originMonths=[...new Set([...a.refunds,...b.refunds].map(purchaseMonth))].sort().reverse();
   const origins=table(['Purchase month','A · postings / dollars','B · postings / dollars'],originMonths.map(k=>{
    const x=a.refunds.filter(t=>purchaseMonth(t)===k),y=b.refunds.filter(t=>purchaseMonth(t)===k);
@@ -146,7 +147,7 @@
   }));
   const old=activity?panel('Where the refunds came from',comp([change('Refunds on purchases before the period',a.old,b.old),
    change('Dollars from those earlier purchases',a.oldGross,b.oldGross,true),
-   change('Dollars from purchases in this period',sum(a.refunds.filter(t=>t.purchase>=periods[0].start&&t.purchase<=periods[0].end)),sum(b.refunds.filter(t=>t.purchase>=periods[1].start&&t.purchase<=periods[1].end)),true),
+   change('Dollars from purchases in this period',sum(a.refunds.filter(t=>t.purchaseLocal>=periods[0].start&&t.purchaseLocal<=periods[0].end)),sum(b.refunds.filter(t=>t.purchaseLocal>=periods[1].start&&t.purchaseLocal<=periods[1].end)),true),
    change('Refunds at least 30 days after purchase',a.long,b.long),change('Dollars at least 30 days after purchase',a.longGross,b.longGross,true),
    change('Purchase date unknown · postings',a.unknown,b.unknown),change('Purchase date unknown · dollars',a.unknownGross,b.unknownGross,true)])+
    '<p class="note">Age is measured in calendar days. The 30-day group can overlap the earlier-purchase group.</p><details><summary>See the original purchase months</summary>'+origins+'</details>'):'';
@@ -181,9 +182,10 @@
    drivers.map(d=>[escape(d.reason),num(d.x.length)+' · '+cash(sum(d.x)),num(d.y.length)+' · '+cash(sum(d.y)),moneyDelta(sum(d.x),sum(d.y))]))+
    '<p class="note">Sorted by the largest dollar increase. A reason is shown only when the refund reference matches an eBay return or cancellation.</p>');
   const proof=(id,ref)=>{const u=orderUrl(id);return u?'<a target="_blank" rel="noopener" href="'+escape(u)+'">'+escape(id)+'</a>':escape(id||ref||'Unlinked');};
+  const purchaseLabel=r=>{const d=activity?r.purchaseLocal:r.purchase;return d?date(d):'Unknown';};
   function ledger(s){
-   const rows=s.refunds.map(t=>[proof(t.order_id),escape(t.reference)+'<small>'+escape(t.reason)+'</small>',date(t.day),t.purchase?date(t.purchase):'Unknown',t.age==null?'—':num(t.age)+' days',cash(t.gross),cash(t.net),escape(t.actor)+'<small>'+escape(t.source)+'</small>']);
-   const cc=s.cases.map(c=>[proof(c.order,c.id),'<a href="https://www.ebay.com/Cancel/Details?cancelId='+encodeURIComponent(c.id)+'" target="_blank" rel="noopener">'+escape(c.id)+'</a>',date(c.date),c.purchase?date(c.purchase):'Unknown',escape(c.reason),escape(c.actor)+'<small>'+escape(c.source)+'</small>',escape(c.timing)]);
+   const rows=s.refunds.map(t=>[proof(t.order_id),escape(t.reference)+'<small>'+escape(t.reason)+'</small>',date(t.day),purchaseLabel(t),t.age==null?'—':num(t.age)+' days',cash(t.gross),cash(t.net),escape(t.actor)+'<small>'+escape(t.source)+'</small>']);
+   const cc=s.cases.map(c=>[proof(c.order,c.id),'<a href="https://www.ebay.com/Cancel/Details?cancelId='+encodeURIComponent(c.id)+'" target="_blank" rel="noopener">'+escape(c.id)+'</a>',date(c.date),purchaseLabel(c),escape(c.reason),escape(c.actor)+'<small>'+escape(c.source)+'</small>',escape(c.timing)]);
    const rulings=[...s.escalations].sort().map(id=>[proof(id),s.rulings.has(id)?'eBay ruling':'Escalation recorded',escape((s.rulings.get(id)||[]).join(', ')||'—')]);
    return '<details><summary>Refund postings ('+rows.length+')</summary>'+table(['Order','Reference','Posted','Purchased','Sale age','Buyer refund','Seller debit','Issuer and evidence'],rows)+'</details>'+
     '<details><summary>Cancellation records ('+cc.length+')</summary>'+table(['Order','Case','Requested','Purchased','Reason','Initiator and evidence','Payment timing'],cc)+'</details>'+
@@ -191,7 +193,7 @@
     '<details><summary>All decided cases ('+s.allDecisions.length+')</summary>'+table(['Order','Case ID','Purchased','eBay decision','Seller outcome'],s.allDecisions.map(r=>[proof(r.oid),escape(r.id),r.purchase?date(M.day(r.purchase)):'Unknown',r.decided_at?time(r.decided_at):'Date unverified',escape(r.outcome==='UNDEFINED'?'Not recorded':r.outcome)]))+'</details>';
   }
   $('refund-body').innerHTML=subt+panel(activity?'Refunds posted in each period':'Refunds on purchases from each period',comp(metrics)+
-   '<p class="note">'+(activity?'Refund posting dates follow the eBay ledger. Cancellations use the request date.':'Later refunds and cancellations go back to the original purchase period. Recent purchases have had less time to generate a refund.')+
+   '<p class="note">'+(activity?'Activity and original purchase dates in this comparison use eBay’s Pacific calendar. Cancellations use the request date.':'Later refunds and cancellations go back to the original Eastern purchase period. Recent purchases have had less time to generate a refund.')+
    ' Amounts reflect verified Refund entries. Claim debits appear separately in the claims report.</p>')+old+driversPanel+who+intervention+cancel+
    panel('Inspect the records','<h4>Period A</h4>'+ledger(a)+'<h4>Period B</h4>'+ledger(b))+
    '<p class="note">Latest order, case and refund evidence updates as Invsto syncs. Earlier purchases without a verified date stay in the unknown group.</p>';
