@@ -141,9 +141,19 @@
         const lot=one(await rpc('prepare_ebay_live_bag_label',{_attempt_id:sale.id}));
         if(!lot?.id||!lot.lot_code)throw Error('The bag could not be prepared for its photo.');
         const path=`live-bags/${lot.id}/${userId}/${command.requestId}.jpg`;
-        const {error}=await window.supabase.storage.from('photos').upload(path,blob,{contentType:'image/jpeg',upsert:false});
-        if(error&&String(error.statusCode||error.status)!=='409'&&error.error!=='Duplicate')throw error;
-        const photo=one(await rpc('attach_ebay_live_bag_photo',{_attempt_id:sale.id,_photo_id:command.requestId,_photo_path:path,_width:image.width,_height:image.height,_captured_at:image.capturedAt}));
+        const upload=await window.supabase.storage.from('photos').upload(path,blob,{contentType:'image/jpeg',upsert:false}).catch(error=>({error}));
+        const status=Number(upload.error?.statusCode||upload.error?.status);
+        const uncertain=!!upload.error&&(!status||status>=500||status===408);
+        if(upload.error&&!uncertain&&status!==409&&upload.error.error!=='Duplicate')throw upload.error;
+        // Storage can commit a JPEG even when the gateway loses its response.
+        // The attachment RPC verifies the stored object before saving the photo.
+        let photo;
+        try {
+          photo=one(await rpc('attach_ebay_live_bag_photo',{_attempt_id:sale.id,_photo_id:command.requestId,_photo_path:path,_width:image.width,_height:image.height,_captured_at:image.capturedAt}));
+        } catch(error) {
+          if(uncertain&&/upload is not complete/i.test(error.message))throw Error('Storage has not confirmed the photo. Keep the capture tab open and retry the same photo.');
+          throw error;
+        }
         window.dispatchEvent(new CustomEvent('live-bag-photo-saved',{detail:{lotId:lot.id}}));
         return {photoId:photo.id,lotId:lot.id,lotCode:lot.lot_code};
       }

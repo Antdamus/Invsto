@@ -21,6 +21,17 @@ test('current and editable eBay layouts retain identity, recover missing evidenc
  const page=await parser(t,'');await page.addScriptTag({path:new URL('./fixtures/live-capture-layout-checks.js',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  const results=await page.evaluate(()=>runLiveCaptureLayoutChecks());assert.equal(results.length,12);assert.deepEqual(results.filter(r=>!r.passed),[]);
 });
+test('Activity observations carry the current computer zone when it changes mid-show',async t=>{
+ const page=await parser(t,tile()+'<div id="activity-panel">'+row()+'</div>');
+ for(const zone of ['America/New_York','America/Denver']){
+  await page.evaluate(zone=>{
+   const original=window.originalDateTimeFormat||=Intl.DateTimeFormat;
+   Intl.DateTimeFormat=function(locale,options){return new original(locale,{timeZone:zone,...options});};
+  },zone);
+  const events=await page.evaluate(()=>InvstoLiveParser.parse(document).events);
+  assert.equal(events.find(e=>e.source==='activity').activity_timezone,zone);
+ }
+});
 test('parser distinguishes explicit paid badge from auction wins and AUC labels',async t=>{const page=await parser(t,tile()+'<div id="activity-panel">'+row()+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));assert.deepEqual(r.events.map(e=>e.kind),['paid','won']);assert.equal(r.events[1].listing_id,'123456789012');await page.setContent(tile('123456789012','AUC'));const pending=(await page.evaluate(()=>InvstoLiveParser.parse(document))).events;assert.equal(pending.length,1);assert.equal(pending[0].kind,'unknown');assert.equal(pending[0].payment_snapshot,true);});
 test('ambiguous listing titles and unfamiliar payment text remain unverified',async t=>{const page=await parser(t,tile()+tile('222222222222')+'<div id="activity-panel">'+row('payment maybe received')+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));const activity=r.events.find(e=>e.source==='activity');assert.equal(activity.kind,'unknown');assert.equal(activity.listing_id,undefined);});
 test('failures without buyer details and identical repeated auction notifications require review',async t=>{const page=await parser(t,tile('123456789012','Payment failed','#001 - Watch','')+'<div id="activity-panel">'+row()+row()+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));assert.equal(r.events[0].kind,'failed');assert.equal(r.events[0].buyer,'');assert.ok(r.events.some(e=>e.kind==='unknown'&&e.key.startsWith('ambiguous|')));});

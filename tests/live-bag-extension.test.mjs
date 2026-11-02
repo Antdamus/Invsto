@@ -30,13 +30,17 @@ async function open(t,{configured=true,sharedContext,seed,capture=false,existing
     if(configured)localStorage.setItem('invsto.print.destination.v1','station-a');
     window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff-a'}}}})},storage:{from:()=>({upload:async(path,blob,options)=>{
       calls.push({name:'upload-bag-photo',path,size:blob.size,options});
-      if(photoFiles[path])return {error:{statusCode:'409'}};photoFiles[path]=await blob.text();return {data:{path}};
+      if(photoFiles[path])return {error:{statusCode:'409'}};
+      if(window.storageOutcome!=='timeout-before-save')photoFiles[path]=await blob.text();
+      if(window.storageOutcome)return {error:{statusCode:'504',message:'Gateway timeout'}};
+      return {data:{path}};
     }})},from(table){let selected;
       const q={select(){return q},eq(key,value){selected=value;return q},maybeSingle:async()=>({data:table==='ebay_live_connections'?{event_id:selected,session_id:'session-'+selected}:null})};return q;
     },rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='list_print_stations')return {data:stations};
       if(name==='attach_ebay_live_bag_photo'){
+        if(!photoFiles[args._photo_path])return {error:{message:'The photo upload is not complete. Retry this photo.'}};
         const sale=sales.find(s=>s.id===args._attempt_id);if(!sale?.buyer||sale.merged_into)return {error:{message:'Payment is not confirmed'}};
         let photo=photos.find(p=>p.id===args._photo_id);if(!photo){photo={id:args._photo_id,...args};photos.push(photo);}
         if(window.delayedPhoto)await new Promise(resolve=>window.finishPhoto=resolve);
@@ -416,6 +420,17 @@ test('missing receipts cannot claim a bag was sent and do not stop automatic pri
   const result=await page.evaluate(()=>chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action:'status',event_id:'EVENT123'}}));
   assert.equal(result.automatic.last.status,'submitted','older installed panels also receive the current automatic receipt');
   assert.equal(await page.evaluate(()=>jobs.length),1);
+});
+test('a gateway timeout confirms a stored JPEG or keeps the same image available for retry',async t=>{
+  const page=await open(t),camera=page.locator('[data-bag-camera]');
+  await page.evaluate(()=>{window.storageOutcome='timeout-before-save';});
+  await camera.click();await expect(page.locator('[data-bag-status]')).toContainText('Storage has not confirmed the photo');
+  assert.equal(await page.evaluate(()=>photos.length),0);
+  await page.evaluate(()=>{window.storageOutcome='timeout-after-save';});
+  await camera.click();await expect(page.locator('[data-bag-status]')).toContainText('Photo saved');
+  const saved=await page.evaluate(()=>({photos,captureCount,paths:calls.filter(c=>c.name==='upload-bag-photo').map(c=>c.path)}));
+  assert.equal(saved.captureCount,1);assert.equal(saved.photos.length,1);assert.equal(saved.paths.length,2);
+  assert.equal(saved.paths[0],saved.paths[1]);
 });
 test('one camera click saves only the selected paid bag and retries the original photo after a lost confirmation',async t=>{
   const page=await open(t),camera=page.locator('[data-bag-camera]');

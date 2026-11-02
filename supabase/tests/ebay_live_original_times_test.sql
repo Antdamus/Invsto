@@ -50,7 +50,8 @@ begin
  perform pg_temp.verify(not exists(select 1 from public.ebay_live_attempts where event_id=event and seller_id<>other) and (select owner_employee_id=other from public.live_sale_lots where id=bag.id),'whole show correction updates all sales and bags');
  begin perform public.correct_ebay_live_sale_sellers(event,array[auction,gen_random_uuid()],seller,'Invalid cross show selection.');raise exception 'Invalid selection accepted';exception when invalid_parameter_value then null;end;
  perform pg_temp.verify((select seller_id=other from public.ebay_live_attempts where id=auction),'invalid selection is atomic');
- begin perform public.apply_ebay_live_stream_metadata(event,stream||'{"activity_timezone":"America/Chicago"}');raise exception 'Mixed clock timezones accepted';exception when invalid_parameter_value then null;end;
+ perform public.apply_ebay_live_stream_metadata(event,stream||'{"activity_timezone":"America/Chicago"}');
+ perform pg_temp.verify((select stream_metadata->>'activity_timezone'='America/New_York' from public.ebay_live_connections where event_id=event),'another browser timezone preserves the show clock');
  perform pg_temp.verify(true,'mixed capture timezones do not reinterpret existing clocks');
  insert into public.ebay_orders(order_number,buyer_username,sale_date,raw_payload) values('__time_fixture_'||gen_random_uuid(),'history-fixture','2026-08-24 06:15Z','{"orderPaymentStatus":"PAID"}') returning id into ord;
  insert into public.ebay_order_lines(order_id,item_number,transaction_id,item_title,sold_for,quantity) values(ord,'123456789012','time-fixture','Historical watch',100,1) returning id into line;

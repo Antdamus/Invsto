@@ -33,6 +33,10 @@ before(async()=>{
  await db.exec(await read('20261007173000_ebay_live_paid_retry_badges.sql'));
  await db.exec(await read('20261009030000_ebay_live_current_payment.sql'));
  await db.exec(await read('20261029223000_live_unknown_payment_preserves_evidence.sql'));
+ const clocks=await read('20261008150000_batch_live_order_sync_reconciliation.sql');
+ await db.exec(clocks.slice(clocks.indexOf('create or replace function public.ebay_live_activity_time'),clocks.indexOf('create function public.ebay_live_order_lines_changed_statement')));
+ await db.exec('drop function apply_ebay_live_stream_metadata(text,jsonb); alter table live_sale_sessions add column started_at timestamptz');
+ await db.exec(await read('20261102220000_live_capture_show_clock.sql'));
  day=(await db.query("select to_char(now()-interval '1 day','YYYY-MM-DD') as day")).rows[0].day;
 });
 beforeEach(async()=>{await db.exec(`truncate ebay_live_listing_payments,ebay_live_audit,ebay_live_observations,ebay_live_attempts,ebay_live_connections,live_sale_sessions,live_sale_lots,ebay_order_lines,ebay_orders cascade;
@@ -137,4 +141,48 @@ test('a reused listing does not revoke another buyer confirmed payment',async()=
  let a=await rows();assert.equal(a.find(a=>a.buyer==='winner').payment_state,'paid');assert.equal(a.find(a=>a.buyer==='next-buyer').payment_state,'failed');
  await ingest([obs('paid',{buyer:'next-buyer',key:'next-paid',observed_at:day+'T12:02:00Z'})]);
  a=await rows();assert.equal(a.filter(a=>a.payment_state==='paid').length,2);
+});
+
+test('browser clock changes replay the original auction across zones and midnight',async()=>{
+ const stream={source:'ebay_event_information',start_local:'2026-10-30T22:30',timezone_label:'America/New_York',activity_timezone:'America/New_York'};
+ const source='America/Denver';
+ await db.query('update ebay_live_connections set stream_metadata=null,stream_start_at=null');
+ const push=(events,zone)=>db.query('select ingest_ebay_live_events($1,$2::jsonb,$3::jsonb)',[event,JSON.stringify(events),JSON.stringify({stream:{...stream,activity_timezone:zone}})]);
+ const activity=(clock,zone)=>obs('won',{time_label:clock,activity_timezone:zone,key:['activity','winner','#001 - UPGRADE',3000,clock,'Won the auction'].map(encodeURIComponent).join('|')});
+ await push([],stream.activity_timezone);
+ await push([activity('Oct 31, 12:15 AM')],stream.activity_timezone);
+ await push([activity('10:15 PM')],source); // Older helper sends the zone in batch metadata.
+ await push([activity('Oct 30, 10:15 PM',source)],stream.activity_timezone); // Queued on another computer.
+ await push([],source);
+ assert.equal((await rows()).length,1);
+ const result=await db.query('select source_key,time_label,occurred_at from ebay_live_observations');
+ assert.equal(result.rows.length,1);
+ assert.equal(result.rows[0].time_label,'12:15 AM');
+ assert.equal(new Date(result.rows[0].occurred_at).toISOString(),'2026-10-31T04:15:00.000Z');
+ assert.equal((await db.query('select stream_metadata from ebay_live_connections')).rows[0].stream_metadata.activity_timezone,stream.activity_timezone);
+ await db.query('select apply_ebay_live_stream_metadata($1,$2::jsonb)',[event,JSON.stringify({...stream,activity_timezone:source})]);
+ assert.equal((await db.query('select stream_metadata from ebay_live_connections')).rows[0].stream_metadata.activity_timezone,stream.activity_timezone);
+});
+test('an ambiguous foreign DST minute stays in the review queue on retries',async()=>{
+ const stream={source:'ebay_event_information',start_local:'2026-11-01T04:00',timezone_label:'UTC',activity_timezone:'UTC'};
+ await db.query('select apply_ebay_live_stream_metadata($1,$2::jsonb)',[event,JSON.stringify(stream)]);
+ const a=obs('won',{key:'activity|winner|title|3000|1%3A30%20AM|Won',time_label:'1:30 AM',activity_timezone:'America/New_York'});
+ await ingest([a]);await ingest([a]);
+ assert.equal((await rows()).length,0);
+ const result=await db.query('select disposition,kind,evidence,occurred_at from ebay_live_observations');
+ assert.equal(result.rows.length,1);assert.equal(result.rows[0].disposition,'unmatched');assert.equal(result.rows[0].kind,'unknown');
+ assert.match(result.rows[0].evidence,/1:30 AM.*America\/New_York/);assert.equal(result.rows[0].occurred_at,null);
+});
+test('a replay from a different zone matches a dated observation stored before the change',async()=>{
+ const stream={source:'ebay_event_information',start_local:'2026-10-30T22:30',timezone_label:'America/New_York',activity_timezone:'America/New_York'};
+ await db.query('update ebay_live_connections set stream_metadata=null');
+ await db.query('select apply_ebay_live_stream_metadata($1,$2::jsonb)',[event,JSON.stringify(stream)]);
+ const originalKey='activity|winner|title|3000|Oct%2031%2C%2012%3A15%20AM|Won';
+ const existing=obs('won',{key:originalKey,time_label:'Oct 31, 12:15 AM'});
+ await db.query('select ingest_ebay_live_events_before_current_payment($1,$2::jsonb,$3::jsonb)',[event,JSON.stringify([existing]),'{}']);
+ const previous=(await rows())[0];
+ await ingest([{...existing,key:'activity|winner|title|3000|10%3A15%20PM|Won',time_label:'10:15 PM',activity_timezone:'America/Denver'}]);
+ const current=await rows();assert.equal(current.length,1);assert.equal(current[0].id,previous.id);
+ assert.equal(current[0].win_key,originalKey);assert.deepEqual(current[0].sold_at,previous.sold_at);
+ assert.equal((await db.query('select count(*)::int n from ebay_live_observations')).rows[0].n,1);
 });

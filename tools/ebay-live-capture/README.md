@@ -1,4 +1,6 @@
-# Invsto Live Capture (1.7.7)
+# Invsto Live Capture (1.8.5)
+
+Activity carries the computer time zone at capture. When a show moves between computers, Invsto keeps the original show clock for matching sales. If a clock is ambiguous during a daylight-saving change, check the observation in Live Sales.
 
 ## Printer receipt beside the buyer (1.7.7)
 

@@ -253,7 +253,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       if(data.closedEvents?.[event_id])return {ok:true,closed:true,status:'This show is closed'};
       for (const event of (message.events||[]).slice(0,100)) {
         if (typeof event.key !== 'string' || event.key.length>2000) continue;
-        const id=event_id+'|'+event.key;
+        const id=event_id+'|'+(event.activity_timezone ? event.activity_timezone+'|' : '')+event.key;
         data.events[id]={id,event_id,event};
       }
       data.sources ||= {};data.sources[event_id] ||= {};

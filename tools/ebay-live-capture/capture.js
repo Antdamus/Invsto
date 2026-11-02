@@ -134,7 +134,7 @@
       const reason=parsed.broadcastEnded?recoveryText:!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?layoutWarning.textContent:!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
       const events=[];
       if(active) for(const event of parsed.events) {
-        const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
+        const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount,event.activity_timezone]);
         const previous=listingSent.get(event.listing_id);
         const changed=event.source==='listing'?previous?.signature!==signature||Date.now()-previous.at>=30000:sent.get(event.key)!==signature;
         if(changed && events.length<100)events.push(event);
@@ -143,7 +143,7 @@
       if(result?.closed){active=false;resumePending=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent='This Invsto show is closed. Capture stopped.';panelStatus('Show closed','paused');return;}
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
-      if(result?.ok) for(const e of events){const signature=JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]);sent.set(e.key,signature);if(e.source==='listing')listingSent.set(e.listing_id,{signature,at:Date.now()});}
+      if(result?.ok) for(const e of events){const signature=JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount,e.activity_timezone]);sent.set(e.key,signature);if(e.source==='listing')listingSent.set(e.listing_id,{signature,at:Date.now()});}
       const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       panelStatus(!active?'Capture off':!result?.ok?'Check connection':parsed.broadcastEnded?'Reading history':working?'Page stays still':ready?'Capture on':'Check capture',!active?'paused':!result?.ok?'attention':ready?'active':'waiting',statusText);
       if(note.textContent!==statusText)note.textContent=statusText;

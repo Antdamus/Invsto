@@ -49,6 +49,7 @@
         events.push({key:key(['listing',listing_id,buyer,amount,kind]),source:'listing',kind,payment_snapshot:true,listing_id,title,ordinal,buyer,amount,currency:'USD',observed_at,evidence:statuses.join(' / ')});
       }
     }
+    const activityZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const panel = doc.querySelector('#activity-panel');
     for (const row of panel?.querySelectorAll('[class*="_rowContent_"]') || []) {
       const line = part(row, 'messageLine');
@@ -61,7 +62,7 @@
       const kind = status(action);
       const matches = Object.values(cache).filter(t => t.title === title);
       const listing = matches.length === 1 ? matches[0] : {};
-      const event = {key:key(['activity',buyer,title,amount,time_label,action]),source:'activity',kind,...listing,title,buyer,amount,currency:'USD',time_label,observed_at,evidence:text(row).slice(0,1000)};
+      const event = {key:key(['activity',buyer,title,amount,time_label,action]),source:'activity',activity_timezone:activityZone,kind,...listing,title,buyer,amount,currency:'USD',time_label,observed_at,evidence:text(row).slice(0,1000)};
       // The clock is minute precision: provide an estimate, never an exact replay timestamp.
       const clock = time_label.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
       if (elapsed !== null && clock) {
@@ -74,7 +75,7 @@
     }
     const counts=new Map();
     for(const e of events.filter(e=>e.source==='activity'))counts.set(e.key,(counts.get(e.key)||0)+1);
-    for(const [k,count] of counts)if(count>1)events.push({key:'ambiguous|'+k,kind:'unknown',source:'activity',observed_at,evidence:'Identical auction notifications cannot be distinguished. Verify each auction attempt on eBay.'});
+    for(const [k,count] of counts)if(count>1)events.push({key:'ambiguous|'+k,kind:'unknown',source:'activity',activity_timezone:activityZone,observed_at,evidence:'Identical auction notifications cannot be distinguished. Verify each auction attempt on eBay.'});
     const soldTab=[...doc.querySelectorAll('[role="tab"]')].find(el=>/^Sold\s*\([\d,]+\)$/i.test(text(el)));
     const soldCount=Number(text(soldTab).match(/\(([\d,]+)\)/)?.[1]?.replace(/,/g,''));
     if(soldTab?.getAttribute('aria-selected')==='true'&&soldCount>0&&!tiles.length){supported=false;layout.message='Capture needs attention: eBay shows sold items, but their listing cards cannot be read. Keep Sold and Activity open.';}
