@@ -298,7 +298,7 @@ test('the visible dropdown prints an earlier bag even after many newer sales and
 test('a sale arriving during print cannot replace the bag being sent and a later failed payment still permits printing',async t=>{
   const page=await open(t);await page.evaluate(()=>{delayedPrint=true;});await page.locator('[data-bag-print]').click();
   await expect.poll(()=>page.evaluate(()=>jobs.length)).toBe(1);
-  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000009',listing_title:'#020 - Ring',buyer:'new-winner',sold_at:'2026-10-06T16:00:00Z',lot_id:null});finishPrint();});
+  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000009',listing_title:'#020 - Ring',buyer:'new-winner',sold_at:'2026-10-06T16:00:00Z',lot_id:null});delayedPrint=false;finishPrint();});
   await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   assert.match(await page.evaluate(()=>jobs[0].args._label_xml),/CURRENT-WINNER/);
   await expect(page.locator('.bag-number')).toHaveText('#020',{timeout:8000});
