@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#123d37"><title>eBay performance reports · Invsto</title>
-<link rel="stylesheet" href="ebay-performance.css?v=1"></head>
+<link rel="stylesheet" href="ebay-performance.css?v=2"></head>
 <body>
 <header class="mast"><a href="dashboard.html#reports-panel">← Business snapshot</a><b>OG JEWELERS <span>/</span> INVSTO</b></header>
 <main><div class="intro"><small>SELLER PERFORMANCE &nbsp;/&nbsp; EBAY</small><h1>Sales after the auction</h1>
 <p>Track cancellations, refunds and the time from closing an order to releasing its funds.</p></div>
-<nav aria-label="Report"><button id="trends-tab" aria-pressed="true">Cancellations &amp; refunds</button><button id="release-tab" aria-pressed="false">Funds release timing</button></nav>
+<nav aria-label="Report"><button id="trends-tab" aria-pressed="true">Sales trends</button><button id="refunds-tab" aria-pressed="false">Refunds &amp; eBay involvement</button><button id="release-tab" aria-pressed="false">Funds release timing</button></nav>
 <div class="controls"><label id="period-label">Purchase period <select id="period"><option value="four">Rolling four months</option><option value="fourWeeks">Last 28 days</option><option value="month">This month so far</option><option value="lastMonth">Last calendar month</option></select></label>
 <button id="refresh">Refresh report</button><button id="print" disabled>Print / save PDF</button></div>
 <p id="status" role="status">Connecting to Invsto…</p>
@@ -15,8 +15,14 @@
 <details id="targets"><summary>Set performance targets</summary><p>Set the maximum percentage of original sold lines for each measure. Leave a field blank to track the trend without a target.</p>
 <form id="goal-form"><label>All canceled lines (%)<input id="goal-cancellation" type="number" min="0" max="100" step="0.01" inputmode="decimal"></label><label>Buyer-requested lines (%)<input id="goal-buyer" type="number" min="0" max="100" step="0.01" inputmode="decimal"></label><label>Other refund lines (%)<input id="goal-refund" type="number" min="0" max="100" step="0.01" inputmode="decimal"></label><button>Save targets</button></form>
 <p id="goal-note" role="status"></p></details></section>
+<section id="refunds" hidden aria-labelledby="refund-title"><h2 id="refund-title">Refunds &amp; eBay involvement</h2>
+<form id="refund-filters" class="panel"><label>Group by <select id="refund-basis"><option value="activity">When the refund posted or cancellation was requested</option><option value="purchase">When the original purchase happened</option></select></label>
+<div class="compare-dates"><fieldset><legend>Period A</legend><label>From <input id="a-start" type="date" required></label><label>Through <input id="a-end" type="date" required></label></fieldset>
+<fieldset><legend>Compare with · Period B</legend><label>From <input id="b-start" type="date" required></label><label>Through <input id="b-end" type="date" required></label></fieldset></div>
+<button type="submit">Compare periods</button> <button type="button" id="last-months">Last two full months</button> <button type="button" id="last-28">Last two 28-day periods</button><p id="compare-note" role="status"></p></form>
+<div id="refund-body"></div></section>
 <section id="release" hidden aria-labelledby="release-title"><h2 id="release-title">Funds release timing</h2><div id="release-body"></div></section>
 </main><footer>Invsto &nbsp;·&nbsp; OG Jewelers &nbsp;·&nbsp; Eastern reporting dates</footer>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="initSupabase.js"></script>
-<script src="ebay-hold-details.js?v=20261101u"></script><script src="ebay-performance-model.js?v=1"></script><script src="ebay-performance.js?v=1"></script>
+<script src="ebay-hold-details.js?v=20261101u"></script><script src="ebay-performance-model.js?v=1"></script><script src="ebay-refund-analysis.js?v=1"></script><script src="ebay-performance.js?v=2"></script>
 </body></html>

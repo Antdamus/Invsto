@@ -80,6 +80,10 @@ test('mobile admin dashboard report opens, changes period, saves targets and pri
   await p.addInitScript(sample=>{window.sample=sample;window.print=()=>window.printed=true;},data);
   await p.goto('https://report.test/ebay-performance.html');await p.getByText('Are we on track?').waitFor();
   await p.selectOption('#period','month');await p.locator('#targets summary').click();await p.fill('#goal-buyer','2.5');await p.getByRole('button',{name:'Save targets'}).click();await p.getByText('Targets saved for this store.').waitFor();
+  await p.click('#refunds-tab');await p.getByText('Where the refunds came from').waitFor();
+  await p.click('#last-months');await p.selectOption('#refund-basis','purchase');
+  await p.getByText('Refunds on purchases from each period').waitFor();
+  assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await p.click('#release-tab');await p.getByText('Upcoming estimated releases').waitFor();await p.click('#print');
   assert.equal(await p.evaluate(()=>window.printed),true);
   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);
