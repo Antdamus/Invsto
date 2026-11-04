@@ -99,15 +99,17 @@ test('manual performance requests queue only stale sources and never override an
    create table ebay_health_jobs(kind text,id text,due timestamptz default now(),verified timestamptz,attempted timestamptz,note text,ticket uuid,owner_id uuid,lease_until timestamptz,primary key(kind,id));
    create function ebay_report_manual_actions_before_performance(date) returns jsonb language sql as $$select '[]'::jsonb$$;`);
   await db.exec(await readFile(file('supabase/migrations/20261104061000_inline_ebay_report_actions.sql'),'utf8'));
+  await db.exec(await readFile(file('supabase/migrations/20261104065500_current_week_dashboard_checks.sql'),'utf8'));
   const actions=()=>v('select ebay_report_manual_actions(current_date) v'),claim=()=>v('select claim_requested_ebay_performance_checks() v');
   assert.equal((await actions())[0].sources.orders.verified,null);
   await db.exec("insert into ebay_health_jobs(kind,id,verified) values('orders','past',now());select request_ebay_performance_refresh();");
   assert.equal((await actions())[0].sources.cases.requested!=null,true);
-  const batch=await claim();assert.deepEqual(batch.map(j=>j.kind),['cases']);assert.equal((await actions())[0].sources.cases.checking,true);
+  const batch=await claim();assert.deepEqual(batch.map(j=>j.kind),['cases','orders']);assert.equal((await actions())[0].sources.cases.checking,true);
   await db.exec('select request_ebay_performance_refresh()');assert.deepEqual(await claim(),[]);
   await db.exec("update ebay_health_jobs set note='Sign in to Seller Hub',lease_until=null,due=now()+interval '2 hours' where kind='cases'");
   assert.match((await actions())[0].sources.cases.error,/Sign in/);await db.exec('select request_ebay_performance_refresh()');assert.deepEqual(await claim(),[]);
-  await db.exec("update ebay_health_jobs set verified=now(),note=null where kind='cases'");assert.deepEqual(await actions(),[]);
+  await db.exec("update ebay_health_jobs set verified=now(),note=null where kind='cases'");assert.equal((await actions())[0].sources.orders.verified,null);
+  await db.exec("update ebay_health_jobs set verified=now(),note=null where kind='orders' and id<>'past'");assert.deepEqual(await actions(),[]);
   await db.exec("set test.denied='on'");await assert.rejects(claim(),/Admin only/);await assert.rejects(db.exec('select request_ebay_performance_refresh()'),/Admin only/);
   assert.equal(await v("select has_function_privilege('anon','request_ebay_performance_refresh()','execute') v"),false);
  }finally{await db.close();}
