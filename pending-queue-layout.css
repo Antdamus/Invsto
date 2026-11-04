@@ -1,0 +1,93 @@
+/* eBay packing queue: lookup, shipping priorities, then tools for the visible lines. */
+#packing-queue { scroll-margin-top: calc(var(--pending-header-height, 94px) + 10px); }
+.orders-panel > .panel-head { align-items: center; margin-bottom: 14px; }
+.orders-panel > .panel-head h2 { margin: 3px 0 0; color: #faf5ea; font-size: 1.65rem; }
+.queue-lookups, .queue-priorities, .queue-utilities { display: grid; gap: 12px; min-width: 0; }
+.queue-lookups { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+.queue-lookups > section { min-width: 0; padding: 14px; margin: 0; border: 1px solid #41443e; background: #202420; border-radius: 14px; }
+.queue-lookups .lookup-label, .queue-controls h3, .queue-work h3 { display: block; margin: 0; color: #f6f2e8; font: 800 1rem/1.35 Manrope, system-ui, sans-serif; }
+.queue-lookups .lookup-label { margin-bottom: 8px; }
+.orders-panel .order-lookup .filter-row { display: flex; flex-flow: row nowrap; margin: 0; width: 100%; }
+.queue-lookups .bag-scan-form, .queue-lookups .camera-scan-field { flex-direction: row; align-items: center; }
+.queue-lookups input[type=search] { width: 100%; min-width: 0; height: 46px; border: 1px solid #51564d; background: #151916; color: #fff9eb; }
+.queue-lookups .bag-scan-form .camera-scan-button::after { content: none; }
+.queue-lookups .bag-scan-form > button { min-height: 44px; padding: 8px 14px; border-radius: 10px; box-shadow: none; }
+.queue-lookups .tracking-search-help, .queue-lookups .bag-scan-meta p { margin: 6px 0 0; color: #bfc8bd; font-size: .77rem; line-height: 1.45; }
+.queue-lookups .bag-scan-meta .is-error { color: #ffbaaa; }
+.queue-controls { padding: 16px 0; margin: 0; }
+.queue-controls-heading, .queue-view-options, .queue-purchase { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.queue-controls-heading #buyer-remaining-count { width: auto; margin: 0; padding: 0; border: 0; background: none; font-size: .8rem; font-weight: 600; color: #bbc9bd; }
+.queue-controls #buyer-remaining-count[hidden] { display: none; }
+.queue-controls .buyer-due-filters { margin: 10px 0; }
+.queue-controls .buyer-shipping-due-options { gap: 6px; }
+.queue-controls .buyer-shipping-due-options .secondary-btn { border-radius: 9px; }
+.queue-view-options { align-items: end; }
+.queue-view-options label, .queue-finance-body label { display: grid; gap: 4px; margin: 0; color: #cbc8bf; font: 700 .78rem/1.4 Manrope, system-ui, sans-serif; }
+.queue-view-options select, .queue-view-options #order-created-date-filter { width: 100%; min-height: 42px; min-width: 0; border-radius: 9px; }
+.queue-view-options select { padding: 8px 30px 8px 10px; }
+.queue-purchase { align-items: end; }
+.queue-view-options .buyer-due-filter-help { display: none; flex-basis: 100%; margin: 0; }
+.queue-view-options:has(#order-created-date-filter:focus, #order-created-date-filter.is-active) .buyer-due-filter-help { display: block; }
+.queue-priorities { grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr); align-items: stretch; }
+.queue-work { padding: 14px; min-width: 0; border: 1px solid #44443d; border-radius: 14px; background: #20211e; }
+.queue-work .pending-work-filters { margin: 8px 0 0; }
+.queue-work .pending-watch-filters { margin: 0; gap: 6px; flex-basis: 100%; }
+.queue-work .pending-work-filters button { min-height: 40px; padding: 7px 10px; border-radius: 9px; }
+.queue-work .pending-report-actions { margin: 5px 0 0; gap: 8px; }
+.queue-work .pending-report-actions a { padding: 3px 0; min-height: 34px; border: 0; background: none; color: #f1d39b; text-decoration: underline; text-underline-offset: 3px; font-size: .8rem; }
+.queue-priorities .watch-directory { grid-template-columns: 1fr; align-content: center; gap: 10px; margin: 0; }
+.queue-priorities .watch-directory-brands button { min-height: 48px; }
+.queue-utilities { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin: 12px 0; }
+.queue-utilities > details { min-width: 0; margin: 0; border: 1px solid #46453f; border-radius: 11px; background: #201f1e; box-shadow: none; }
+.queue-utilities > details[open], .queue-utilities:not(:has(#order-import-panel:not(.hidden))) > .queue-finance { grid-column: 1/-1; }
+.queue-utilities > details > summary { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 9px 13px; cursor: pointer; list-style: none; color: #f3eadb; font: 700 .91rem/1.4 Manrope, system-ui, sans-serif; }
+.queue-utilities > details > summary::-webkit-details-marker { display: none; }
+.queue-utilities summary > :last-child { margin-left: auto; }
+.queue-utilities .import-panel-summary-action { padding: 0; border: 0; background: none; min-height: auto; }
+.queue-utilities .import-panel-summary h2, #phone-packing-tools-content .import-panel-summary h2 { margin: 0; color: #f3eadb; font: inherit; }
+.queue-chevron { display: inline-block; width: 9px; height: 9px; flex: 0 0 auto; border: solid #e6c88c; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); margin-inline: 5px; }
+details[open] > summary .queue-chevron { transform: translateY(2px) rotate(225deg); }
+#queue-finance-active { padding: 3px 7px; background: #53452a; color: #ffe6ad; border-radius: 6px; font-size: .75rem; }
+.queue-finance-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; padding: 14px; border-top: 1px solid #44443d; }
+.queue-finance-body > div { align-content: start; min-width: 0; align-items: end; margin: 0; padding: 0; border: 0; background: none; }
+.queue-finance-body select { min-width: 0; width: 100%; }
+.queue-finance-body :is(.buyer-refund-field, .eh-filter-controls > label) { flex: 1 1 160px; }
+.admin-order-actions { box-shadow: none; border-radius: 12px; }
+.admin-order-actions h2 { color: #f5efe4; }
+.admin-order-actions:not(.has-selection) :is(#admin-clear-order-selection, #admin-open-ebay-labels, #admin-mark-packed-no-stock, #admin-mark-cancelled) { display: none; }
+.admin-order-actions.has-selection { border-color: #baa06b; }
+.admin-order-actions-controls .count-pill { display: inline-flex; align-items: center; }
+.orders-panel :is(summary, button, select, input, a):focus-visible { outline: 2px solid #f5d499; outline-offset: 2px; }
+@media (min-width: 761px) {
+  .content.pending-content { width: 100%; max-width: 1600px; margin-inline: auto; }
+}
+@media (min-width: 1400px) {
+  .queue-controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; align-items: end; }
+  .queue-controls-heading { grid-column: 1/-1; }
+  .queue-controls .buyer-due-filters { margin: 0; }
+  .queue-controls .buyer-shipping-due-options > span { flex-basis: 100%; }
+  .queue-controls .queue-view-options { border-left: 1px solid #47463f; padding-left: 20px; }
+}
+@media (max-width: 900px) {
+  .queue-lookups { grid-template-columns: repeat(auto-fit, minmax(min(100%, 315px), 1fr)); }
+  .queue-priorities { grid-template-columns: repeat(auto-fit, minmax(min(100%, 295px), 1fr)); }
+}
+@media (max-width: 760px) {
+  .pending-content .order-marketplace-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pending-content .order-marketplace-tabs a { min-width: 0; padding-inline: 5px; text-align: center; }
+  .queue-lookups, .queue-priorities, .queue-utilities { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .queue-lookups > section, .queue-work { padding: 11px; }
+  .queue-lookups .bag-scan-form > button { padding-inline: 10px; }
+  .queue-controls { padding: 9px 0; }
+  .queue-controls .buyer-due-filters { margin: 0; }
+  .queue-controls-heading { gap: 4px 8px; }
+  .queue-controls-heading #phone-order-filters { margin-left: auto; min-height: 44px; }
+  .orders-panel:not(.phone-filters-open) .queue-view-options { display: none; }
+  .phone-filters-open .queue-view-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); margin-top: 8px; }
+  .queue-view-options label { min-width: 0; }
+  .queue-view-options #queue-purchase-help { grid-column: 1/-1; }
+  .queue-work .pending-work-filters button { min-height: 44px; }
+  .queue-work .pending-watch-filters { display: grid; grid-template-columns: 1fr 1fr; }
+  .queue-priorities .watch-directory { gap: 6px; }
+  .queue-utilities { margin: 8px 0; }
+}

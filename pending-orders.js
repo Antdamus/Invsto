@@ -3395,6 +3395,7 @@ function applyOrderFilters() {
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
   filtered = window.OGPendingBuyerRefunds?.filter?.(filtered) || filtered;
   filtered = filterOrderHoldReasons(filtered);
+  renderQueueFinanceFilterCount();
 
   state.filteredOrders = window.OGPendingWork?.filter(filtered) || filtered;
   renderSummaryStrip();
@@ -3403,6 +3404,15 @@ function applyOrderFilters() {
   renderLiveLotOrderMatches();
   renderOrders();
   orderDeadlineSignature = getOrderDeadlineSignature();
+}
+
+function renderQueueFinanceFilterCount() {
+  const badge = $("queue-finance-active");
+  if (!badge) return;
+  const count = ["pending-hold-reason", "pending-hold-release-date", "buyer-refund-filter", "buyer-refund-timing"]
+    .map(id => $(id)?.value).filter(value => value && value !== "all").length;
+  badge.hidden = count === 0;
+  badge.textContent = count ? `${count} active` : "";
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {

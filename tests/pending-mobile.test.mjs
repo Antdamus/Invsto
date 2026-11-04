@@ -217,6 +217,41 @@ test('filters work, navigation opens, and desktop restores the original tools', 
   await expect(page.locator('#phone-checkout-dock')).toBeHidden();
 });
 
+test('packing queue keeps scanners inline, discloses financial filters and surfaces actions for selected lines', async t => {
+  const page = await open(t, {width: 1440, admin: true});
+  await page.addScriptTag({url: origin + '/barcode-scanner.js'});
+  const finance = page.locator('.queue-finance > summary');
+  await expect(page.locator('#pending-hold-release-date')).toBeHidden();
+  await finance.press('Enter');
+  await expect(page.locator('#pending-hold-release-date')).toBeVisible();
+  await page.locator('#buyer-refund-timing').selectOption('before_shipment');
+  await page.evaluate(() => applyOrderFilters());
+  await finance.press('Enter');
+  await expect(finance).toContainText('1 active');
+  const select = page.locator('#admin-select-visible-pending');
+  await expect(page.locator('#admin-mark-cancelled')).toBeHidden();
+  await page.locator('#order-search').fill('jewelrylover_28');
+  await select.click();
+  await expect(page.locator('#admin-open-ebay-labels')).toBeEnabled();
+  assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0','line-1']);
+  await page.locator('#admin-clear-order-selection').click();
+  await expect(page.locator('#admin-mark-cancelled')).toBeHidden();
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({width, height: 900});
+    await page.locator('#pending-bag-scan').scrollIntoViewIfNeeded();
+    const boxes = await page.locator('#bag-scan-form input, #bag-scan-form button').evaluateAll(els => els.map(el => el.getBoundingClientRect().toJSON()));
+    assert.equal(boxes.length, 3);
+    assert.ok(boxes.every(b => b.width >= 44 && b.height >= 44 && b.x >= 0 && b.right <= width), `Bag scan targets at ${width}px: ${JSON.stringify(boxes)}`);
+    assert.ok(Math.max(...boxes.map(b=>b.y)) - Math.min(...boxes.map(b=>b.y)) < 5, `Bag controls must align at ${width}px: ${JSON.stringify(boxes)}`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    if (width === 1440) {
+      await page.locator('.orders-panel > .panel-head').evaluate(el => el.scrollIntoView({block:'start'}));
+      await page.screenshot({path:'test-results/pending-queue-layout.png'});
+    }
+  }
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
+
 for (const width of [768, 1024, 1440]) {
   test(`${width}px: grouped card tools are reachable, keyboard accessible, and preserve the expanded buyer`, async t => {
     const page = await open(t, {width, admin: true});

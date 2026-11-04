@@ -28,6 +28,7 @@
   <link rel="stylesheet" href="pending-order-cards.css?v=20261030-group-selection">
   <link rel="stylesheet" href="pending-buyer-refunds.css?v=20261029-timing">
   <link rel="stylesheet" href="ebay-hold-details.css?v=20261101s">
+  <link rel="stylesheet" href="pending-queue-layout.css?v=20261103a" />
   <script src="order-certificates.js?v=20261011-work" defer></script>
 </head>
 <body>
@@ -324,252 +325,281 @@
         </section>
       </div>
 
-      <details id="order-import-panel" class="import-panel import-details hidden" aria-label="Import eBay orders">
-        <summary class="import-panel-summary">
-          <div>
-            <span class="eyebrow">eBay Orders</span>
-            <h2>Sync & Reconciliation Tools</h2>
-            <p>Orders update automatically. Open these tools for a manual check, reconciliation, or CSV fallback.</p>
-          </div>
-          <span class="secondary-btn import-panel-summary-action">
-            <i data-lucide="chevron-down"></i>
-            Tools
-          </span>
-        </summary>
-        <div class="import-panel-body">
-        <div>
-          <span class="eyebrow">eBay Orders</span>
-          <h2>Sync Awaiting Shipments</h2>
-          <p>Pull current awaiting-shipment orders from eBay, add missing pending lines, and reserve matching stock.</p>
-        </div>
-        <div class="import-actions ebay-order-sync-actions">
-          <label class="days-back-field">
-            Days
-            <input id="ebay-order-sync-days-back" type="number" min="1" max="90" step="1" value="90" />
-          </label>
-          <label class="days-back-field">
-            Limit
-            <input id="ebay-order-sync-limit" type="number" min="50" max="1000" step="50" value="500" />
-          </label>
-          <button id="ebay-order-sync-check" type="button" class="secondary-btn">
-            <i data-lucide="search-check"></i>
-            Check Orders
-          </button>
-          <button id="ebay-order-sync-run" type="button" class="primary-btn">
-            <i data-lucide="download-cloud"></i>
-            Sync & Reserve
-          </button>
-        </div>
-        <p id="import-status" class="import-status"></p>
-        <div id="finance-sync-panel" class="finance-sync-panel" role="status" aria-live="polite" hidden>
-          <div><strong>Payout updates</strong><p id="finance-sync-status"></p></div>
-          <button id="finance-sync-retry" type="button" class="secondary-btn" hidden>Retry payout updates</button>
-        </div>
-        <section class="ebay-reconciliation-panel" aria-label="eBay reconciliation">
-          <div class="reconciliation-head">
-            <div>
-              <span class="eyebrow">eBay Reconciliation</span>
-              <h3>Review orders eBay no longer shows as awaiting shipment</h3>
-              <p>Preview the flagged orders, then close fulfilled/refunded records through the audited order closeout path.</p>
-            </div>
-            <div class="reconciliation-actions">
-              <button id="preview-ebay-reconciliation" type="button" class="secondary-btn">
-                <i data-lucide="list-checks"></i>
-                Preview
-              </button>
-              <button id="apply-ebay-reconciliation" type="button" class="primary-btn" disabled>
-                <i data-lucide="shield-check"></i>
-                Apply
-              </button>
-            </div>
-          </div>
-          <div class="reconciliation-apply-row">
-            <label>
-              Password
-              <input id="ebay-reconciliation-password" type="password" autocomplete="current-password" placeholder="Required to apply" />
-            </label>
-            <label>
-              Audit note
-              <input id="ebay-reconciliation-note" type="text" placeholder="Optional custom note" />
-            </label>
-          </div>
-          <p id="ebay-reconciliation-status" class="import-status"></p>
-          <div id="ebay-reconciliation-results" class="reconciliation-results">
-            <div class="empty-state">Run preview after a full eBay check to see reconciliation actions.</div>
-          </div>
-        </section>
-        <details class="legacy-import-details">
-          <summary>CSV report fallback</summary>
-          <div class="legacy-import-actions">
-            <label class="file-picker">
-              <input id="ebay-orders-file" type="file" accept=".csv,text/csv" />
-              <i data-lucide="upload"></i>
-              Choose CSV
-            </label>
-            <button id="import-ebay-orders" type="button" class="secondary-btn">Import CSV</button>
-          </div>
-        </details>
-        </div>
-      </details>
-
-      <section id="admin-order-actions-panel" class="admin-order-actions hidden" aria-label="Admin order closeout actions">
-        <div>
-          <span class="eyebrow">Order Actions</span>
-          <h2>Pending Order Actions</h2>
-          <p>Select pending order lines, then close only the checked orders with one signed note.</p>
-        </div>
-        <div class="admin-order-actions-controls">
-          <span id="admin-order-selected-count" class="count-pill">0 selected</span>
-          <button id="admin-clear-order-selection" type="button" class="secondary-btn">Clear</button>
-          <button id="admin-open-ebay-labels" type="button" class="secondary-btn">Create shipping labels</button>
-          <button id="admin-mark-packed-no-stock" type="button" class="secondary-btn">Confirm Packed</button>
-          <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Close Selected</button>
-          <button id="admin-select-visible-pending" type="button" class="secondary-btn">Select Visible</button>
-        </div>
-      </section>
-
       <section class="workspace-grid">
-        <aside class="orders-panel">
+        <aside id="packing-queue" class="orders-panel" aria-label="Packing queue">
           <div class="panel-head">
             <div>
-              <span class="eyebrow">Queue</span>
-              <h2>Orders to Pack</h2>
+              <span class="eyebrow">eBay fulfillment</span>
+              <h2>Packing queue</h2>
             </div>
             <span id="order-count-pill" class="count-pill">0</span>
           </div>
 
-          <section class="bag-scan-bar" aria-label="Find an order by scanning its bag">
-            <form id="bag-scan-form" class="bag-scan-form">
-              <input id="pending-bag-scan" type="search" placeholder="Scan bag or enter #" aria-label="Scan bag or enter bag number" data-camera-scan autocomplete="off" autocapitalize="off" spellcheck="false" />
-              <button type="submit" class="primary-btn">Find bag</button>
-            </form>
-            <div class="bag-scan-meta"><p id="bag-scan-status" role="status">Scan a bag to open its order.</p><span id="bag-scan-queued"></span></div>
-            <select id="bag-scan-recent" class="hidden" aria-label="Recently scanned bags"><option value="">Recent scans</option></select>
-          </section>
-
-          <div class="filter-row">
-            <input
-              id="order-search"
-              data-camera-scan data-camera-mode="tracking"
-              name="pending-orders-search"
-              type="search"
-              placeholder="Search tracking number, order, buyer, title..."
-              autocomplete="new-password"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              aria-label="Search pending orders"
-              aria-describedby="pending-tracking-search-help"
-            />
-            <button id="phone-order-filters" type="button" class="phone-only secondary-btn" aria-expanded="false" aria-controls="order-status-filter order-sort cancellation-review-toggle phone-queue-filter-options"><i data-lucide="list-filter"></i><span>Filters</span></button>
-            <select id="order-status-filter" aria-label="Order status">
-              <option value="pending">Pending</option>
-              <option value="cancellations">Cancellations</option>
-              <option value="all">All open</option>
-              <option value="fulfilled">Fulfilled</option>
-            </select>
-            <button
-              id="cancellation-review-toggle"
-              type="button"
-              class="cancellation-review-tab"
-              aria-pressed="false"
-              title="Show pending orders where eBay is reporting a cancellation request or cancellation state"
-            >
-              <i data-lucide="ban"></i>
-              <span>Cancellations</span>
-              <strong id="cancellation-review-count">0</strong>
-            </button>
-            <select id="order-sort" aria-label="Order queue sort">
-              <option value="created_asc">Sale date oldest first</option>
-              <option value="created_desc">Sale date newest first</option>
-              <option value="urgency_asc">Urgency highest first</option>
-              <option value="urgency_desc">Urgency lowest first</option>
-              <option value="due_asc">Due date soonest</option>
-              <option value="due_desc">Due date latest</option>
-              <option value="total_desc">Order total high to low</option>
-              <option value="total_asc">Order total low to high</option>
-              <option value="buyer_asc">Username A to Z</option>
-              <option value="buyer_desc">Username Z to A</option>
-            </select>
+          <div class="queue-lookups">
+            <section class="order-lookup" aria-label="Find an order">
+              <label class="lookup-label" for="order-search">Find an order</label>
+              <div class="filter-row">
+                <input
+                  id="order-search"
+                  data-camera-scan data-camera-mode="tracking"
+                  name="pending-orders-search"
+                  type="search"
+                  placeholder="Search tracking number, order, buyer, title..."
+                  autocomplete="new-password"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  aria-label="Search pending orders"
+                  aria-describedby="pending-tracking-search-help"
+                />
+              </div>
+              <p id="pending-tracking-search-help" class="tracking-search-help">Use a buyer, title, order number or the last 6+ tracking digits.</p>
+            </section>
+            <section class="bag-scan-bar" aria-label="Find an order by scanning its bag">
+              <label class="lookup-label" for="pending-bag-scan">Find an auction bag</label>
+              <form id="bag-scan-form" class="bag-scan-form">
+                <input id="pending-bag-scan" type="search" placeholder="Scan or enter bag number" aria-label="Scan bag or enter bag number" data-camera-scan autocomplete="off" autocapitalize="off" spellcheck="false" />
+                <button type="submit" class="primary-btn">Find bag</button>
+              </form>
+              <div class="bag-scan-meta"><p id="bag-scan-status" role="status">Scan a bag to open its order.</p><span id="bag-scan-queued"></span></div>
+              <select id="bag-scan-recent" class="hidden" aria-label="Recently scanned bags"><option value="">Recent scans</option></select>
+            </section>
           </div>
 
-          <p id="pending-tracking-search-help" class="tracking-search-help">Scan a shipping label or enter the last 6+ tracking digits. All matching buyer groups are shown.</p>
-          <div class="buyer-due-filters" id="phone-queue-filter-options">
-            <div class="buyer-shipping-due-options" role="group" aria-label="Shipping due date">
-              <span>Shipping due · eBay Pacific time</span>
-              <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
-              <button type="button" class="secondary-btn" data-order-due-filter="overdue" aria-pressed="false">Overdue</button>
-              <button type="button" class="secondary-btn" data-order-due-filter="today" aria-pressed="false">Due today</button>
-              <button type="button" class="secondary-btn" data-order-due-filter="tomorrow" aria-pressed="false">Due tomorrow</button>
+          <div class="queue-controls">
+            <div class="queue-controls-heading">
+              <h3>Filter the queue</h3>
+              <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
+              <button id="phone-order-filters" type="button" class="phone-only secondary-btn" aria-expanded="false" aria-controls="queue-view-options"><i data-lucide="list-filter"></i><span>Filters</span></button>
             </div>
-            <label class="buyer-purchase-date-picker">
-              Earliest pending purchase
-              <input id="order-created-date-filter" name="pending-orders-created-date" type="date" autocomplete="off" aria-label="Earliest pending purchase date" />
-            </label>
-            <button id="clear-order-created-date-filter" type="button" class="secondary-btn hidden" aria-label="Clear purchase date">Clear date</button>
-            <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
+            <div class="buyer-due-filters" id="phone-queue-filter-options">
+              <div class="buyer-shipping-due-options" role="group" aria-label="Shipping due date">
+                <span>Shipping due · eBay Pacific time</span>
+                <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
+                <button type="button" class="secondary-btn" data-order-due-filter="overdue" aria-pressed="false">Overdue</button>
+                <button type="button" class="secondary-btn" data-order-due-filter="today" aria-pressed="false">Due today</button>
+                <button type="button" class="secondary-btn" data-order-due-filter="tomorrow" aria-pressed="false">Due tomorrow</button>
+              </div>
+            </div>
+            <div id="queue-view-options" class="queue-view-options">
+              <label>Order status
+                <select id="order-status-filter" aria-label="Order status">
+                  <option value="pending">Pending</option>
+                  <option value="cancellations">Cancellations</option>
+                  <option value="all">All open</option>
+                  <option value="fulfilled">Fulfilled</option>
+                </select>
+              </label>
+              <label>Sort by
+                <select id="order-sort" aria-label="Order queue sort">
+                  <option value="created_asc">Sale date oldest first</option>
+                  <option value="created_desc">Sale date newest first</option>
+                  <option value="urgency_asc">Urgency highest first</option>
+                  <option value="urgency_desc">Urgency lowest first</option>
+                  <option value="due_asc">Due date soonest</option>
+                  <option value="due_desc">Due date latest</option>
+                  <option value="total_desc">Order total high to low</option>
+                  <option value="total_asc">Order total low to high</option>
+                  <option value="buyer_asc">Username A to Z</option>
+                  <option value="buyer_desc">Username Z to A</option>
+                </select>
+              </label>
+              <div class="queue-purchase">
+                <label class="buyer-purchase-date-picker" title="Matches the buyer’s earliest pending purchase and keeps their orders together.">
+                  Earliest pending purchase
+                  <input id="order-created-date-filter" name="pending-orders-created-date" type="date" autocomplete="off" aria-label="Earliest pending purchase date" aria-describedby="queue-purchase-help" />
+                </label>
+                <button id="clear-order-created-date-filter" type="button" class="secondary-btn hidden" aria-label="Clear purchase date">Clear date</button>
+              </div>
+              <button
+                id="cancellation-review-toggle"
+                type="button"
+                class="cancellation-review-tab"
+                aria-pressed="false"
+                title="Show pending orders where eBay is reporting a cancellation request or cancellation state"
+              >
+                <i data-lucide="ban"></i>
+                <span>Cancellations</span>
+                <strong id="cancellation-review-count">0</strong>
+              </button>
+              <p id="queue-purchase-help" class="buyer-due-filter-help">Purchase date uses the buyer’s earliest pending order and keeps their orders together.</p>
+            </div>
           </div>
-          <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
-          <div class="eh-filter-controls">
-            <label for="pending-hold-reason">eBay funds on hold · reason
-              <select id="pending-hold-reason"><option value="all">All orders</option></select>
-            </label>
-            <label for="pending-hold-release-date">Estimated release date
-              <select id="pending-hold-release-date"><option value="all">All estimated dates</option></select>
-            </label>
-            <p id="pending-hold-status" role="status">Shows matching orders’ item lines. eBay’s payment estimate takes priority over older order estimates; a date is not a guarantee of release.</p>
+
+          <div class="queue-priorities">
+            <section class="queue-work" aria-labelledby="queue-work-title">
+              <h3 id="queue-work-title">Work status</h3>
+              <div class="pending-work-filters" role="group" aria-label="Order work status">
+                <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
+                <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
+                <button type="button" data-work-view="all" aria-pressed="false">All <span data-work-count>…</span></button>
+                <div class="pending-watch-filters">
+                  <button type="button" id="pending-work-cgl" aria-pressed="false">Pending CGL <span>…</span></button>
+                  <button type="button" id="pending-work-missing" aria-pressed="false">Missing watches <span>…</span></button>
+                  <button type="button" id="pending-work-cancel" aria-pressed="false">Pending to cancel <span>…</span></button>
+                  <button type="button" id="pending-work-not-found" aria-pressed="false">Item not found <span>…</span></button>
+                </div>
+              </div>
+              <div class="pending-report-actions">
+                <button type="button" id="pending-work-show-all" class="secondary-btn" aria-pressed="false" hidden>Show all buyer order lines</button>
+                <a class="secondary-btn" href="ebay-missing-report.html" target="_blank" rel="noopener"><i class="ti ti-file-report" aria-hidden="true"></i> Missing items report</a>
+              </div>
+            </section>
+            <section class="watch-directory" id="pending-watch-directory" aria-label="Pending orders with watches">
+              <button type="button" class="watch-directory-total" data-watch-filter="all" aria-pressed="false" disabled>
+                <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="4"/><path d="M9 6V2h6v4M9 18v4h6v-4M12 9v3l2 1"/></svg><span>Orders with watches<small>All pending orders</small></span><strong>…</strong>
+              </button>
+              <div class="watch-directory-brands" role="group" aria-label="Filter watch orders by brand">
+                <button type="button" data-watch-filter="cartier" aria-pressed="false" disabled>Cartier <strong>…</strong></button>
+                <button type="button" data-watch-filter="rolex" aria-pressed="false" disabled>Rolex <strong>…</strong></button>
+                <button type="button" data-watch-filter="ap" aria-pressed="false" title="Audemars Piguet" disabled>AP <strong>…</strong></button>
+                <button type="button" data-watch-filter="other" aria-pressed="false" disabled>Other <strong>…</strong></button>
+              </div>
+              <small class="watch-directory-note" data-watch-count-note>Checking saved Watch markers…</small>
+            </section>
           </div>
-          <div class="buyer-refund-controls" role="group" aria-label="Buyer refund controls">
-            <div class="buyer-refund-field">
-              <label for="buyer-refund-filter">Buyer refund history</label>
-              <select id="buyer-refund-filter">
-                <option value="all">All buyers</option>
-                <option value="confirmed">Buyers with completed refunds</option>
-                <option value="requested">Buyers with requests / pending refunds</option>
-                <option value="verification">Buyers with refund records to verify</option>
-                <option value="none">No refunds or cancellations recorded</option>
-              </select>
-            </div>
-            <div class="buyer-refund-field">
-              <label for="buyer-refund-timing">Refund / cancellation timing</label>
-              <select id="buyer-refund-timing">
-                <option value="all">All timing</option>
-                <option value="after_shipment">After shipment</option>
-                <option value="before_shipment">Before shipment</option>
-                <option value="after_completion">After system completion (shipment unconfirmed)</option>
-                <option value="timing_unknown">Timing needs verification</option>
-              </select>
-            </div>
-            <button id="buyer-refund-refresh" type="button" class="secondary-btn">Check buyer refunds</button>
-            <p id="buyer-refund-status" role="status" aria-live="polite">Check saved buyer history, including closed orders. Each buyer’s current orders stay together.</p>
+
+          <div class="queue-utilities">
+            <details class="queue-finance">
+              <summary><span>Payment holds &amp; buyer refunds</span><span id="queue-finance-active" hidden></span><span class="queue-chevron" aria-hidden="true"></span></summary>
+              <div class="queue-finance-body">
+                <div class="eh-filter-controls">
+                  <label for="pending-hold-reason">eBay funds on hold · reason
+                    <select id="pending-hold-reason"><option value="all">All orders</option></select>
+                  </label>
+                  <label for="pending-hold-release-date">Estimated release date
+                    <select id="pending-hold-release-date"><option value="all">All estimated dates</option></select>
+                  </label>
+                  <p id="pending-hold-status" role="status">Shows matching orders’ item lines. eBay’s payment estimate takes priority over older order estimates; a date is not a guarantee of release.</p>
+                </div>
+                <div class="buyer-refund-controls" role="group" aria-label="Buyer refund controls">
+                  <div class="buyer-refund-field">
+                    <label for="buyer-refund-filter">Buyer refund history</label>
+                    <select id="buyer-refund-filter">
+                      <option value="all">All buyers</option>
+                      <option value="confirmed">Buyers with completed refunds</option>
+                      <option value="requested">Buyers with requests / pending refunds</option>
+                      <option value="verification">Buyers with refund records to verify</option>
+                      <option value="none">No refunds or cancellations recorded</option>
+                    </select>
+                  </div>
+                  <div class="buyer-refund-field">
+                    <label for="buyer-refund-timing">Refund / cancellation timing</label>
+                    <select id="buyer-refund-timing">
+                      <option value="all">All timing</option>
+                      <option value="after_shipment">After shipment</option>
+                      <option value="before_shipment">Before shipment</option>
+                      <option value="after_completion">After system completion (shipment unconfirmed)</option>
+                      <option value="timing_unknown">Timing needs verification</option>
+                    </select>
+                  </div>
+                  <button id="buyer-refund-refresh" type="button" class="secondary-btn">Check buyer refunds</button>
+                  <p id="buyer-refund-status" role="status" aria-live="polite">Check saved buyer history, including closed orders. Each buyer’s current orders stay together.</p>
+                </div>
+              </div>
+            </details>
+            <details id="order-import-panel" class="import-panel import-details hidden" aria-label="Import eBay orders">
+              <summary class="import-panel-summary">
+                <div>
+                  <h2>eBay sync tools</h2>
+                  <p>Orders update automatically. Open these tools for a manual check, reconciliation, or CSV fallback.</p>
+                </div>
+                <span class="secondary-btn import-panel-summary-action">
+                  <span class="queue-chevron" aria-hidden="true"></span>
+                </span>
+              </summary>
+              <div class="import-panel-body">
+              <div>
+                <span class="eyebrow">eBay Orders</span>
+                <h2>Sync Awaiting Shipments</h2>
+                <p>Pull current awaiting-shipment orders from eBay, add missing pending lines, and reserve matching stock.</p>
+              </div>
+              <div class="import-actions ebay-order-sync-actions">
+                <label class="days-back-field">
+                  Days
+                  <input id="ebay-order-sync-days-back" type="number" min="1" max="90" step="1" value="90" />
+                </label>
+                <label class="days-back-field">
+                  Limit
+                  <input id="ebay-order-sync-limit" type="number" min="50" max="1000" step="50" value="500" />
+                </label>
+                <button id="ebay-order-sync-check" type="button" class="secondary-btn">
+                  <i data-lucide="search-check"></i>
+                  Check Orders
+                </button>
+                <button id="ebay-order-sync-run" type="button" class="primary-btn">
+                  <i data-lucide="download-cloud"></i>
+                  Sync & Reserve
+                </button>
+              </div>
+              <p id="import-status" class="import-status"></p>
+              <div id="finance-sync-panel" class="finance-sync-panel" role="status" aria-live="polite" hidden>
+                <div><strong>Payout updates</strong><p id="finance-sync-status"></p></div>
+                <button id="finance-sync-retry" type="button" class="secondary-btn" hidden>Retry payout updates</button>
+              </div>
+              <section class="ebay-reconciliation-panel" aria-label="eBay reconciliation">
+                <div class="reconciliation-head">
+                  <div>
+                    <span class="eyebrow">eBay Reconciliation</span>
+                    <h3>Review orders eBay no longer shows as awaiting shipment</h3>
+                    <p>Preview the flagged orders, then close fulfilled/refunded records through the audited order closeout path.</p>
+                  </div>
+                  <div class="reconciliation-actions">
+                    <button id="preview-ebay-reconciliation" type="button" class="secondary-btn">
+                      <i data-lucide="list-checks"></i>
+                      Preview
+                    </button>
+                    <button id="apply-ebay-reconciliation" type="button" class="primary-btn" disabled>
+                      <i data-lucide="shield-check"></i>
+                      Apply
+                    </button>
+                  </div>
+                </div>
+                <div class="reconciliation-apply-row">
+                  <label>
+                    Password
+                    <input id="ebay-reconciliation-password" type="password" autocomplete="current-password" placeholder="Required to apply" />
+                  </label>
+                  <label>
+                    Audit note
+                    <input id="ebay-reconciliation-note" type="text" placeholder="Optional custom note" />
+                  </label>
+                </div>
+                <p id="ebay-reconciliation-status" class="import-status"></p>
+                <div id="ebay-reconciliation-results" class="reconciliation-results">
+                  <div class="empty-state">Run preview after a full eBay check to see reconciliation actions.</div>
+                </div>
+              </section>
+              <details class="legacy-import-details">
+                <summary>CSV report fallback</summary>
+                <div class="legacy-import-actions">
+                  <label class="file-picker">
+                    <input id="ebay-orders-file" type="file" accept=".csv,text/csv" />
+                    <i data-lucide="upload"></i>
+                    Choose CSV
+                  </label>
+                  <button id="import-ebay-orders" type="button" class="secondary-btn">Import CSV</button>
+                </div>
+              </details>
+              </div>
+            </details>
           </div>
-          <section class="watch-directory" id="pending-watch-directory" aria-label="Pending orders with watches">
-            <button type="button" class="watch-directory-total" data-watch-filter="all" aria-pressed="false" disabled>
-              <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="4"/><path d="M9 6V2h6v4M9 18v4h6v-4M12 9v3l2 1"/></svg><span>Orders with watches<small>All pending orders</small></span><strong>…</strong>
-            </button>
-            <div class="watch-directory-brands" role="group" aria-label="Filter watch orders by brand">
-              <button type="button" data-watch-filter="cartier" aria-pressed="false" disabled>Cartier <strong>…</strong></button>
-              <button type="button" data-watch-filter="rolex" aria-pressed="false" disabled>Rolex <strong>…</strong></button>
-              <button type="button" data-watch-filter="ap" aria-pressed="false" title="Audemars Piguet" disabled>AP <strong>…</strong></button>
-              <button type="button" data-watch-filter="other" aria-pressed="false" disabled>Other <strong>…</strong></button>
+
+          <section id="admin-order-actions-panel" class="admin-order-actions hidden" aria-label="Admin order closeout actions">
+            <div>
+              <h2>Selected lines</h2>
+              <p>Check individual lines or select the visible ones. Actions apply only to your selection.</p>
             </div>
-            <small class="watch-directory-note" data-watch-count-note>Checking saved Watch markers…</small>
+            <div class="admin-order-actions-controls">
+              <span id="admin-order-selected-count" class="count-pill">0 selected</span>
+              <button id="admin-select-visible-pending" type="button" class="secondary-btn">Select Visible</button>
+              <button id="admin-clear-order-selection" type="button" class="secondary-btn">Clear</button>
+              <button id="admin-open-ebay-labels" type="button" class="secondary-btn">Create shipping labels</button>
+              <button id="admin-mark-packed-no-stock" type="button" class="secondary-btn">Confirm Packed</button>
+              <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Close Selected</button>
+            </div>
           </section>
-          <div class="pending-work-filters" role="group" aria-label="Order work status">
-            <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
-            <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
-            <button type="button" data-work-view="all" aria-pressed="false">All <span data-work-count>…</span></button>
-            <div class="pending-watch-filters">
-              <button type="button" id="pending-work-cgl" aria-pressed="false">Pending CGL <span>…</span></button>
-              <button type="button" id="pending-work-missing" aria-pressed="false">Missing watches <span>…</span></button>
-              <button type="button" id="pending-work-cancel" aria-pressed="false">Pending to cancel <span>…</span></button>
-              <button type="button" id="pending-work-not-found" aria-pressed="false">Item not found <span>…</span></button>
-            </div>
-          </div>
-          <div class="pending-report-actions">
-            <button type="button" id="pending-work-show-all" class="secondary-btn" aria-pressed="false" hidden>Show all buyer order lines</button>
-            <a class="secondary-btn" href="ebay-missing-report.html" target="_blank" rel="noopener"><i class="ti ti-file-report" aria-hidden="true"></i> Missing items report</a>
-          </div>
+
           <p id="pending-work-status" role="status">Checking which orders are ready…</p>
           <p class="pending-chat-live" data-pending-chat-status>Checking buyer chats…</p>
           <span class="pending-chat-sr-only" data-pending-chat-announcement role="status" aria-live="polite"></span>
@@ -1402,7 +1432,7 @@
   <script src="order-tracking-search.js?v=20261030"></script>
   <script src="pending-shipment-evidence.js?v=20261030-verified-completion"></script>
   <script src="ebay-hold-details.js?v=20261101u"></script>
-  <script src="pending-orders.js?v=20261101v"></script>
+  <script src="pending-orders.js?v=20261103-queue-layout"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261030-phone-tracking"></script>
