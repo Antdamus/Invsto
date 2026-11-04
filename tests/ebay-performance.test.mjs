@@ -42,6 +42,7 @@ test('only admins see the report; a failed or replayed refresh cannot overwrite 
  await db.exec(await fs.readFile(new URL('supabase/migrations/20261102210000_ebay_performance_reports.sql',root),'utf8'));
  await db.exec(await fs.readFile(new URL('supabase/migrations/20261102212000_verify_performance_cancel_details.sql',root),'utf8'));
  await db.exec(await fs.readFile(new URL('supabase/migrations/20261104064000_verify_later_ebay_payments.sql',root),'utf8'));
+ await db.exec(await fs.readFile(new URL('supabase/migrations/20261104071000_verify_ebay_paid_listing_identity.sql',root),'utf8'));
  const query=async(s,p)=>(await db.query(s,p)).rows[0]?.v;
  await db.query("select store_ebay_health_rows('orders',$1)",[JSON.stringify([order])]);
  await db.query("select store_ebay_health_rows('payments',$1)",[JSON.stringify(transactions)]);
@@ -49,6 +50,15 @@ test('only admins see the report; a failed or replayed refresh cannot overwrite 
  const saveLate=row=>db.query('select finish_ebay_health_job($1,$2,1,null)',[ticket,JSON.stringify([row])]);
  await assert.rejects(saveLate(order),/outside/);await assert.rejects(saveLate({...order,buyer:'other',paid_day:'2026-11-03'}),/outside/);
  await saveLate({...order,paid_day:'2026-11-03'});assert.equal(await query("select count(*)::int v from ebay_health_orders"),1);
+ const previous={...order,id:'123456789012-10000000000',paid:false,items:[{id:'123456789012'}]},paidOrder={...previous,id:'02-23456-78901',paid:true,paid_day:'2026-11-03'};
+ await db.query("select store_ebay_health_rows('orders',$1)",[JSON.stringify([previous])]);
+ await db.query("insert into ebay_orders(id,order_number,buyer_username,sale_date) values(auth.uid(),$1,$2,'2026-11-03')",[paidOrder.id,order.buyer]);
+ await db.exec("insert into ebay_order_lines(order_id,item_number) values(auth.uid(),'123456789012')");
+ const paidTicket=await query("update ebay_health_jobs set ticket=gen_random_uuid(),owner_id=auth.uid(),lease_until=now()+interval '5 min' where kind='orders' and id='2026-11-02' returning ticket v");
+ const pay=row=>db.query('select finish_ebay_health_job($1,$2,1,null)',[paidTicket,JSON.stringify([row])]);
+ await assert.rejects(pay({...paidOrder,items:[{id:'123456789013'}]}),/outside/);
+ await pay(paidOrder);assert.equal(await query("select count(*)::int v from ebay_health_orders where items->0->>'id'='123456789012'"),1);
+ assert.equal(await query("select id v from ebay_health_orders where items->0->>'id'='123456789012'"),paidOrder.id);
  const next=await query('select claim_ebay_health_jobs() v');const job=next.find(j=>j.kind==='cases');assert.ok(job);
  await assert.rejects(db.query("select finish_ebay_health_job($1,$2,2,null)",[job.ticket,JSON.stringify([c])]),/Incomplete/);
  await db.query("select finish_ebay_health_job($1,$2,1,null)",[job.ticket,JSON.stringify([c])]);
