@@ -58,6 +58,7 @@
   if(window.OGEbayHoldDetails){sel('date').innerHTML=window.OGEbayHoldDetails.dateOptions(byReason.map(r=>r.holdInfo),releaseDate);sel('date').value=releaseDate;}
   const dated=byReason.filter(r=>!window.OGEbayHoldDetails||window.OGEbayHoldDetails.matchesDate(r.holdInfo,releaseDate));
   const rows=review()?.filter(el,dated,kind)??dated;
+  window.WeeklyRefundReminders?.list(el);
   const pages=Math.max(1,Math.ceil(rows.length/25));el.wh.page=Math.min(pages-1,Math.max(0,el.wh.page));const page=el.wh.page;
   sel('list').innerHTML='<p><b>'+rows.length+(rows.length===1?' entry':' entries')+' · '+usd(sum(rows))+'</b></p>'+rows.slice(page*25,page*25+25).map(r=>'<article><div><b>'+h(kinds[r.kind])+'</b><strong>'+usd(r.cents)+'</strong></div><p>'+(r.oid?link('https://www.ebay.com/sh/ord/details?orderid='+encodeURIComponent(r.oid),'Order '+r.oid):'Order not yet matched')+' · '+(r.date?'Purchased '+date(r.date):'Purchase date unknown')+'</p>'+(review()?.identity(r)||'')+'<small>'+(r.kind==='sale'?'Sale posted ':'Hold placed ')+date(r.placed)+(r.kind==='sale'?'':' · '+link(proof(r),'eBay hold '+r.ref))+'</small>'+(window.OGEbayHoldDetails?.render(r.holdInfo)||'')+(review()?.card(el,r)||'')+'</article>').join('');
   sel('nav').hidden=pages===1;sel('position').textContent='Page '+(page+1)+' of '+pages;sel('prev').disabled=!page;sel('next').disabled=page>=pages-1;
@@ -69,7 +70,7 @@
   const selected=data.month.slice(0,7),fresh=!el.wh,entries=(Array.isArray(snap.entries)?snap.entries:[]).map(r=>({...r,holdInfo:holdInfo(r,snap.verified_at)}));
   if(fresh){
    el.innerHTML='<header><small>EBAY PAYMENTS · ALL PURCHASE MONTHS</small><h3>Where the money on hold comes from</h3></header><div class="wh-account"></div><div class="wh-why"></div><div class="wh-cohorts"></div>'+
-   '<details class="wh-browser"><summary>Inspect held orders and eBay evidence</summary><div class="ws-controls"><label>Purchase month<select class="wh-month"></select></label><label>Week of purchase<select class="wh-week"></select></label><label>Hold type<select class="wh-kind">'+option('','All hold types')+option('reserves','All separate holds')+Object.entries(kinds).map(([k,v])=>option(k,v)).join('')+'</select></label><label>Hold reason<select class="wh-reason"><option value="all">All hold entries</option></select></label><label>Estimated release date<select class="wh-date"><option value="all">All estimated dates</option></select></label><label>Find an entry<input class="wh-find" type="search" placeholder="Order, return, buyer or item"></label></div>'+(review()?.controls||'')+'<div class="wh-list"></div><div class="wh-nav"><button class="wh-prev" type="button">Previous</button> <span class="wh-position"></span> <button class="wh-next" type="button">Next</button></div></details>'+
+   '<details class="wh-browser"><summary>Inspect held orders and eBay evidence</summary><div class="ws-controls"><label>Purchase month<select class="wh-month"></select></label><label>Week of purchase<select class="wh-week"></select></label><label>Hold type<select class="wh-kind">'+option('','All hold types')+option('reserves','All separate holds')+Object.entries(kinds).map(([k,v])=>option(k,v)).join('')+'</select></label><label>Hold reason<select class="wh-reason"><option value="all">All hold entries</option></select></label><label>Estimated release date<select class="wh-date"><option value="all">All estimated dates</option></select></label><label>Find an entry<input class="wh-find" type="search" placeholder="Order, return, buyer or item"></label></div>'+(review()?.controls||'')+'<div class="whr-reminder-list"></div><div class="wh-list"></div><div class="wh-nav"><button class="wh-prev" type="button">Previous</button> <span class="wh-position"></span> <button class="wh-next" type="button">Next</button></div></details>'+
    '<footer><button type="button" class="wh-sync">Refresh hold details from eBay</button> '+link(url,'View live holds in Seller Hub')+'<p class="wh-msg" role="status"></p></footer>'+(review()?.dialogHTML||'');
    el.wh={page:0};el.onclick=e=>{
     const b=e.target.closest('button');if(!b)return;
@@ -82,7 +83,7 @@
     browse(el);
    };el.onchange=e=>{if(e.target.matches('.ws-controls select')){el.wh.page=0;if(e.target.matches('.wh-month'))el.querySelector('.wh-week').value='';if(e.target.matches('.wh-reason'))el.querySelector('.wh-date').value='all';browse(el);}};el.oninput=e=>{if(e.target.matches('.wh-find')){el.wh.page=0;browse(el);}};
   }
-  el.hidden=false;Object.assign(el.wh,{entries,client,load,reviews:data.ebay_return_hold_reviews});
+  el.hidden=false;Object.assign(el.wh,{entries,client,load,reviews:data.ebay_return_hold_reviews,reminders:data.ebay_refund_reminders});
   const has=!!snap.verified_at&&Array.isArray(snap.entries),apiNew=snap.api_at&&(!has||Date.parse(snap.api_at)>Date.parse(snap.verified_at)),control=apiNew?snap.api_cents:snap.ledger_cents;
   const gap=has&&control!=null?control-snap.ledger_cents:null,stale=has&&Date.now()-Date.parse(snap.verified_at)>6*3600000;
   const headline=has?snap.ledger_cents:control;

@@ -52,12 +52,14 @@ test('phone review: filter, assign without losing the draft on auto-refresh, ins
  const b=await chromium.launch();try{
   const p=await b.newPage({viewport:{width:390,height:840}});
   await p.route('http://localhost/holds',r=>r.fulfill({contentType:'text/html',body:'<section class="wh-panel"></section>'}));await p.goto('http://localhost/holds');
-  for(const f of ['weekly-return-hold-review.js','weekly-ebay-holds.js'])await p.addScriptTag({path:root(f)});
+  for(const f of ['weekly-refund-reminders.js','weekly-return-hold-review.js','weekly-ebay-holds.js'])await p.addScriptTag({path:root(f)});
   await p.addStyleTag({path:root('weekly-marketplace-sales.css')});
   await p.evaluate(()=>{
    const data={month:'2026-11-01',ebay_return_hold_reviews:{},ebay_account_holds:{verified_at:new Date().toISOString(),ledger_cents:2500,entries:['111','222'].map((ref,i)=>({kind:'return',ref,oid:'22-10000-00222',cents:i?1000:1500,placed:'2026-11-01',item_context:{name:'Taylor',user:'tg',source:'line',items:[{title:i?'Pendant':'Watch',number:ref}]}}))}};
+   data.ebay_refund_reminders={};
    const client={rpc:async(n,args)=>{
     if(n==='list_team_task_assignees')return {data:[{user_id:'employee',display_name:'Jo'}]};
+    if(n==='set_hold_refund_reminder'){if(args._day)data.ebay_refund_reminders[args._ref]={day:args._day};else delete data.ebay_refund_reminders[args._ref];return {data:data.ebay_refund_reminders};}
     const v=data.ebay_return_hold_reviews[args._ref]??={};
     if(n==='set_return_hold_inspected')v.mark={revision:args._revision+1,inspected:args._inspected,signer:'Alex',at:'2026-11-03T18:15:00Z'};
     if(n==='create_return_hold_task')v.tasks=[{id:'task-id',owner:'Jo',status:'assigned'}];return {data:v};
@@ -74,6 +76,11 @@ test('phone review: filter, assign without losing the draft on auto-refresh, ins
   await p.locator('[data-inspection-mode=checked]').click();assert.match(await card.innerText(),/Alex.*EST/);
   await card.getByRole('button',{name:'Undo inspection'}).click();await p.locator('.whr-mark').waitFor({state:'detached'});
   await p.locator('[data-inspection-mode=unchecked]').click();assert.equal(await card.count(),1);
+  await card.getByRole('button',{name:'Remind me to refund'}).click();const d=p.locator('.whr-reminder-dialog');
+  await d.locator('input').fill('2030-02-04');await p.evaluate(()=>draw());assert.equal(await d.locator('input').inputValue(),'2030-02-04');
+  await d.getByRole('button',{name:'Save reminder'}).click();await card.getByRole('button',{name:'Edit reminder'}).waitFor();
+  assert.match(await card.innerText(),/Feb 4, 2030/);await card.getByRole('button',{name:'Edit reminder'}).click();
+  await d.getByRole('button',{name:'Remove reminder'}).click();await card.getByRole('button',{name:'Remind me to refund'}).waitFor();
   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  }finally{await b.close();}
 });

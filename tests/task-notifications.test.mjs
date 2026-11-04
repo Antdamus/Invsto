@@ -306,3 +306,12 @@ test('a slow previous filter cannot overwrite a newer filter and the preference 
   await page.getByRole('button',{name:'Updates, 2 unread',exact:true}).click();
   await expect(page.getByRole('button',{name:'Returns, 0 unread',exact:true})).toHaveAttribute('aria-pressed','true');
 });
+test('personal refund reminders open their exact return even after the hold disappears',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{Object.assign(rows[0],{notification_type:'refund_reminder',metadata:{case_id:'12345678-1234-1234-1234-123456789012',return_ref:'5331434197',open_url:'https://unexpected.example'}});channels[0].callback({eventType:'UPDATE'});});
+ await page.getByRole('button',{name:'Review updates'}).click();
+ const link=page.getByRole('link',{name:'Open return',exact:true});
+ await expect(link).toHaveAttribute('href','ebay-returns.html?caseId=12345678-1234-1234-1234-123456789012');
+ await page.evaluate(async()=>{delete rows[0].metadata.case_id;await OGTaskNotifications.refresh();});
+ await expect(link).toHaveAttribute('href','https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=5331434197');
+});

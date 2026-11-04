@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 
 const teamTasksHtml = readFileSync(new URL("../team-tasks.html", import.meta.url), "utf8");
 const teamTasksJs = readFileSync(new URL("../team-tasks.js", import.meta.url), "utf8");
@@ -10,11 +11,11 @@ const migration = readFileSync(
 );
 
 test("task notification links open the unified task page", () => {
-  assert.match(teamTasksHtml, /team-tasks\.js\?v=workspace-20261007/);
-  assert.match(
-    teamTasksJs,
-    /function getTaskNotificationHref\(notification = \{\}\) \{\s*return `team-tasks\.html\?taskId=\$\{encodeURIComponent\(notification\.task_id \|\| ""\)\}`;\s*\}/,
-  );
+  assert.match(teamTasksHtml, /src="team-tasks\.js\?v=[^"]+"/);
+  const source=teamTasksJs.slice(teamTasksJs.indexOf("function getTaskNotificationHref("),teamTasksJs.indexOf("function getTaskNotificationTypeLabel("));
+  const href=runInNewContext(source+";getTaskNotificationHref",{window:{OGTaskNotifications:{href:()=>"return-link"}}});
+  assert.equal(href({task_id:"a/b",metadata:{open_url:"https://unexpected.example"}}),"team-tasks.html?taskId=a%2Fb");
+  assert.equal(href({notification_type:"refund_reminder"}),"return-link");
   assert.match(migration, /select 'team-tasks\.html\?taskId=' \|\| coalesce\(_task_id::text, ''\)/);
 });
 

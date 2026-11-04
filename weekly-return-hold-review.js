@@ -30,7 +30,7 @@
   if(r.kind!=='return'||!el.wh.reviews)return '';
   const review=get(el,r.ref),m=review.mark,done=m?.inspected,busy=el.wh.saving?.has(r.ref);
   return '<section class="whr-card" data-return-ref="'+esc(r.ref)+'" aria-label="Return inspection"><div class="whr-info"><strong class="'+(done?'whr-done':'')+'">'+(done?'✓ Inspected':'Not inspected')+'</strong>'+
-   (done?'<small>'+esc(m.signer)+' · '+esc(time(m.at))+'</small>':'')+'</div><div class="whr-buttons"><button type="button" class="whr-mark" '+(busy?'disabled':'')+'>'+ (busy?'Saving…':done?'Undo inspection':'Mark inspected')+'</button><button type="button" class="whr-task">Create task</button></div>'+
+   (done?'<small>'+esc(m.signer)+' · '+esc(time(m.at))+'</small>':'')+'</div><div class="whr-buttons"><button type="button" class="whr-mark" '+(busy?'disabled':'')+'>'+ (busy?'Saving…':done?'Undo inspection':'Mark inspected')+'</button><button type="button" class="whr-task">Create task</button>'+(window.WeeklyRefundReminders?.card(el,r.ref)||'')+'</div>'+
    ((review.tasks||[]).length?'<ul>'+review.tasks.map(t=>'<li><a href="team-tasks.html?taskId='+encodeURIComponent(t.id)+'" target="_blank" rel="noopener">View task ↗</a> · '+esc(t.owner||'Unassigned')+' · '+esc(String(t.status).replace(/_/g,' '))+'</li>').join('')+'</ul>':'')+'</section>';
  }
  const dialogHTML='<dialog class="whr-dialog" aria-labelledby="whr-title"><form><h3 id="whr-title">Create a follow-up task</h3><p class="whr-context"></p><label>Assign to<select name="owner" required></select></label><label>What needs to be done?<textarea name="note" rows="4" maxlength="4000" required></textarea></label><p class="whr-error" role="alert"></p><div><button type="button" class="whr-cancel">Cancel</button><button type="submit">Assign task</button></div></form></dialog>';
@@ -84,6 +84,7 @@
   }catch(e){if(d.dataset.request===request){owner.innerHTML='<option value="">Unavailable</option>';error.textContent='Could not load employees. Close and try again.';}}
  }
  function click(el,b,redraw){
+  if(b.hasAttribute('data-refund-remind')){window.WeeklyRefundReminders?.open(el,b.dataset.refundRemind,redraw);return true;}
   if(b.hasAttribute('data-inspection-mode')){
    el.wh.inspection=b.dataset.inspectionMode;el.wh.page=0;redraw(el);el.querySelector('[data-inspection-mode][aria-pressed=true]')?.focus({preventScroll:true});return true;
   }
