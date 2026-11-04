@@ -1058,3 +1058,33 @@ test('escalated case history is scoped to provider identity, with malformed and 
  assert.equal((await scalar('select customer_issue_evidence($1) v',[id(100)])).case_history.length,0);
  await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select customer_issue_evidence($1) v',[id(100)]),/access required/);
 });
+
+test('money returned marks are signed, reversible and filtered before paging independently of provider status',async()=>{
+ await db.exec(await sqlFile('20261103190000_customer_return_money_marks.sql'));
+ await db.exec(`insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status)
+   values('${id(101)}','${id(10)}','01-12345-12345','6789','open','return','return','OPEN'),
+         ('${id(102)}','${id(10)}','01-12345-12345','6780','open','inquiry','request','OPEN')`);
+ const mark=(key,flag,rev)=>scalar('select set_customer_return_money_mark($1,$2,$3) v',[id(key),flag,rev]);
+ const list=(filter,view='return')=>scalar("select list_customer_issues($1,'all','',0,1,'newest','all',null,'all',$2) v",[view,filter]);
+ assert.equal((await list('unmarked')).total,2);
+ const signed=await mark(100,true,0);
+ assert.equal(signed.signer_name,'Operator');
+ assert.equal(signed.signed_by,id(1));assert.ok(signed.recorded_at);
+ assert.equal((await mark(100,true,0)).revision,1);
+ assert.equal((await list('marked')).rows[0].money_mark.revision,1);
+ assert.equal((await list('unmarked')).rows[0].id,id(101));
+ assert.equal((await list('all')).total,2);
+ assert.equal((await list('all','attention')).total,3);
+ assert.equal(Object.values((await list('unmarked')).return_stages).reduce((a,b)=>a+b,0),1);
+ await assert.rejects(mark(102,true,0),/physical return/);
+ await assert.rejects(mark(100,false,0),/Another worker/);
+ await db.exec("update ebay_return_cases set ebay_status='REFUND_INITIATED' where id='"+id(100)+"'");
+ assert.equal((await list('marked')).total,1);
+ assert.equal((await mark(100,false,1)).revision,2);
+ assert.equal((await list('unmarked')).total,2);
+ assert.equal(await scalar('select count(*)::int v from customer_return_money_marks'),2);
+ assert.equal(await scalar('select status v from ebay_return_cases where id=$1',[id(100)]),'open');
+ await db.exec("select set_config('test.access','no',false);set role authenticated");
+ await assert.rejects(mark(100,true,2),/access required/);
+ assert.equal(await scalar('select count(*)::int v from customer_return_money_marks'),0);
+});

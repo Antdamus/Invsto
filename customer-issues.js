@@ -31,6 +31,46 @@
  const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
  let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',returnCounts=null,disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  let historyPreview=null,historyReceipt='';
+ let moneyFilter='unmarked';
+ function moneyMarkControl(c){
+  if(kind(c)!=='return')return '';
+  const mark=c.money_mark,marked=mark?.marked===true;
+  const label=marked?'Undo mark':'Mark money returned';
+  return `<div class="return-money-control" data-money-control="${escape(c.id)}">
+    ${marked?`<span class="return-money-signed"><strong>✓ Money returned</strong><small>${escape(mark.signer_name)} · ${escape(date(mark.recorded_at))}</small></span>`:''}
+    <button type="button" class="secondary-btn" data-money-case="${escape(c.id)}" data-mark="${!marked}" data-revision="${Number(mark?.revision)||0}" title="Staff record in Invsto">${label}</button>
+  </div>`;
+ }
+ async function saveMoneyMark(button){
+  const id=button.dataset.moneyCase,marked=button.dataset.mark==='true';
+  saving=true;
+  document.querySelectorAll('[data-money-case]').forEach(el=>el.disabled=true);
+  try{
+   const mark=checked(await db.rpc('set_customer_return_money_mark',{
+    _case_id:id,_marked:marked,_expected_revision:Number(button.dataset.revision)
+   }));
+   const row=rows.find(c=>c.id===id);
+   if(row)row.money_mark=mark;
+   if(detail?.c.id===id)detail.c.money_mark=mark;
+   const leavesList=view==='return'&&moneyFilter!=='all'&&marked!==(moneyFilter==='marked');
+   if(leavesList){
+    bulkSelection.delete(id);
+    rows=rows.filter(c=>c.id!==id);
+    if(selected===id&&!$('issue-action-form')&&!root.OGCaseNotes?.isEditing)closeCase(true);
+   }
+   await refresh({detail:false});
+   if(!$('issues-feedback').classList.contains('is-error')){
+    feedback(marked?'Marked as money returned in Invsto.':'Money returned mark removed.');
+   }
+  }catch(error){
+   feedback(error.message||'Could not save the money returned mark. Refresh the case and retry.',true);
+  }finally{
+   saving=false;
+   cards();
+   const control=$('issues-detail').querySelector('[data-money-control]');
+   if(control&&detail?.c.id===control.dataset.moneyControl)control.outerHTML=moneyMarkControl(detail.c);
+  }
+ }
  function caseHistoryAction(c,compact=false){
   if(ctx.employee.role!=='admin')return '';
   if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks)&&!['pending','changes_requested'].includes(c.final_review?.status))return compact?'':'<section class="issue-case-history"><div><strong>Saved in History · watching for updates</strong><p>New eBay activity or case work brings this record back to the active list.</p></div></section>';
@@ -82,7 +122,7 @@
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
  let listReturnPosition=null,bulkReturnPosition=null;
- const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all',view==='dispute'?disputeState:'all']);
+ const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all',view==='return'?moneyFilter:'all',view==='dispute'?disputeState:'all']);
  function captureListPosition(id){
   const cards=Array.from($('issues-list').querySelectorAll('[data-case]'));
   const card=cards.find(el=>el.dataset.case===id)||cards.find(el=>el.getBoundingClientRect().bottom>80);
@@ -182,6 +222,7 @@
  };
  function returnFilters(){
   $('issues-return-filter').hidden=view!=='return';
+  $('issues-money-filter').value=moneyFilter;
   const all=Object.values(returnCounts||{}).reduce((sum,n)=>sum+Number(n),0);
   for(const option of $('issues-return-stage').options){
    option.dataset.label??=option.textContent;
@@ -255,7 +296,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${view==='final_review'?'':customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${view==='final_review'?`<div class="issue-review-card-deadline">${reviewDeadline(c)}</div><p class="issue-review-card-submitted">Work finished ${escape(date(c.final_review?.submitted_at))}</p>`:cardFacts(c)}
    <div class="issue-card-footer">${view==='final_review'?returnBadge(c)+`<span class="issue-tag">${escape(nextText(c))}</span>`:cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueReview?.button(c)||''}${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${moneyMarkControl(c)}${root.OGIssueReview?.button(c)||''}${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='final_review'?`return${total===1?'':'s'} awaiting review`:`${view==='history'?'finished':'active'} case${total===1?'':'s'}`}`;
   returnFilters();
@@ -334,7 +375,7 @@
  async function refresh(options={}){
   const request=++listVersion;$('issues-list').setAttribute('aria-busy','true');
   try{
-   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(view==='dispute'?{_dispute_state:disputeState,_focus_case_id:options.focusCase||null}:options.focusCase?{_focus_case_id:options.focusCase}:{})}));
+   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',_dispute_state:view==='dispute'?disputeState:'all',_focus_case_id:options.focusCase||null,_money_filter:view==='return'?moneyFilter:'all'}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};returnCounts=result.return_stages||null;disputeCounts=result.dispute_states||{};total=result.total||0;
    if(ctx.employee.role==='admin'){
@@ -346,6 +387,12 @@
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await Promise.all([root.OGCaseNotes?.load(rows.map(c=>c.id)),root.OGIssueReview?.load()]);if(request!==listVersion)return;
    cards();root.OGIssueChats?.load(rows);
+   const selectedRow=rows.find(c=>c.id===selected);
+   if(detail?.c.id===selected&&selectedRow&&detail.c.money_mark?.revision!==selectedRow.money_mark?.revision){
+    detail.c.money_mark=selectedRow.money_mark;
+    const control=$('issues-detail').querySelector('[data-money-control]');
+    if(control)control.outerHTML=moneyMarkControl(detail.c);
+   }
    if($('issues-feedback').classList.contains('is-error'))feedback('');
    const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
    if(!root.OGCaseNotes?.isEditing&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
@@ -465,6 +512,7 @@
   const reason=c.source_lane==='inquiry'?'Item not received':/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
+   ${moneyMarkControl(c)}
    ${root.OGIssueReview?.button(c)||''}
    ${caseHistoryAction({...c,open_tasks:summary.open_tasks})}
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
@@ -559,11 +607,17 @@
    ]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
    if(c.source_lane==='return')Object.assign(c,checked(await db.rpc('customer_return_review_details',{_case_id:id}))||{});
+   if(kind(c)==='return'){
+    const marks=checked(await db.from('customer_return_money_marks').select('marked,revision,signer_name,recorded_at')
+      .eq('case_id',id).order('revision',{ascending:false}).limit(1));
+    c.money_mark=marks?.[0]||null;
+   }
    if(stamp!==version)return;
    if(locate){
     clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';disputeState='all';offset=0;
     const active=!['closed','cancelled'].includes(c.status)||tasks.some(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
     view=['pending','changes_requested'].includes(c.final_review?.status)?'final_review':active?kind(c):'history';resetSort();$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
+    if(view==='return'&&moneyFilter!=='all'&&(c.money_mark?.marked===true)!==(moneyFilter==='marked'))moneyFilter='all';
     await refresh({detail:false,focusCase:id});if(stamp!==version)return;
     if(!rows.some(row=>row.id===id))throw new Error('Could not locate this case in the list. Refresh and retry.');
     listReturnPosition=captureListPosition(id);
@@ -671,6 +725,7 @@
  }
  async function init(context){
   ctx=context;db=ctx.supabase;ready=true;
+  if(new URLSearchParams(location.search).get('view')==='return')view='return';
   if($('issues-history-banner'))$('issues-history-banner').hidden=ctx.employee.role!=='admin';
   resetSort();
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
@@ -680,7 +735,8 @@
   await root.OGIssueReview?.init({client:db,feedback,onChange:()=>{cards();if(detail&&!root.OGCaseNotes?.isEditing&&!$('issue-action-form'))renderDetail();}});
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
-   if(b.id==='issues-archive-finalized'){archiveFinalized();}
+   if(b.dataset.moneyCase)saveMoneyMark(b);
+   else if(b.id==='issues-archive-finalized'){archiveFinalized();}
    else if(b.dataset.sendHistory){sendCaseToHistory(b.dataset.sendHistory);}
    else if(b.id==='issues-open-history'){clearBulk();view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';resetSort();closeCase();refresh({detail:false});}
    else if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;resetSort();offset=0;closeCase();refresh({detail:false});}
@@ -724,6 +780,7 @@
   $('issues-sort').onchange=()=>{clearBulk();sort=$('issues-sort').value;offset=0;refresh({detail:false});};
   $('issues-scope').onchange=()=>{clearBulk();scope=$('issues-scope').value;offset=0;refresh({detail:false});};
   $('issues-return-stage').onchange=()=>{clearBulk();returnStage=$('issues-return-stage').value;offset=0;closeCase();refresh({detail:false});};
+  $('issues-money-filter').onchange=()=>{clearBulk();moneyFilter=$('issues-money-filter').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-dispute-state').onchange=()=>{clearBulk();disputeState=$('issues-dispute-state').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-prev').onclick=()=>{offset=Math.max(0,offset-PAGE);refresh({detail:false});};$('issues-next').onclick=()=>{offset+=PAGE;refresh({detail:false});};
   $('issues-refresh').onclick=()=>{refresh();health();};$('issues-sync').onclick=()=>sync();

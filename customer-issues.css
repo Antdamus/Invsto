@@ -187,3 +187,13 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 @media(max-width:800px){.issue-case-history{flex-direction:column;align-items:stretch}.issue-case-history button{width:100%}}
 /* A shared evidence-review pile, separate from the operational case state. */
 .issue-review-mark{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:14px 0}.issue-card>.issue-review-mark{padding:0 18px}.issue-review-mark .is-marked{border-color:#e5c982;color:#e5c982;background:#d8b96418}.issue-review-mark a{color:#e5c982}.issue-review-link{text-decoration:none;display:inline-flex;gap:10px;align-items:center}.issue-review-link span{background:#18261f;color:#f0d496;padding:2px 9px;border-radius:20px}
+.return-filter-row { display:flex; align-items:end; flex-wrap:wrap; gap:0 22px; }
+.return-filter-row[hidden] { display:none; }
+.return-money-control { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin:12px 0; }
+.issue-card-row > .return-money-control { padding:0 16px; }
+.return-money-control button { min-height:44px; border-color:#5f8f76; color:#c9edd8; }
+.return-money-signed { display:grid; gap:2px; color:#a4e1bc; }
+.return-money-signed small { color:#bbc8bd; overflow-wrap:anywhere; }
+@media (max-width:600px) {
+  .return-filter-row { display:grid; grid-template-columns:minmax(0,1fr); }
+}

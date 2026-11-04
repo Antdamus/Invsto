@@ -115,6 +115,28 @@ test('filters and paging stay server-side; full case data loads only on selectio
  await expect(stages.locator('option[value="all"]')).toHaveText('All return stages (1)');
  await page.locator('.issue-card').click();await page.getByRole('button',{name:'View full photo',exact:true}).click();await expect(page.locator('#issues-feedback')).toHaveText('Full evidence viewer opened');
 });
+for (const width of [390,1366]) test(`money returned at ${width}px can be marked, filtered and undone`,async t=>{
+ const page=await open(t,width);
+ await page.getByRole('button',{name:'Returns 12',exact:true}).click();
+ const filter=page.getByLabel('Money returned',{exact:true});
+ await expect(filter).toHaveValue('unmarked');
+ await page.locator('[data-case="case-0"]').click();
+ const mark=page.locator('#issues-detail').getByRole('button',{name:'Mark money returned'});
+ await page.evaluate(()=>window.fixtureMoneyFailure=true);
+ await mark.click();await expect(page.locator('#issues-feedback')).toContainText('Could not save');
+ await expect(mark).toBeEnabled();await page.evaluate(()=>window.fixtureMoneyFailure=false);
+ await mark.click();await expect(page.locator('.issue-card')).toHaveCount(11);
+ await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);
+ await filter.selectOption('marked');await expect(page.locator('.issue-card')).toHaveCount(1);
+ await expect(page.locator('.return-money-signed').first()).toContainText('Jose');
+ await page.locator('[data-case="case-0"]').click();
+ await expect(page.locator('#issues-detail .return-money-signed')).toContainText('Jose');
+ await page.locator('#issues-detail').getByRole('button',{name:'Undo mark'}).click();
+ await expect(page.locator('.issue-card')).toHaveCount(0);
+ await filter.selectOption('all');await expect(page.locator('.issue-card')).toHaveCount(12);
+ assert.deepEqual(await page.evaluate(()=>fixtureWrites.map(w=>w.name)),Array(3).fill('set_customer_return_money_mark'));
+});
+
 test('background case changes keep expanded details and never erase an unsaved reply',async t=>{
  const page=await open(t,1440);await page.locator('.issue-card').first().click();
  await expect(page.getByRole('heading',{name:'Complaint & conversation',exact:true})).toBeVisible();

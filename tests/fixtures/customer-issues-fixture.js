@@ -36,6 +36,7 @@
  if(location.search.includes('bulkFixture'))window.fixtureItems=[{return_case_id:'case-2',received_quantity:1,restocked_quantity:0,disposition:'quarantine'}];
  function query(table){let filters=[],one=false,lim=999;const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},in(){return q;},order(){return q;},overlaps(){return q;},contains(){return q;},or(){return q;},not(){return q;},range(){return q;},limit(n){lim=n;return q;},single(){one=true;return q;},maybeSingle(){one=true;return q;},then(resolve){
   fixtureCalls.push({table});let data=table==='employees'?people:table==='ebay_return_cases'?rows:table==='ebay_return_tasks'?tasks:table==='ebay_order_lines'?[line]:table==='ebay_return_items'?window.fixtureItems:table==='ebay_return_events'?[{id:'event-1',return_case_id:'case-0',action:'updated',notes:'The customer included the certificate. Inspect the clasp and compare with the original photos.',created_at:now,signed_by_email:'sandra@example.test',evidence_photos:[{bucket:'evidence',path:'watch.svg'}]}]:[];
+  if(table==='customer_return_money_marks')data=rows.map(r=>r.money_mark).filter(Boolean).filter(r=>filters.every(([k,v])=>r[k]===v));
   if(table==='employees'||table==='ebay_return_cases'||table==='ebay_return_tasks'||(table==='ebay_return_items'&&location.search.includes('bulkFixture')))data=data.filter(r=>filters.every(([k,v])=>r[k]===v));
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
@@ -60,10 +61,19 @@
    const results=args._case_ids.map(id=>{const r=rows.find(r=>r.id===id),archived=r?.id==='case-1'&&!window.fixtureNewWork;if(archived){r.status='closed';r.open_tasks=0;}return {id,archived};});
    return {data:{results,archived:results.filter(r=>r.archived).length}};
   }
+  if(name==='set_customer_return_money_mark'){
+   fixtureWrites.push({name,args});
+   if(window.fixtureMoneyFailure)return {error:{message:'Could not save the mark'}};
+   const row=rows.find(r=>r.id===args._case_id);
+   row.money_mark={case_id:row.id,marked:args._marked,revision:args._expected_revision+1,signer_name:'Jose',recorded_at:now};
+   return {data:row.money_mark};
+  }
   fixtureCalls.push({rpc:name,args});if(name==='can_access_post_order_issues')return {data:true};if(name==='list_customer_issues'){
    const scoped=rows.filter(r=>(!args._search||[r.customer_name,r.buyer_username,r.order_number,r.ebay_return_id].some(v=>String(v||'').toLowerCase().includes(args._search.toLowerCase())))&&(args._scope==='all'||r[args._scope]));
-   const return_stages={};for(const r of scoped.filter(r=>r.status!=='closed'&&r.issue_kind==='return')){const stage=r.return_stage||'unknown';return_stages[stage]=(return_stages[stage]||0)+1;}
+   const matchesMoney=r=>args._view!=='return'||!args._money_filter||args._money_filter==='all'||Boolean(r.money_mark?.marked)===(args._money_filter==='marked');
+   const return_stages={};for(const r of scoped.filter(r=>r.status!=='closed'&&r.issue_kind==='return'&&matchesMoney(r))){const stage=r.return_stage||'unknown';return_stages[stage]=(return_stages[stage]||0)+1;}
    let found=scoped.filter(r=>(args._view==='history'?r.status==='closed':r.status!=='closed'&&(args._view==='attention'||r.issue_kind===args._view||(args._view==='final_review'&&['pending','changes_requested'].includes(r.final_review?.status))))&&(args._view!=='return'||!args._return_stage||args._return_stage==='all'||(r.return_stage||'unknown')===args._return_stage));
+   found=found.filter(matchesMoney);
    const sort=args._sort||'newest',key=sort.startsWith('value_')?'item_value':sort.startsWith('order_')?'order_placed_at':sort.startsWith('due_')?'ebay_due_at':'opened_at',asc=['oldest','order_oldest','due_soonest','value_lowest'].includes(sort);found.sort((a,b)=>((a[key]>b[key]?1:a[key]<b[key]?-1:0)*(asc?1:-1))||a.id.localeCompare(b.id));
    return {data:{rows:found.slice(args._offset,args._offset+args._limit),total:found.length,return_stages,counts:{final_review:rows.filter(r=>['pending','changes_requested'].includes(r.final_review?.status)).length,attention:rows.filter(r=>r.status!=='closed').length,return:rows.filter(r=>r.status!=='closed'&&r.issue_kind==='return').length,request:12,dispute:12,history:rows.filter(r=>r.status==='closed').length}}};
   }
