@@ -290,7 +290,7 @@ test('front task, watch and completion actions keep their scope with an existing
     const previous = window.supabase.rpc;
     window.supabase.rpc = (name, args) => {
       if (name === 'list_pending_order_work') return {range: async () => ({data: []})};
-      if (name === 'set_order_line_watch') return Promise.resolve({data: {order_line_id: args._order_line_id, is_watch: args._is_watch, revision: 1}});
+      if (name === 'set_order_line_watch_brand') return Promise.resolve({data: {order_line_id: args._order_line_id, is_watch: args._is_watch, brand:args._brand, revision: 1}});
       return previous(name, args);
     };
     window.supabase.from = name => {
@@ -315,6 +315,7 @@ test('front task, watch and completion actions keep their scope with an existing
   assert.deepEqual(calls[1], {scope:'line',line:'line-0'});
   await expect(line.locator('[data-work-missing-add]')).toHaveCount(0);
   await line.locator('[data-watch-toggle]').click();
+  await page.getByRole('dialog',{name:'Choose a watch brand'}).getByRole('button',{name:'Cartier'}).click();
   await expect(line.locator('[data-watch-toggle]')).toHaveAttribute('aria-pressed','true');
   await expect(line.locator('[data-work-missing-add]')).toBeVisible();
   await expect(line.locator('[data-work-cgl-add]')).toBeVisible();
@@ -418,4 +419,30 @@ test('missing checkout store opens tools and choosing the store enables packing'
   await page.locator('#phone-review-checkout').click();
   await expect(page.locator('#item-scan')).toBeFocused();
   assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
+test('watch directory opens the matching brands from all pending orders on phone and desktop', async t=>{
+  const page=await open(t,{width:390});
+  for(const file of ['pending-watch-flags.js','pending-work-queue.js']) await page.addScriptTag({url:origin+'/'+file});
+  await page.evaluate(async()=>{
+    const tags=['cartier','rolex','ap','other'];
+    supabase.from=()=>({select:()=>({in:async()=>({data:tags.map((brand,i)=>({order_line_id:'line-'+i,is_watch:true,brand,revision:1}))})})});
+    supabase.rpc=(name)=>({range:async()=>({data:[]})});
+    OGPendingWork.start();await OGPendingWork.load(state.orders,{paint:false});await OGOrderWatches.load();applyOrderFilters();
+  });
+  for(const width of [390,1440]){
+    await page.setViewportSize({width,height:844});
+    const brand=page.locator('[data-watch-filter="cartier"]');
+    await expect(brand).toBeVisible();
+    await expect(brand.locator('strong')).toHaveText('1');
+    await page.locator('#order-search').fill('not-a-buyer');
+    await brand.click();await expect(brand).toHaveAttribute('aria-pressed','true');
+    assert.deepEqual(await page.evaluate(()=>state.filteredOrders.map(r=>r.id)),['line-0']);
+    await page.locator('[data-watch-filter="rolex"]').click();
+    assert.deepEqual(await page.evaluate(()=>state.filteredOrders.map(r=>r.id)),['line-1']);
+    await page.locator('[data-watch-filter="all"]').click();
+    assert.equal(await page.evaluate(()=>state.filteredOrders.length),4);
+    await page.locator('[data-watch-filter="all"]').click();
+    await expect(page.locator('.buyer-order-card')).toHaveCount(7);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  }
 });

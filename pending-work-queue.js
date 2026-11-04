@@ -106,9 +106,12 @@
     const groups=groupLinesByBuyer(rows), history=$('order-status-filter')?.value==='fulfilled';
     const searching=isSearch();
     const itemFilter=history||searching?'':watchFilter, workView=history||searching?'all':view;
+    const brand=itemFilter.startsWith('brand:')?itemFilter.slice(6):'';
+    window.OGOrderWatches?.counters?.(brand);
+    const matchesBrand=row=>window.OGOrderWatches?.matches?.(row,brand);
     const missingOnly=['not-found','missing'].includes(itemFilter);
     const matchesMissingLine=row=>itemFilter==='not-found'?isNotFound(row):isOpenOrderLine(row)&&Boolean(missingFor(row.id));
-    const matchesItem=g=>!itemFilter||(itemFilter==='not-found'?g.lines.some(isNotFound):
+    const matchesItem=g=>!itemFilter||(brand?g.lines.some(matchesBrand):itemFilter==='not-found'?g.lines.some(isNotFound):
       (itemFilter==='cgl'?pendingCgl(g.key):itemFilter==='cancel'?pendingCancellations(g.key):missingWatches(g.key)).length>0);
     const matchesView=g=>workView==='all'||(isKnown(g.key)&&(workView==='waiting')===Boolean(active(g.key).length));
     // Each set of counts applies the other filter, so it describes the buyers/items
@@ -121,7 +124,7 @@
       else counts[active(g.key).length?'waiting':'ready']++;
     }
     const workUnknown=groups.some(g=>g.lines.some(isOpenOrderLine)&&!isKnown(g.key));
-    const itemUnknown=Boolean(itemFilter&&itemFilter!=='not-found'&&workUnknown);
+    const itemUnknown=Boolean(itemFilter&&!brand&&itemFilter!=='not-found'&&workUnknown);
     for(const g of groups){
       if(!matchesView(g))continue;
       if(!g.lines.some(isOpenOrderLine))continue;
@@ -147,7 +150,7 @@
       :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking||itemUnknown?'Checking which orders are ready…':missingOnly?`Showing ${visible.length} ${visible.length===1?'buyer':'buyers'} with ${counts[itemFilter]} missing item ${counts[itemFilter]===1?'line':'lines'}. ${showAllBuyerLines?'All their order lines are included.':'Only missing order lines are shown.'} Ready, Waiting and All count matching buyers.`:'Buyer counts match the selected item filter; item counts match the selected work status. Click the selected item filter again to clear it.';}
     if(history||searching)return rows;
     const keys=new Set(visible.map(g=>g.key));
-    return rows.filter(r=>keys.has(getBuyerKey(r))&&(!missingOnly||showAllBuyerLines||matchesMissingLine(r)));
+    return rows.filter(r=>keys.has(getBuyerKey(r))&&(!brand||matchesBrand(r))&&(!missingOnly||showAllBuyerLines||matchesMissingLine(r)));
   }
   function itemSearchChanged() {
     // The existing item-search stream supplies changes; no extra reads or writes.
@@ -332,9 +335,11 @@
   }
   function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.visibilityState!=='hidden')void load();},250);}
   async function showPendingItemFilter(kind) {
-    view=kind==='not-found'?'all':'waiting';watchFilter=kind;showAllBuyerLines=false;state.orderDueFilter='all';
+    const brand=kind.startsWith('brand:');
+    view=kind==='not-found'||brand?'all':'waiting';watchFilter=kind;showAllBuyerLines=false;state.orderDueFilter='all';
     clearOrderSearch({apply:false});clearOrderCreatedDateFilter({apply:false});clearEbayLaunchFilter({apply:false});
     for(const id of ['buyer-refund-filter','buyer-refund-timing']){const el=$(id);if(el)el.value='all';}
+    if(brand)for(const id of ['pending-hold-reason','pending-hold-release-date']){const el=$(id);if(el)el.value='all';}
     if(state.selectedLiveLot){clearLiveLotSelection({render:false});renderLiveLotPanel();}
     const status=$('order-status-filter'),previous=status?.value;
     if(status)status.value='pending';
@@ -347,6 +352,14 @@
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
+      const brandButton=event.target.closest('[data-watch-filter]');
+      if(brandButton&&!brandButton.disabled){
+        const kind='brand:'+brandButton.dataset.watchFilter;
+        event.preventDefault();event.stopPropagation();
+        if(watchFilter===kind&&!isSearch()){watchFilter='';applyOrderFilters();}
+        else void showPendingItemFilter(kind);
+        return;
+      }
       const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#pending-work-show-all,#summary-cgl-button,#summary-missing-button,#summary-cancel-button,#phone-summary-cancel-button,#summary-not-found-button,#phone-summary-not-found-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving||undoBusy)return;

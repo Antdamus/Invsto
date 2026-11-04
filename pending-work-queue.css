@@ -56,3 +56,24 @@
 .pending-work-notice button:disabled{opacity:.55;cursor:wait}.pending-work-notice.is-error{background:#492d26;border-color:#e99b84}
 @media(max-width:760px){.pending-work-filters{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}.pending-work-filters button{font-size:12px;padding:9px 8px}.pending-watch-filters{grid-column:1/-1;margin-left:0;gap:6px}.pending-work-dialog{padding:18px;max-height:calc(100dvh - 20px)}.pending-work-dialog h2{font-size:21px}.pending-work-summary{font-size:13px}.pending-work-dialog #pending-work-save{width:100%}}
 .pending-report-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0}.pending-report-actions a{display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+/* Pending watch directory */
+.watch-directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));align-items:center;gap:8px 16px;margin:14px 0 10px;padding:13px 15px;border:1px solid #5b5033;border-radius:15px;background:linear-gradient(110deg,#302b20,#1b231f 70%);color:#fbefd6}
+.watch-directory button,#watch-brand-picker button{font:inherit;cursor:pointer}
+.watch-directory-total{display:flex;align-items:center;gap:10px;border:0;color:inherit;background:none;text-align:left;padding:4px 0;min-height:44px}
+.watch-directory-total svg{flex-shrink:0;color:#dfbc77}.watch-directory-total span{font-weight:750;line-height:1.25}.watch-directory-total small{display:block;font-weight:500;color:#c1bbac;margin-top:3px;font-size:.73rem}
+.watch-directory-total strong{margin-left:auto;color:#ffe4a8;font-size:1.55rem;font-variant-numeric:tabular-nums}
+.watch-directory-brands,.watch-picker-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.watch-directory-brands button{display:grid;justify-items:center;gap:2px;min-height:44px;padding:5px;border:1px solid #605b48;border-radius:9px;background:#191d1a;color:#e9e3d5;font-size:.78rem}
+.watch-directory-brands strong{font-size:1rem;line-height:1.15;font-variant-numeric:tabular-nums}
+.watch-directory [aria-pressed=true],.watch-picker-options [aria-pressed=true]{background:#f2d399;color:#271e0c;border-color:#f2d399}
+.watch-directory-total[aria-pressed=true]{border-radius:9px;padding-inline:8px}.watch-directory-total[aria-pressed=true] :is(small,strong,svg){color:inherit}
+.watch-directory button:focus-visible,#watch-brand-picker button:focus-visible{outline:2px solid #ffe6a8;outline-offset:3px}
+.watch-directory-note{grid-column:1/-1;color:#c9c7ba;font-size:.73rem}.watch-directory[hidden]{display:none}
+#watch-brand-picker{width:min(390px,calc(100% - 28px));padding:22px;color:#f7f2e6;background:#1d251f;border:1px solid #75674a;border-radius:18px;box-shadow:0 20px 80px #0008}
+#watch-brand-picker::backdrop{background:#090c0bbd}.watch-picker-head{display:flex;align-items:center;justify-content:space-between;color:#ead09a;font-size:.69rem;font-weight:800;letter-spacing:.13em}
+.watch-picker-head button{min-width:40px;min-height:40px;background:transparent;border:0;color:#ede8db;font-size:1.5rem!important}
+#watch-brand-picker h2{margin:0 0 6px;font-size:1.45rem;color:inherit}#watch-brand-picker [data-watch-item]{color:#d5cfbf;font-size:.86rem;overflow-wrap:anywhere}
+.watch-picker-options{grid-template-columns:1fr 1fr;margin:18px 0 14px}.watch-picker-options button{min-height:52px;text-align:left;padding:9px 12px;border-radius:10px;border:1px solid #6c6751;background:#2a332c;color:#f7f2e6;font-weight:700!important}
+.watch-picker-options button[aria-pressed=true]{background:#edd39d;color:#271e0c}.watch-picker-options small{display:block;font-size:.68rem;font-weight:500}
+.watch-picker-message{font-size:.83rem;color:#d8cfbd;margin-bottom:6px}#watch-brand-picker [data-watch-remove]{background:none;color:#efc1ab;border:0;padding:8px 0;min-height:44px}
+@media(max-width:760px){.watch-directory{grid-template-columns:1fr;padding:11px 13px}.watch-directory-total{justify-content:flex-start}.watch-directory-total strong{margin-left:auto}.watch-directory-brands button{display:flex;align-items:center;justify-content:space-evenly}}

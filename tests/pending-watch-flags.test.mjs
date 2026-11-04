@@ -20,6 +20,7 @@ before(async()=>{
   insert into public.ebay_order_lines values('${lineId}','pending',2,0,'{"payment":"PAID"}');
   set test.staff='yes';set test.uid='${userId}';`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261010203000_order_line_watch_flags.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261103170000_pending_watch_brands.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 const save=async(value,revision=0)=>(await db.query('select * from public.set_order_line_watch($1,$2,$3)',[lineId,value,revision])).rows[0];
@@ -55,24 +56,36 @@ test('only authenticated staff can read or change markers, with no direct write 
 });
 
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};}
+test('brand changes use the signed marker revision and old clients can remove branded watches',async()=>{
+ const assign=async(key,rev)=>(await db.query('select * from set_order_line_watch_brand($1,true,$2,$3)',[lineId,rev,key])).rows[0];
+ assert.equal((await assign('cartier',3)).revision,4);
+ assert.equal((await save(true,0)).brand,'cartier');
+ await assert.rejects(assign('rolex',3),/Another teammate/);
+ await assert.rejects(assign('unknown',4),/Invalid Watch/);
+ assert.equal((await assign('rolex',4)).brand,'rolex');
+ assert.equal((await save(false,5)).brand,null);
+ assert.equal((await db.query('select count(*) n from order_line_watch_events')).rows[0].n,4);
+});
 async function client(){
  const listeners={},requests=[],reads=[],messages=[],row={id:lineId,line_status:'pending'};
+ const dialog={querySelector:()=>({}),querySelectorAll:()=>[],showModal(){this.open=true;},close(){this.open=false;}};
  const context={state:{orders:[row],filteredOrders:[row]},console:{warn(){}},
   escapeHtml:s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;'),isOpenOrderLine:r=>r.line_status==='pending',getBuyerKey:()=> 'buyer',
-  setStatus:(...args)=>messages.push(args),document:{querySelectorAll:()=>[],addEventListener:(name,fn)=>listeners[name]=fn,visibilityState:'visible'},
+  setStatus:(...args)=>messages.push(args),document:{getElementById:id=>id==='watch-brand-picker'?dialog:null,querySelectorAll:()=>[],addEventListener:(name,fn)=>listeners[name]=fn,visibilityState:'visible'},
   supabase:{from:()=>({select:()=>({in:()=>{const d=deferred();reads.push(d);return d.promise;}})}),rpc:(name,args)=>{const d=deferred();requests.push({name,args,...d});return d.promise;}},
   window:{setInterval(){},addEventListener(){},OGOrderLiveUpdates:{subscribe(){}}}};
  vm.runInNewContext(await readFile(new URL('../pending-watch-flags.js',import.meta.url),'utf8'),context);
  const api=context.window.OGOrderWatches;api.start();
  const click=()=>listeners.click({target:{closest:()=>({dataset:{watchToggle:lineId}})},preventDefault(){},stopPropagation(){}});
  const flush=()=>new Promise(r=>setImmediate(r));
- return{api,click,reads,requests,row,messages,flush};
+ const choose=key=>dialog.onclick({target:{closest:()=>({dataset:{watchChoice:key}})}});
+ return{api,click,choose,reads,requests,row,messages,flush};
 }
 test('a late read cannot erase a saved marker and double-clicks make one request',async()=>{
  const c=await client();const first=c.api.load();c.reads[0].resolve({data:[]});await first;
- const late=c.api.load();c.click();c.click();assert.equal(c.requests.length,1);
- assert.deepEqual(JSON.parse(JSON.stringify(c.requests[0].args)),{_order_line_id:lineId,_is_watch:true,_expected_revision:0});
- c.requests[0].resolve({data:{order_line_id:lineId,is_watch:true,revision:1}});await c.flush();
+ const late=c.api.load();c.click();assert.equal(c.requests.length,0);c.choose('cartier');c.choose('cartier');assert.equal(c.requests.length,1);
+ assert.deepEqual(JSON.parse(JSON.stringify(c.requests[0].args)),{_order_line_id:lineId,_is_watch:true,_expected_revision:0,_brand:'cartier'});
+ c.requests[0].resolve({data:{order_line_id:lineId,is_watch:true,brand:'cartier',revision:1}});await c.flush();
  c.reads[1].resolve({data:[]});await late;
  assert.match(c.api.line(c.row),/aria-pressed="true"/);assert.match(c.api.summary([c.row]),/Extra processing/);
 });
@@ -80,6 +93,13 @@ test('failed saves keep the previous marker and show a local error; read failure
  const c=await client();const first=c.api.load();c.reads[0].resolve({error:{message:'offline'}});await first;
  c.click();assert.equal(c.requests.length,0);assert.match(c.api.line(c.row),/disabled/);assert.match(c.api.line(c.row),/Retry/);
  const read=c.api.load();c.reads[1].resolve({data:[{order_line_id:lineId,is_watch:true,revision:4}]});await read;
- c.click();c.requests[0].resolve({error:{message:'Could not save'}});await c.flush();
+ c.click();c.choose('ap');c.requests[0].resolve({error:{message:'Could not save'}});await c.flush();
  assert.match(c.api.line(c.row),/aria-pressed="true"/);assert.match(c.api.line(c.row),/Could not save/);
+});
+test('counts distinct pending order IDs overall and within each brand',async()=>{
+ const c=await client();
+ const rows=['cartier','cartier','rolex','ap','other','cartier'].map((brand,i)=>({id:String(i),order_id:['A','A','A','B','C','D'][i],line_status:i===5?'fulfilled':'pending',brand}));
+ const run=c.api.load(rows);c.reads[0].resolve({data:rows.map(r=>({order_line_id:r.id,is_watch:true,brand:r.brand,revision:1}))});await run;
+ assert.deepEqual({...c.api.orderCounts(rows).counts},{all:3,cartier:1,rolex:1,ap:1,other:1});
+ assert.deepEqual(rows.filter(r=>c.api.matches(r,'cartier')).map(r=>r.id),['0','1']);
 });

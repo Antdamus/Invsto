@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
   <link rel="stylesheet" href="pending-orders.css?v=20261030-phone-tracking" />
   <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
-  <link rel="stylesheet" href="pending-work-queue.css?v=20261029-missing-report" />
+  <link rel="stylesheet" href="pending-work-queue.css?v=20261103-watch-brands" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -543,6 +543,18 @@
             <button id="buyer-refund-refresh" type="button" class="secondary-btn">Check buyer refunds</button>
             <p id="buyer-refund-status" role="status" aria-live="polite">Check saved buyer history, including closed orders. Each buyer’s current orders stay together.</p>
           </div>
+          <section class="watch-directory" id="pending-watch-directory" aria-label="Pending orders with watches">
+            <button type="button" class="watch-directory-total" data-watch-filter="all" aria-pressed="false" disabled>
+              <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="4"/><path d="M9 6V2h6v4M9 18v4h6v-4M12 9v3l2 1"/></svg><span>Orders with watches<small>All pending orders</small></span><strong>…</strong>
+            </button>
+            <div class="watch-directory-brands" role="group" aria-label="Filter watch orders by brand">
+              <button type="button" data-watch-filter="cartier" aria-pressed="false" disabled>Cartier <strong>…</strong></button>
+              <button type="button" data-watch-filter="rolex" aria-pressed="false" disabled>Rolex <strong>…</strong></button>
+              <button type="button" data-watch-filter="ap" aria-pressed="false" title="Audemars Piguet" disabled>AP <strong>…</strong></button>
+              <button type="button" data-watch-filter="other" aria-pressed="false" disabled>Other <strong>…</strong></button>
+            </div>
+            <small class="watch-directory-note" data-watch-count-note>Checking saved Watch markers…</small>
+          </section>
           <div class="pending-work-filters" role="group" aria-label="Order work status">
             <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
             <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
@@ -1368,8 +1380,18 @@
     </div>
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
-  <script src="pending-watch-flags.js?v=20261018-front-tasks"></script>
-  <script src="pending-work-queue.js?v=20261029-filter-counts"></script>
+  <dialog id="watch-brand-picker" aria-labelledby="watch-brand-title">
+    <form method="dialog"><div class="watch-picker-head"><span>WATCH CLASSIFICATION</span><button type="submit" aria-label="Close brand picker">×</button></div>
+      <h2 id="watch-brand-title">Choose a watch brand</h2><p data-watch-item></p>
+      <div class="watch-picker-options" role="group" aria-label="Save watch brand">
+        <button type="button" data-watch-choice="cartier">Cartier</button><button type="button" data-watch-choice="rolex">Rolex</button>
+        <button type="button" data-watch-choice="ap">AP <small>Audemars Piguet</small></button><button type="button" data-watch-choice="other">Other</button>
+      </div><p class="watch-picker-message" role="status" data-watch-message>Choose a brand to save it to this order line.</p>
+      <button type="button" data-watch-remove hidden>Remove Watch marker</button>
+    </form>
+  </dialog>
+  <script src="pending-watch-flags.js?v=20261103-watch-brands"></script>
+  <script src="pending-work-queue.js?v=20261103-watch-brands"></script>
   <script src="buyer-tasks.js?v=20261013-photos"></script>
   <script src="buyer-promise-checkout.js?v=20261013-photos"></script>
   <script src="pending-partial-refunds.js?v=20261029-approval-cache"></script>
