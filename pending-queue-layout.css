@@ -62,7 +62,7 @@ details[open] > summary .queue-chevron { transform: translateY(2px) rotate(225de
   .content.pending-content { width: 100%; max-width: 1600px; margin-inline: auto; }
 }
 @media (min-width: 1400px) {
-  .queue-controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; align-items: end; }
+  .queue-controls { display: grid; grid-template-columns: minmax(400px, .8fr) minmax(0, 1.5fr); gap: 8px 20px; align-items: end; }
   .queue-controls-heading { grid-column: 1/-1; }
   .queue-controls .buyer-due-filters { margin: 0; }
   .queue-controls .buyer-shipping-due-options > span { flex-basis: 100%; }
