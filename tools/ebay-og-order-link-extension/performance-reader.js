@@ -14,15 +14,24 @@
   if(!m||!months.includes(m[1]))throw Error('The eBay calendar date could not be read.');
   return m[3]+'-'+String(months.indexOf(m[1])+1).padStart(2,'0')+'-'+m[2].padStart(2,'0');
  }
- function soldAt(value,from,end){
+ function soldAt(value,from,end,paid){
   const m=/^([A-Z][a-z]{2}) (\d{1,2})\s+(\d{1,2}):(\d{2})(am|pm) (P[DS]T)$/i.exec(value);
   if(!m)throw Error('Missing Pacific purchase time.');
   for(const year of new Set([from.slice(0,4),end.slice(0,4)])){
    const day=dateParts(m[1]+' '+m[2]+', '+year);
    if(day>=from&&day<=end){
     const hour=Number(m[3])%12+(m[5].toLowerCase()==='pm'?12:0);
-    return new Date(day+'T'+String(hour).padStart(2,'0')+':'+m[4]+':00'+(m[6]==='PDT'?'-07:00':'-08:00')).toISOString();
+    return {purchased:new Date(day+'T'+String(hour).padStart(2,'0')+':'+m[4]+':00'+(m[6]==='PDT'?'-07:00':'-08:00')).toISOString()};
    }
+  }
+  // Seller Hub also lists older orders paid during this window. Preserve the
+  // actual sale minute; the server must independently match it to this order.
+  const p=/^([A-Z][a-z]{2}) (\d{1,2})$/.exec(paid);
+  if(p)for(const year of new Set([from.slice(0,4),end.slice(0,4)])){
+   const paid_day=dateParts(p[1]+' '+p[2]+', '+year);if(paid_day<from||paid_day>end)continue;
+   let day=dateParts(m[1]+' '+m[2]+', '+year);if(day>paid_day)day=dateParts(m[1]+' '+m[2]+', '+(Number(year)-1));
+   const hour=Number(m[3])%12+(m[5].toLowerCase()==='pm'?12:0);
+   return {purchased:new Date(day+'T'+String(hour).padStart(2,'0')+':'+m[4]+':00'+(m[6]==='PDT'?'-07:00':'-08:00')).toISOString(),paid_day};
   }
   throw Error('A sale is outside the requested date range.');
  }
@@ -54,7 +63,7 @@
     const [sold,paid]=[...row.querySelectorAll('.date-column')].map(text);
     const status=text(row.querySelector('.actions-cell')).split('\n')[0];
     if(!buyer||!sold||!status)throw Error('An order row is incomplete.');
-    out.set(id,{id,buyer:buyer.toLowerCase(),purchased:soldAt(sold,job.from,job.to),paid:Boolean(paid&&!/^[-—]+$/.test(paid)),
+    out.set(id,{id,buyer:buyer.toLowerCase(),...soldAt(sold,job.from,job.to,paid),paid:Boolean(paid&&!/^[-—]+$/.test(paid)),
      original_cents:dollars(text(row.querySelector('.price-column')).split('\n')[0]),status,items:items(row),children:[]});
    }else{
     const parent=out.get(id),line=items(row);if(!parent||line.length>1)throw Error('Could not link an item to its order.');
@@ -74,7 +83,18 @@
    const reason=description.match(/Reason:\s*([^\n]+)/)?.[1]?.trim(),day=description.match(/Requested:\s*([^\n]+)/)?.[1]?.trim();
    if(!reason||!day||text(cells[3])!=='Canceled'||!text(cells.at(-1)))throw Error('A cancellation is incomplete.');
    const amount=text(cells.at(-2));
-   rows.push({id,buyer:text(cells.at(-1)).toLowerCase(),reason,requested:dateParts(day),items:ids,gross:/^[-—]+$/.test(amount)?0:dollars(amount)});
+   const buyer=text(cells.at(-1)).toLowerCase();
+   if(!ids.length){
+    // A removed listing can lose its item link. The same case row's eBay
+    // contact link still identifies the buyer and exact item.
+    const fallback=new Set();
+    for(const a of cells.at(-1).querySelectorAll('a[href]')){
+     const u=new URL(a.href),item=u.searchParams.get('item_id');
+     if(u.origin==='https://www.ebay.com'&&u.pathname==='/contact/sendmsg'&&u.searchParams.get('recipient')?.toLowerCase()===buyer&&/^\d{12}$/.test(item||''))fallback.add(item);
+    }
+    if(fallback.size===1)ids.push(...fallback);
+   }
+   rows.push({id,buyer,reason,requested:dateParts(day),items:ids,gross:/^[-—]+$/.test(amount)?0:dollars(amount)});
   }
   if(rows.some(r=>!r.items.length))throw Error('Missing cancellation item IDs.');
   return {...page,rows};

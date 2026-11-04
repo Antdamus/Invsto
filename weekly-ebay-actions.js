@@ -32,7 +32,7 @@
   }
   function feedback(key,text){messages.set(key,text);const slot=[...list.children].find(li=>li.dataset.key===key)?.querySelector('.ws-action-feedback');if(slot)slot.textContent=text;}
   function render(force=false){
-   const visible=rows.filter(describe),sig=JSON.stringify([visible,reader(),[...busy],receipt]);
+   const visible=rows.filter(describe),fixedReader=document.documentElement.hasAttribute('data-invsto-performance-reader'),sig=JSON.stringify([visible,reader(),fixedReader,[...busy],receipt]);
    if(!force&&sig===signature)return;signature=sig;
    el.hidden=!visible.length&&!receipt;heading.textContent=visible.length?'Needs your action':'Action complete';icon.textContent=visible.length?'!':'✓';
    el.classList.toggle('ws-actions-complete',!visible.length&&!!receipt);
@@ -48,6 +48,7 @@
     const after=elem('p',messages.get(key),'ws-action-feedback');after.setAttribute('role','status');
     if(a.kind==='performance'){
      const {sources,inProgress,queued}=state(a);
+     const needsReader=reader()&&!fixedReader&&Object.values(sources).some(s=>/missing cancellation item ids|outside the requested date range/i.test(s.error||''));
      if(a.sources){
       const dl=elem('dl',null,'ws-source-checks');
       for(const [k,name] of [['orders','Order history'],['cases','Cancellation register']]){
@@ -57,8 +58,12 @@
       }
       copy.append(dl);
      }
+     if(needsReader){
+      copy.append(elem('p','One-time Edge update: open Extensions → Manage extensions, then click Reload (↻) on OG eBay Order Link v1.0.33 or later. If your extension was installed from a ZIP, update its folder first.','ws-action-state'));
+      tools.append(external('Download updated reader ↗','downloads/OG-eBay-Order-Link.zip?v=1.0.33'));
+     }
      if(inProgress||queued)copy.append(elem('p',inProgress?'Checking Seller Hub now. This card updates automatically.':'Queued for the signed-in workstation’s next check.','ws-action-state'));
-     tools.append(actionButton(inProgress?'Checking…':queued&&!reader()?'Refresh requested':label,()=>run(a),busy.has(key)||inProgress||(queued&&!reader())),external('Open Seller Hub ↗',hub));
+     tools.prepend(actionButton(inProgress?'Checking…':queued&&!reader()?'Refresh requested':needsReader?'Refresh after reloading':label,()=>run(a),busy.has(key)||inProgress||(queued&&!reader())));tools.append(external('Open Seller Hub ↗',hub));
     }else if(a.kind==='claims'||a.kind==='statement'){
      const file=elem('input');file.type='file';file.hidden=true;file.accept=a.kind==='claims'?'.csv,text/csv':'.pdf,application/pdf';file.setAttribute('aria-label',label);
      file.onchange=()=>{if(file.files[0])run(a,file.files[0]);};
@@ -109,7 +114,7 @@
    }catch{if(n===sequence&&!el.hidden){status.dataset.delayed='1';status.textContent='Showing the last known reminders. Invsto will check again automatically.';}}
   }
   setInterval(()=>{if(watchPerformance&&Date.now()<watchUntil&&!document.hidden)check();},12000);
-  if(typeof MutationObserver!=='undefined')new MutationObserver(()=>render()).observe(document.documentElement,{attributes:true,attributeFilter:['data-invsto-hold-reader']});
+  if(typeof MutationObserver!=='undefined')new MutationObserver(()=>render()).observe(document.documentElement,{attributes:true,attributeFilter:['data-invsto-hold-reader','data-invsto-performance-reader']});
   return check;
  }
  window.WeeklyEbayActions={init};

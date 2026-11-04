@@ -41,9 +41,14 @@ test('only admins see the report; a failed or replayed refresh cannot overwrite 
  create function ebay_report_manual_actions(date) returns jsonb language sql as $$select '[]'::jsonb$$;`);
  await db.exec(await fs.readFile(new URL('supabase/migrations/20261102210000_ebay_performance_reports.sql',root),'utf8'));
  await db.exec(await fs.readFile(new URL('supabase/migrations/20261102212000_verify_performance_cancel_details.sql',root),'utf8'));
+ await db.exec(await fs.readFile(new URL('supabase/migrations/20261104064000_verify_later_ebay_payments.sql',root),'utf8'));
  const query=async(s,p)=>(await db.query(s,p)).rows[0]?.v;
  await db.query("select store_ebay_health_rows('orders',$1)",[JSON.stringify([order])]);
  await db.query("select store_ebay_health_rows('payments',$1)",[JSON.stringify(transactions)]);
+ const ticket=await query("insert into ebay_health_jobs(kind,id,ticket,owner_id,lease_until) values('orders','2026-11-02',gen_random_uuid(),auth.uid(),now()+interval '5 min') returning ticket v");
+ const saveLate=row=>db.query('select finish_ebay_health_job($1,$2,1,null)',[ticket,JSON.stringify([row])]);
+ await assert.rejects(saveLate(order),/outside/);await assert.rejects(saveLate({...order,buyer:'other',paid_day:'2026-11-03'}),/outside/);
+ await saveLate({...order,paid_day:'2026-11-03'});assert.equal(await query("select count(*)::int v from ebay_health_orders"),1);
  const next=await query('select claim_ebay_health_jobs() v');const job=next.find(j=>j.kind==='cases');assert.ok(job);
  await assert.rejects(db.query("select finish_ebay_health_job($1,$2,2,null)",[job.ticket,JSON.stringify([c])]),/Incomplete/);
  await db.query("select finish_ebay_health_job($1,$2,1,null)",[job.ticket,JSON.stringify([c])]);
@@ -105,8 +110,13 @@ test('Seller Hub reader verifies its seller, date and transaction filter before 
   let result=await read('/sh/ord/',span);
   assert.deepEqual([result.page.rows[0].purchased,result.page.rows[0].items.length,result.page.rows[0].original_cents],['2026-07-07T06:25:00.000Z',2,2000]);
   assert.equal((await read('/sh/ord/',{...span,from:'2026-07-02'})).ok,false);
+  html=html.replace('Jul 6<br>11:25pm PDT','Jun 6<br>11:25pm PDT');
+  const late=await read('/sh/ord/',span);assert.equal(late.page.rows[0].purchased,'2026-06-07T06:25:00.000Z');assert.equal(late.page.rows[0].paid_day,'2026-07-06');
   html=profile+'<button>Status:<br>Canceled</button><p>Results: 1-1 of 1</p><table><tr><td>See details</td><td></td><td><a href="/itm/123">Lot A</a></td><td>Canceled</td><td>Cancel ID: 100<br>Requested: Nov 2, 2026<br>Reason: Buyer requested</td><td>$30.00</td><td>seller_buyer</td></tr></table>';
   result=await read('/sh/ord/cancel',{kind:'cases'});assert.deepEqual(result.page.rows[0],{id:'100',buyer:'seller_buyer',reason:'Buyer requested',requested:'2026-11-02',items:['123'],gross:3000});
+  html=html.replace('<a href="/itm/123">Lot A</a>','Lot A').replace('<td>seller_buyer</td>','<td><a href="/contact/sendmsg?item_id=123456789123&amp;recipient=seller_buyer">seller_buyer</a></td>');
+  assert.deepEqual((await read('/sh/ord/cancel',{kind:'cases'})).page.rows[0].items,['123456789123']);
+  html=html.replace('recipient=seller_buyer','recipient=someone_else');assert.equal((await read('/sh/ord/cancel',{kind:'cases'})).ok,false);
   const transaction=(kind)=>'<div class="transaction--content-wrapper"><div>Nov 2, 2026</div><div class="transaction--desc">'+kind+' for order number 01-12345-67890<button>Open in OG</button><br>Cancel ID: 100<br>#100 Lot A</div><div>-$30.00</div><div>$2.20</div><div class="transaction--net">-$27.80<br>negative $27.80</div></div>';
   html=profile+'<input type="search" aria-label="search-field" value="01-12345-67890"><p>Transactions: 1-2 of 2</p>'+transaction('Refund')+transaction('Claim');
   result=await read('/mes/transactionlist?sh=true',{kind:'payments',id:order.id});
