@@ -1588,12 +1588,13 @@ async function performTaskLoad() {
 }
 
 function getTaskNotificationHref(notification = {}) {
-  if (notification.notification_type === "refund_reminder" && window.OGTaskNotifications?.href) return window.OGTaskNotifications.href(notification);
+  if (["refund_reminder", "hold_review_reminder"].includes(notification.notification_type) && window.OGTaskNotifications?.href) return window.OGTaskNotifications.href(notification);
   return `team-tasks.html?taskId=${encodeURIComponent(notification.task_id || "")}`;
 }
 
 function getTaskNotificationTypeLabel(type = "") {
   const labels = {
+    hold_review_reminder: "Your hold reminder",
     refund_reminder: "Your refund reminder",
     task_assigned: "Task assigned",
     subtask_assigned: "Subtask assigned",

@@ -6,7 +6,7 @@
   const REFRESH_MS = 60000;
   const categories = {all: 'All', tasks: 'Tasks', buyers: 'Buyer issues', returns: 'Returns', system: 'System', catalogues: 'Catalogues'};
   const descriptions = {all: 'Assignments, replies and eBay updates.', tasks: 'Your assignments, replies and approvals.', buyers: 'Buyer requests, disputes and eBay deadlines.', returns: 'Return case updates and eBay deadlines.', system: 'Connection and synchronization alerts.', catalogues: 'Client selections awaiting your review.'};
-  const labels = {refund_reminder:'Your refund reminder',catalogue_request: 'Client selection',task_assigned: 'New assignment', subtask_assigned: 'New subtask', shipment_assigned: 'Shipping assignment',
+  const labels = {hold_review_reminder:'Your hold reminder',refund_reminder:'Your refund reminder',catalogue_request: 'Client selection',task_assigned: 'New assignment', subtask_assigned: 'New subtask', shipment_assigned: 'Shipping assignment',
     packaging_assigned: 'Packaging assignment', return_task_assigned: 'Return assignment', task_progress_update: 'Reply / update',
     task_ready_for_review: 'Ready for review', task_completed: 'Work completed', subtask_completed: 'Subtask completed',
     task_due_reminder: 'Task reminder', task_overdue: 'Overdue task',customer_issue_sync:'eBay sync',customer_issue_action:'eBay case update',customer_issue_deadline:'eBay deadline'};
@@ -26,7 +26,14 @@
   const issueAlert = entry => ['customer_issue_action','customer_issue_deadline'].includes(entry.notification_type) && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.metadata?.case_id || '');
   const syncAlert = entry => entry.notification_type === 'customer_issue_sync';
   const catalogueAlert = entry => entry.notification_type === 'catalogue_request' && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.metadata?.request_id || '');
-  const href = entry => refundAlert(entry) ? refundHref(entry) : catalogueAlert(entry) ? `catalogue-requests.html?requestId=${encodeURIComponent(entry.metadata.request_id)}` : syncAlert(entry) ? 'ebay-returns.html?syncHealth=1' : issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
+  const holdAlert = e => e.notification_type==='hold_review_reminder' && ['retro','dispute'].includes(e.metadata?.hold_kind) && /^[a-zA-Z0-9_-]{1,110}$/.test(e.metadata?.hold_ref||'');
+  const holdHref = e => {
+    const m=e.metadata;if(m.hold_kind==='dispute')return /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(m.case_id||'')?'ebay-returns.html?caseId='+encodeURIComponent(m.case_id):'https://pmtdispute.ebay.com/dispute/'+encodeURIComponent(m.hold_ref);
+    const q=new URLSearchParams({sh:'true',type:'RESERVE',uuid:'RETRO_FUNDS_DISPLAY__RETRO_DISPLAY-'+m.hold_ref});
+    if(/^\d{2}-\d{5}-\d{5}$/.test(m.order_number||'')){q.set('relatedTransactionId',m.order_number);q.set('relatedTransactionType','ORDER');}
+    return 'https://www.ebay.com/mes/transactiondetails?'+q;
+  };
+  const href = entry => holdAlert(entry) ? holdHref(entry) : refundAlert(entry) ? refundHref(entry) : catalogueAlert(entry) ? `catalogue-requests.html?requestId=${encodeURIComponent(entry.metadata.request_id)}` : syncAlert(entry) ? 'ebay-returns.html?syncHealth=1' : issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
     ? `team-tasks.html?taskId=${encodeURIComponent(entry.task_id)}` : 'team-tasks.html';
   const snapshot = () => ({userId, notifications: [...new Map([...unread, ...entries].map(row => [row.id, row])).values()], unreadCount});
   function publish() {
@@ -154,7 +161,7 @@
         <h3>${escape(entry.title || 'Task update')}</h3>
         ${entry.actor_email ? `<small class="og-tu-actor">From ${escape(entry.actor_email)}</small>` : ''}
         <p>${escape(entry.body || 'Open the task to see the instructions.')}</p>
-        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${refundAlert(entry)?'Open return':catalogueAlert(entry)?'Review selection':syncAlert(entry)?'Open sync status':issueAlert(entry)?'Open case':'Open task'}</a>
+        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${holdAlert(entry)?'Open hold':refundAlert(entry)?'Open return':catalogueAlert(entry)?'Review selection':syncAlert(entry)?'Open sync status':issueAlert(entry)?'Open case':'Open task'}</a>
         ${entry.read_at ? '<span>Read</span>' : `<button type="button" data-tu-read="${escape(entry.id)}" ${busyIds.has(entry.id) ? 'disabled' : ''}>${busyIds.has(entry.id) ? 'Saving…' : 'Mark read'}</button>`}</div>
       </article>`).join('') : `<div class="og-tu-empty">${loading ? 'Loading updates…' : `No ${view === 'unread' ? 'unread' : 'recent'} ${category === 'all' ? 'updates' : categories[category].toLowerCase() + ' updates'}.${category !== 'all' && unreadCount ? ' Other updates are available under All.' : ''}`}</div>`;
       list.scrollTop = scrollTop;

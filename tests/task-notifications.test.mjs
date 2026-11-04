@@ -315,3 +315,12 @@ test('personal refund reminders open their exact return even after the hold disa
  await page.evaluate(async()=>{delete rows[0].metadata.case_id;await OGTaskNotifications.refresh();});
  await expect(link).toHaveAttribute('href','https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=5331434197');
 });
+test('hold reminders link to the specific payment dispute or repeat hold',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{Object.assign(rows[0],{notification_type:'hold_review_reminder',metadata:{hold_kind:'retro',hold_ref:'1234',order_number:'12-33333-44444'}});channels[0].callback({eventType:'UPDATE'});});
+ await page.getByRole('button',{name:'Review updates'}).click();
+ const link=page.getByRole('link',{name:'Open hold',exact:true});
+ await expect(link).toHaveAttribute('href',/RETRO_FUNDS_DISPLAY__RETRO_DISPLAY-1234&relatedTransactionId=12-33333-44444/);
+ await page.evaluate(async()=>{rows[0].metadata.hold_kind='dispute';await OGTaskNotifications.refresh();});
+ await expect(link).toHaveAttribute('href','https://pmtdispute.ebay.com/dispute/1234');
+});
