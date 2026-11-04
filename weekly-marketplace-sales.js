@@ -145,24 +145,9 @@
   connect.onclick=async()=>{connect.disabled=true;try{const {data,error}=await client.functions.invoke('ebay-weekly-earnings',{body:{action:'connect'}});if(error)throw error;
    if(data.url&&new URL(data.url).origin==='https://auth.ebay.com'){location.assign(data.url);return;}if(!data.ok)throw Error();await earningsStatus();load();
   }catch{earnStatus.textContent='Could not start eBay authorization. Try again.';}finally{connect.disabled=false;}};
-  let lastReport=null,pendingAction=null;
+  let lastReport=null;
   const actionNotice=$('ws-manual-actions');
-  const actionMessage=text=>{const s=actionNotice?.querySelector('[role="status"]');if(s)s.textContent=text;};
-  function revealAction(){
-   const a=pendingAction;if(!a)return;pendingAction=null;
-   const selector={claims:'#ws-ebay-cash .wcl-file',statement:'#ws-ebay-cash input[accept*="pdf"]',holds:'#ws-ebay-holds .wh-sync',earnings:'#ws-ebay-connect'}[a.kind];
-   const control=selector&&document.querySelector(selector);
-   if(!control||control.hidden){actionMessage('The control is not available yet. Refresh the sales report and try again.');return;}
-   const details=control.closest('details.wc-sources');if(details)details.open=true;
-   control.scrollIntoView({block:'center'});control.focus({preventScroll:true});actionMessage('');
-   if(a.kind==='holds'&&!control.disabled)control.click();
-  }
-  const checkActions=window.WeeklyEbayActions?.init(actionNotice,client,()=>month.value,a=>{
-   pendingAction=a;market.value='ebay';
-   if(a.month){manualMonth=true;month.value=a.month.slice(0,7);}
-   if(!panel.open){panel.open=true;return;}
-   if(lastReport?.key===market.value+'/'+month.value&&$('ws-results').childElementCount)revealAction();else load();
-  })||(()=>{});
+  const checkActions=window.WeeklyEbayActions?.init(actionNotice,client,()=>month.value,()=>{if(panel.open)load();})||(()=>{});
   function sourceTimes(data){
    const el=$('ws-source-times'),f=data?.ebay_refresh;
    el.hidden=!f;if(!f){el.replaceChildren();return;}
@@ -192,10 +177,9 @@
     itemLedger(data);lastReport={key:market.value+'/'+month.value,at:data.as_of};sourceTimes(data);
     for(const group of $('ws-results').querySelectorAll('.ws-pay-group'))group.open=expanded.has(group.dataset.payKey);
     $('ws-status').textContent=(marketNames[market.value]||'All marketplaces')+' · Checked '+etStamp(data.as_of)+' · Refreshes every minute while open.';
-    revealAction();checkActions();
+    checkActions();
    }catch{if(seq===version){const keep=lastReport?.key===market.value+'/'+month.value&&$('ws-results').childElementCount>0;
     if(!keep){$('ws-results').replaceChildren();itemLedger(null);sourceTimes(null);}
-    if(pendingAction){pendingAction=null;actionMessage('Could not open the report controls. Your reminder is still here; try again when the report reconnects.');}
     $('ws-status').textContent=keep?'Refresh delayed. Showing the last report from '+etStamp(lastReport.at)+'. Retrying automatically.':'Could not verify these totals. The report will retry automatically.';}}
   }
   panel.addEventListener('toggle',()=>{if(panel.open)load();else seq++;});month.onchange=()=>{manualMonth=true;$('ws-results').replaceChildren();itemLedger(null);sourceTimes(null);load();};

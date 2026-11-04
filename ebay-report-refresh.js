@@ -22,9 +22,17 @@
  function markReaderCheck(verified){
   try{localStorage.setItem(readerCheckKey,JSON.stringify({verified,at:Date.now()}));}catch{}
  }
- async function updatePerformance(db,started){
+ async function updatePerformance(db,started,manual=false){
+   // Edge can inject its document-idle bridge just after the window load event.
+   if(document.documentElement&&!document.documentElement.dataset.invstoPerformanceWorker){
+    await new Promise(resolve=>{
+     const finish=()=>{observer.disconnect();clearTimeout(timer);resolve();};
+     const observer=new MutationObserver(()=>{if(document.documentElement.dataset.invstoPerformanceWorker)finish();});
+     const timer=setTimeout(finish,3500);observer.observe(document.documentElement,{attributes:true,attributeFilter:['data-invsto-performance-worker']});
+    });
+   }
    if(document.documentElement?.dataset?.invstoPerformanceWorker&&Date.now()-started<5*60000){
-    const batch=await db.rpc('claim_ebay_health_jobs');
+    const batch=await db.rpc(manual?'claim_requested_ebay_performance_checks':'claim_ebay_health_jobs');
     if(batch.error)throw Error('Could not check the performance report schedule.');
     for(const job of batch.data||[]){
      if(Date.now()-started>8*60000)break;
@@ -34,14 +42,16 @@
      const result=await db.rpc('finish_ebay_health_job',{_ticket:job.ticket,_rows:rows,_count:rows.length,_error:error});
      if(result.error&&!error)await db.rpc('finish_ebay_health_job',{_ticket:job.ticket,_rows:[],_count:0,_error:'The source did not reconcile. The previous figures are preserved.'});
     }
-   }
+   }else if(manual)throw Error('Refresh queued. Enable OG eBay Order Link v1.0.32 or later on the Edge workstation. The next signed-in check will pick it up.');
  }
  async function run(){
   if(!new URL(location.href).searchParams.has('job')||window.top!==window)return;
   const started=Date.now();
+  const manual=new URL(location.href).searchParams.get('performance')==='manual';
   let pause=false,performanceCheck;
   try{
-   const db=window.supabaseClient;if(!db||!(await db.auth.getSession()).data?.session){pause=true;return;}
+   const db=window.supabaseClient;if(!db||!(await db.auth.getSession()).data?.session){pause=!manual;if(manual)document.querySelector('#status').textContent='Sign in to Invsto on the Edge workstation, then retry from Needs your action.';return;}
+   if(manual){document.querySelector('#status').textContent='Checking the overdue sources in Seller Hub. You can return to the dashboard; the result will appear on the action card.';await updatePerformance(db,started,true);return;}
    performanceCheck=updatePerformance(db,started).catch(()=>{});
    if(new URL(location.href).searchParams.has('performance'))return;
    const job=await db.rpc('claim_ebay_browser_reports');if(job.error){pause=true;return;}if(!job.data)return;
@@ -80,10 +90,11 @@
    const saved=await db.rpc('finish_ebay_browser_reports',{_ticket:work.ticket,_observations:observations,_note:notes.join(' '),_statement_note:statementNote});
    if(saved.error)throw Error('The refresh expired; last verified records are preserved.');
 
-  }catch{document.querySelector('#status').textContent='The next check will retry. Previously verified records are preserved.';}
+  }catch(e){document.querySelector('#status').textContent=manual?e.message:'The next check will retry. Previously verified records are preserved.';}
   finally{
    await performanceCheck;
    window.postMessage({channel:'invstoReportRequest',id:crypto.randomUUID(),type:'OG_REPORT_FINISH',pause},location.origin);
+   if(manual&&document.documentElement?.dataset?.invstoPerformanceWorker)window.close();
   }
  }
  window.addEventListener('load',run,{once:true});

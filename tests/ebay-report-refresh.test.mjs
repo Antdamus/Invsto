@@ -29,6 +29,20 @@ test('signed-in worker certifies a new reader, retries a transient page, and ski
  assert.equal((await run()).reads,0,'an unverified reader cools down before a new certification attempt');
  const auth=await run({replies:[{ok:false,message:'Sign in to the ogjewelers Seller Hub account.'}],ledger:true});assert.equal(auth.reads,1);
 });
+test('manual refresh waits for the Edge bridge and verifies exactly the requested sources',async()=>{
+ const source=await readFile(file('ebay-report-refresh.js'),'utf8'),calls=[],origin='https://antdamus.github.io';
+ let boot,handler;const root={dataset:{}},doc={documentElement:root,querySelector:()=>({})};
+ const db={auth:{getSession:async()=>({data:{session:{}}})},rpc:async(n,p)=>{
+  calls.push([n,p]);if(n==='claim_requested_ebay_performance_checks')return {data:[{kind:'cases',id:'register',ticket:'c'},{kind:'orders',id:'2026-11-02',ticket:'o'}]};
+  assert.equal(n,'finish_ebay_health_job');return {};
+ }};
+ const win={supabaseClient:db,close(){},addEventListener(k,f){if(k==='load')boot=f;else handler=f;},removeEventListener(){},
+  postMessage(m){if(m.type==='OG_REPORT_FINISH')return;assert.equal(m.type,'OG_PERFORMANCE_READ');
+   queueMicrotask(()=>handler({origin,source:win,data:{channel:'invstoReportResult',id:m.id,reply:m.job.kind==='cases'?{ok:false,message:'Sign in to Seller Hub'}:{ok:true,rows:[{id:'o'}]}}}));}};
+ win.top=win;const observer=class{constructor(fn){this.fn=fn;}observe(){root.dataset.invstoPerformanceWorker='1';queueMicrotask(this.fn);}disconnect(){}};
+ runInNewContext(source,{window:win,document:doc,MutationObserver:observer,location:{origin,href:origin+'/Invsto/ebay-report-refresh.html?job=1&performance=manual'},URL,crypto:{randomUUID:()=> 'msg'},setTimeout:()=>0,clearTimeout:()=>{},Date});
+ await boot();assert.equal(calls.length,3);assert.equal(calls[1][1]._error,'Sign in to Seller Hub');assert.equal(calls[2][1]._count,1);
+});
 test('held-list worker requests exact ranges in its own tab and never publishes a partial or changing ledger',async()=>{
  const src=await readFile(file('tools/ebay-og-order-link-extension/holds-background.js'),'utf8');
  async function run(bad){

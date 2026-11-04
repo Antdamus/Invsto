@@ -117,29 +117,14 @@
         if(filter&&section){host.dataset.claimFilter=filter.dataset.filter;window.WeeklyEbayClaims.choose(section,filter.dataset.filter);section.querySelector('.wcl-list').open=true;}
         if(e.target.closest('[data-show-claims]')&&section){const list=section.querySelector('.wcl-list');if(list)list.open=true;section.focus({preventScroll:true});section.scrollIntoView({block:'start'});}
       };
-      host.querySelector('.wcl-file').onchange=async event=>{
-        const input=event.target,file=input.files[0],msg=host.querySelector('.wcl-message');
-        if(!file)return;input.disabled=true;msg.textContent='Checking claim postings against the monthly statement…';
-        try{
-          if(file.size>40*1024*1024)throw Error('Choose a transaction export under 40 MB.');
-          const entries=window.WeeklyEbayClaims.parseExport(await file.text(),period);
-          const {error}=await client.rpc('save_ebay_claim_export',{_month:period+'-01',_entries:entries});
-          if(error)throw Error(error.message||'Could not verify this export.');
-          msg.textContent=entries.length+' claim postings saved and reconciled.';await refresh();
-        }catch(e){msg.textContent=e.message||'Could not read the claim export.';}finally{input.disabled=false;input.value='';}
-      };
-      host.querySelector('input').onchange=async event=>{
-        const input=event.target,file=input.files[0],msg=host.querySelector('.wc-message');
-        if(!file)return;
-        input.disabled=true;msg.textContent='Checking statement amounts…';
-        try{
-          const result=await readStatement(file,period);
-          const {error}=await client.rpc('save_ebay_cash_statement',result);
-          if(error)throw Error('Invsto could not save this statement. Check your admin access and try again.');
-          msg.textContent='Statement saved. Its entries reconcile to the closing balance.';await refresh();
-        }catch(e){msg.textContent=e.message||'Could not verify the statement.';}
-        finally{input.disabled=false;input.value='';}
-      };
+      for(const [selector,kind,message] of [['.wcl-file','claims','.wcl-message'],['input[accept*="pdf"]','statement','.wc-message']]){
+        host.querySelector(selector).onchange=async({target:input})=>{
+          const file=input.files[0],msg=host.querySelector(message);if(!file)return;
+          input.disabled=true;msg.textContent='Verifying the file for '+name+'…';
+          try{msg.textContent=await importFile(client,kind,period,file);await refresh();}
+          catch(e){msg.textContent=e.message||'Could not verify the file.';}finally{input.disabled=false;input.value='';}
+        };
+      }
     }
     const body=host.querySelector('.wc-body'),expanded=new Set([...body.querySelectorAll('details[open]')].map(d=>d.dataset.state||d.querySelector('summary').textContent));
     host.hidden=false;
@@ -193,5 +178,18 @@
     if(opening==null||closing==null||entries.length===0||opening+entries.reduce((n,m)=>n+m.cents,0)!==closing)throw Error('The statement totals could not be reconciled.');
     return {_month:period+'-01',_opening:opening,_closing:closing,_movements:entries};
   }
-  window.WeeklyEbayCash={update,parseStatement};
+  async function importFile(client,kind,period,file){
+    if(kind==='claims'){
+      if(file.size>40*1024*1024)throw Error('Choose a transaction export under 40 MB.');
+      const entries=window.WeeklyEbayClaims.parseExport(await file.text(),period);
+      const {error}=await client.rpc('save_ebay_claim_export',{_month:period+'-01',_entries:entries});
+      if(error)throw Error(error.message||'Could not verify this export.');
+      return entries.length+' claim postings saved and reconciled.';
+    }
+    if(kind!=='statement')throw Error('Unknown import type.');
+    const result=await readStatement(file,period),{error}=await client.rpc('save_ebay_cash_statement',result);
+    if(error)throw Error('Could not save the verified statement. Check your admin access and try again.');
+    return 'Statement saved. Its entries reconcile to the closing balance.';
+  }
+  window.WeeklyEbayCash={update,parseStatement,importFile};
 })();

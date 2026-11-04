@@ -25,15 +25,8 @@
  function week(d){if(!d)return 'unknown';const v=new Date(d+'T12:00Z');v.setUTCDate(v.getUTCDate()-(v.getUTCDay()+6)%7);return v.toISOString().slice(0,10);}
  const review=()=>window.WeeklyReturnHoldReview;
  const option=(k,n)=>'<option value="'+h(k)+'">'+h(n)+'</option>';
- let active=false,nextAttempt=0;
- async function refresh(el,s,automatic=false){
-  if(active||!s)return;
-  if(!document.documentElement.hasAttribute('data-invsto-hold-reader')){
-   if(!automatic)el.querySelector('.wh-msg').textContent='To refresh the order breakdown, reload the latest OG eBay Order Link in Edge, then refresh this dashboard. The latest verified breakdown stays available.';
-   return;
-  }
-  active=true;nextAttempt=Date.now()+3600000;
-  const msg=el.querySelector('.wh-msg'),button=el.querySelector('.wh-sync');button.disabled=true;msg.textContent='Checking all pages of Seller Hub’s On hold list…';
+ let inFlight=null,nextAttempt=0;
+ async function verify(client){
   const id=crypto.randomUUID();let listener,timer;
   try{
    const packet=await new Promise((resolve,reject)=>{
@@ -42,11 +35,22 @@
     window.addEventListener('message',listener);timer=setTimeout(()=>reject(Error('Seller Hub took too long to respond.')),330000);
     window.postMessage({type:'INVSTO_HOLD_REFRESH',id},location.origin);
    });
-   const {error}=await s.client.rpc('refresh_ebay_hold_ledger',{_at:packet.at,_total:packet.total,_count:packet.count,_rows:packet.rows});
+   const {error}=await client.rpc('refresh_ebay_hold_ledger',{_at:packet.at,_total:packet.total,_count:packet.count,_rows:packet.rows});
    if(error)throw Error('The entries did not pass the account checks or your admin session expired.');
-   msg.textContent='Verified: all '+packet.count+' entries matched Seller Hub.';await s.load();
-  }catch(e){msg.textContent=(e?.message||'Could not check Seller Hub.')+' The previous verified breakdown is preserved.';}
-  finally{clearTimeout(timer);window.removeEventListener('message',listener);button.disabled=false;active=false;}
+   return 'Verified: all '+packet.count+' entries matched Seller Hub.';
+  }finally{clearTimeout(timer);window.removeEventListener('message',listener);}
+ }
+ function refreshNow(client){
+  if(!document.documentElement.hasAttribute('data-invsto-hold-reader'))throw Error('Open this dashboard on the signed-in Edge workstation with OG eBay Order Link enabled.');
+  nextAttempt=Date.now()+3600000;
+  return inFlight??=verify(client).finally(()=>{inFlight=null;});
+ }
+ async function refresh(el,s,automatic=false){
+  if(!s||automatic&&!document.documentElement.hasAttribute('data-invsto-hold-reader'))return;
+  const msg=el.querySelector('.wh-msg'),button=el.querySelector('.wh-sync');button.disabled=true;msg.textContent='Checking all pages of Seller Hub’s On hold list…';
+  try{msg.textContent=await refreshNow(s.client);await s.load();}
+  catch(e){msg.textContent=(e.message||'Could not check Seller Hub.')+' The previous verified breakdown is preserved.';}
+  finally{button.disabled=false;}
  }
  function browse(el){
   const {entries}=el.wh,sel=key=>el.querySelector('.wh-'+key),mo=sel('month').value,kind=sel('kind').value,w=sel('week').value,find=sel('find').value.trim().toLowerCase();
@@ -106,5 +110,5 @@
   browse(el);
   if((!has||stale||gap)&&Date.now()>nextAttempt&&!document.hidden)refresh(el,el.wh,true);
  }
- window.WeeklyEbayHolds={update};
+ window.WeeklyEbayHolds={update,refreshNow};
 })();
