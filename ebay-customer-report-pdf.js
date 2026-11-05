@@ -85,12 +85,13 @@
       const x=36+i*138;rect(page,x,384,126,94,bg);await text(page,String(value),x+14,430,30,1,fg);await text(page,label,x+14,403,8,1,fg);
     }
     let f=flow(page,354,'Customer summary');
-    await f.write(`Original item value in this edition: ${model.itemValue}`,13,1);
+    await f.write(`${model.amountLabel||'Original item value'}: ${model.itemValue}`,13,1);
     if(model.orderMap){
       await f.write(`${model.orderMap.groups.length} live shows / ${model.count} matched pending item lines`,11,1);
       await f.write('Show schedule and overnight grouping use Eastern time. Host estimates are labeled; regular purchases are excluded.',9,0,muted);
       if(model.orderMap.warning)await f.write(model.orderMap.warning,9,1,amber);
     }
+    if(model.amountNotice)await f.write(model.amountNotice,10,0,muted);
     if(model.unknownPrices)await f.write(`${model.unknownPrices} item amounts are not recorded and are excluded from that value.`,9,0,amber);
     await f.write(`${model.labeled} pending lines have a shipping label attached; ${model.unlabeled} do not.`,10);
     if(model.unknown)await f.write(`${model.unknown} lines have a status that needs review.`,9,1,amber);
@@ -127,20 +128,20 @@
       await f.write(`${section.title} / ${selected.length}`,11,1,gold,10);
       if(section.note)await f.write(section.note,9,0,muted,14);
       for(const {r,i} of selected){
-        const left=[`${r.showMap&&r.showMap.number!=null?'Item #'+r.showMap.number:i+1+'.'} ${r.title}`,`Order ${r.orderNumber}`,`${r.purchaseLabel||'Purchased'} ${r.date}`,...(r.groups.length?['Grouped completion / see item details']:[])];
+        const left=[`${r.showMap&&r.showMap.number!=null?'Item #'+r.showMap.number:i+1+'.'} ${r.title}`,`Order ${r.orderNumber}`,...(!model.clientFacing?[`${r.purchaseLabel||'Purchased'} ${r.date}`]:[]),...(r.groups.length?['Grouped completion / see item details']:[])];
         const right=[r.state.label,...(r.pending?[report.urgency(r),r.shippingLabel.label,`Ship by ${r.deadline.dueEastern||'Not recorded'}`]:[])];
-        const amount=shared.money(r.price.total,r.price.currency),refundLabel=r.refund?.label||'Refund status not recorded';
+        const amount=shared.money(r.price.total,r.price.currency),refundLabel=model.clientFacing&&!r.refund?.refundSignal&&!r.refund?.unknown?'No completed refund':r.refund?.label||'Refund status not recorded';
         const leftH=wrap(left[0],236,9,1).length*12.6+left.slice(1).reduce((sum,s)=>sum+wrap(s,236,8).length*11.2+4,0);
         const rightH=right.reduce((sum,s,n)=>sum+wrap(s,157,n===1?11:8,n<2?1:0).length*(n===1?15.4:11.2)+5,0);
         const middleH=wrap(amount,91,13,1).length*18.2+wrap(refundLabel,91,8).length*11.2+25;
-        const h=Math.max(88,leftH+28,rightH+25,middleH+25);await f.ensure(h);
+        const h=model.clientFacing?Math.max(70,leftH+18,rightH+18,middleH+10):Math.max(88,leftH+28,rightH+25,middleH+25);await f.ensure(h);
         const top=f.y+9,bg=r.refund?.itemRefundConfirmed?roseBg:white;rect(f.page,36,top-h,540,h-5,bg);
         rect(f.page,36,top-h,3,h-5,r.pending?tone(r.deadline.level):line);
         let y=await block(f.page,left[0],48,f.y-7,236,9,1);for(const s of left.slice(1))y=await block(f.page,s,48,y-4,236,8,0,muted);
-        await text(f.page,'ITEM AMOUNT',298,f.y-7,6,1,muted);y=await block(f.page,amount,298,f.y-28,91,13,1);
+        await text(f.page,model.amountLabel?'AUCTION AMOUNT':'ITEM AMOUNT',298,f.y-7,6,1,muted);y=await block(f.page,amount,298,f.y-28,91,13,1);
         await block(f.page,refundLabel,298,y-7,91,8,0,r.refund?.itemRefundConfirmed?rose:muted);
         y=f.y-7;for(const [n,s] of right.entries())y=await block(f.page,s,407,y,157,n===1?11:8,n<2?1:0,n===1?tone(r.deadline.level):n===2&&!r.shippingLabel.attached?amber:ink)-5;
-        jumps.push({page:f.page,rect:[36,top-h,576,top],key:`item:${r.id}`});f.y=top-h-14;
+        jumps.push({page:f.page,rect:[36,top-h,576,top],key:`item:${r.id}`});f.y=top-h-(model.clientFacing?6:14);
       }f.y-=12;
     }
     if(model.orderMap){
@@ -164,7 +165,7 @@
       await f.write(`ORDER ${r.orderNumber} / ${r.state.label}`,10,1);
       await f.write(r.title,20,2,ink,8);
       await f.write(`${shared.money(r.price.total,r.price.currency)} / Qty ${r.price.quantity}`,18,1,ink,5);
-      await f.write('Original item amount before refunds; excludes shipping and tax.',8,0,muted,8);
+      await f.write(`${model.amountLabel||'Original item amount'} before refunds; excludes shipping and tax.`,8,0,muted,8);
       await f.write(`${r.shippingLabel.label}${r.shippingLabel.uploadedAt?` / ${shared.date(r.shippingLabel.uploadedAt)}`:''}`,10,1,r.pending&&!r.shippingLabel.attached?amber:green,14);
       // Preparation time is in every page header; label time appears above the evidence.
       const events=model.selection?r.timeline.filter(e=>!/^Report snapshot|^eBay payment and status checked|^Shipping label attached/.test(e.label)):r.timeline;
@@ -195,10 +196,10 @@
       if(r.review)await f.write(r.review,9,1,amber);
       const refundActivity=r.refund?.refundSignal||r.refund?.requests?.length;
       await f.ensure(54);await f.write('REFUND STATUS',8,1,gold,5);
-      const refundLines=model.selection&&!refundActivity&&!r.refund?.unknown?[r.selectionStatus,`Item: ${root.OGCustomerSelection.money(r.selectionAmount.item)} / Shipping: ${root.OGCustomerSelection.money(r.selectionAmount.shipping)} / eBay tax: ${root.OGCustomerSelection.money(r.selectionAmount.tax)}`]:refunds.detailLines(r.refund);
+      const refundLines=model.clientFacing?r.customerRefundLines:model.selection&&!refundActivity&&!r.refund?.unknown?[r.selectionStatus,`Item: ${root.OGCustomerSelection.money(r.selectionAmount.item)} / Shipping: ${root.OGCustomerSelection.money(r.selectionAmount.shipping)} / eBay tax: ${root.OGCustomerSelection.money(r.selectionAmount.tax)}`]:refunds.detailLines(r.refund);
       for(const [n,s] of refundLines.entries())await f.write(s,n===0?10:9,n===0?1:0,n===0&&refundActivity?rose:muted,5);
       for(const q of r.refund?.requests||[]){await f.ensure(28);await link(f.page,`Review case ${q.caseNumber}`,q.url,36,f.y,9);f.y-=26;}
-      await f.write(`eBay item ${r.item||'Not recorded'} / Saved eBay status: ${r.ebayStatus}`,8,0,muted);
+      await f.write(`eBay item ${r.item||'Not recorded'}${model.clientFacing?'':` / Saved eBay status: ${r.ebayStatus}`}`,8,0,muted);
       for(const group of r.groups)await f.write(group,9,0,muted);
       if(r.notes.length){await f.ensure(65);await f.write('ITEM NOTES / NEWEST FIRST',9,1,gold);for(const note of r.notes){
         if(model.selection){await f.ensure(45);await f.write(`${note.author} / ${note.date}`,8,1,muted,4);await f.write(note.text,9,0,ink,8);}
@@ -206,7 +207,12 @@
       }}
     }
     page=await newPage('Report notes');f=flow(page,710,'Report notes');await f.write('Every detail, explained.',29,2,ink,20);
-    for(const [title,body] of [
+    for(const [title,body] of model.clientFacing?[
+      ['PURCHASES & REFUNDS',report.financialNotes(model)],
+      ['ORDER STATUS','Closed / fulfilled describes the recorded order status. A shipping label or closed order does not confirm delivery. Shipment entries identify the carrier and tracking number when available.'],
+      ['ITEM PHOTOS','Images show saved item evidence, using the item crop when available. Missing photos are identified on the item page.'],
+      ['DATES & NAVIGATION','Dates use Eastern time. Use the item index and customer summary links on every page. Order and video receipt links open eBay and may require your sign-in. Rose item pages identify completed full or partial refunds.'],
+    ]:[
       ['SCOPE & STATUS',`${model.title}. Each entry represents one saved item line. Pending lines appear first, sorted by shipping deadline. Closed lines show the system closure reason and are not treated as currently overdue. A closed or fulfilled system record is not a carrier delivery confirmation.`],
       ['FINANCIAL SUMMARY',report.financialNotes(model)],['SHIPPING DEADLINES',report.DEADLINE_NOTES],
       ['LABELS & ITEM EVIDENCE','Label attached means that specific order currently has a saved shipping-label file; another order in the buyer group does not establish label coverage. It does not mean the parcel shipped. Item images use the saved crop where available, without a duplicate full screenshot. If no crop is recorded, the saved evidence is used as-is. Missing screenshots are called out explicitly.'],
@@ -215,7 +221,7 @@
     for(const [i,meta] of pageMeta.entries()){
       const p=meta.page;
       if(meta.row){rule(p,36,104,540);const receipt=buyer.receiptAction(meta.row);
-        for(const [label,url,x] of [['eBay order',meta.row.orderUrl,36],[meta.row.pending?'Pending order':'System record',meta.row.pending?meta.row.pendingUrl:meta.row.historyUrl,170],[receipt.pdfLabel,receipt.href,373]])await link(p,label,url,x,84,9);
+        for(const [label,url,x] of [['eBay order',meta.row.orderUrl,36],...(!model.clientFacing?[[meta.row.pending?'Pending order':'System record',meta.row.pending?meta.row.pendingUrl:meta.row.historyUrl,170]]:[]),[receipt.pdfLabel,receipt.href,373]])await link(p,label,url,x,84,9);
         if(!meta.row.videoUrl)await text(p,'Receipt opens the eBay order because no direct video URL is saved.',36,65,7,0,muted);
       }
       rule(p,36,47,540);
