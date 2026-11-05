@@ -12,6 +12,26 @@ before(async()=>{
  browserServer=await webkit.launchServer();browser=await webkit.connect(browserServer.wsEndpoint());await mkdir(new URL('../test-results/customer-issues',import.meta.url),{recursive:true});
 });
 
+for(const width of [390,1366])test(`Won appeal ${width}px: card and detail show the reimbursement and preserve internal work`,async t=>{
+ const context=await browser.newContext({viewport:{width,height:1000}});t.after(()=>context.close());
+ await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
+ const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/ebay-returns.html?historyManualFixture=1&appealFixture=1');
+ for(const file of ['task-workflow.js','customer-issue-evidence.js','return-receiving.js','customer-issue-chats.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.waitForFunction(()=>window.fixtureReady);
+ await page.evaluate(()=>fixtureUpdateCase({source_lane:'inquiry',issue_kind:'request',buyer_username:'sample.buyer',customer_name:'Sample Buyer',provider_outcome:{outcome:'final',label:'Appeal won',case_number:'C100',appeal:{seller_won:true,reimbursed_amount:480,currency:'USD',closed_at:'2026-10-31T20:36:27Z'}}}));
+ await page.getByRole('button',{name:'Refresh customer issues'}).click();
+ const card=page.locator('[data-case="case-0"]');await expect(card).toContainText('$480.00 reimbursed to us');
+ await card.click();await expect(page.locator('#issues-detail .issue-appeal-result')).toContainText('Appeal won');
+ await expect(page.locator('#issues-detail .issue-case-history')).not.toContainText('Decided against us');
+ await expect(page.locator('#issues-detail .issue-case-history')).not.toContainText('accepted as fair');
+ await expect(page.locator('#issues-detail .issue-case-history')).toContainText('remaining internal work');
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.locator('#issues-detail .issue-appeal-result').scrollIntoViewIfNeeded();
+ await page.screenshot({path:`test-results/customer-issues/appeal-${width}.png`});assert.deepEqual(errors,[]);
+ assert.deepEqual(await page.evaluate(()=>fixtureWrites),[]);
+});
+
 for(const width of [390,1366])test(`Send to History ${width}px: visible individual button accepts a fair decision for the whole issue`,async t=>{
  const context=await browser.newContext({viewport:{width,height:1000}});t.after(()=>context.close());
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
@@ -37,7 +57,7 @@ for(const width of [390,1366])test(`Send to History ${width}px: visible individu
  await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);await expect(page.locator('[data-case="case-2"]')).toHaveCount(0);
  await page.locator('#issues-open-history').click();await expect(page.locator('.issue-card')).toHaveCount(2);assert.deepEqual(errors,[]);
 });
-after(async()=>{await browser?.close();const stop=setTimeout(()=>browserServer?.process()?.kill(),2500);await browserServer?.close();clearTimeout(stop);await new Promise(r=>{server.close(r);server.closeAllConnections();});});
+after(async()=>{const stop=setTimeout(()=>browserServer?.process()?.kill(),2500);try{await browser?.close();await browserServer?.close();}finally{clearTimeout(stop);await new Promise(r=>{server.close(r);server.closeAllConnections();});}});
 
 
 for(const width of [390,1366])test(`Finalized History banner ${width}px: visible rules, one-click archive and History navigation`,async t=>{

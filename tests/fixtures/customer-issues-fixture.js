@@ -54,6 +54,7 @@
     const allowed=['case-0','case-2'].includes(r.id);if(allowed)r.ebay_status='CLOSED';
     checks[r.id]={ready:false,reason:allowed?'Decided against us · keep for review':'Still open on eBay',manual:{allowed,reason:allowed?null:'Still open on eBay',accept_decision:allowed,against_us:allowed,task_count:allowed?tasks.filter(t=>['case-0','case-2'].includes(t.return_case_id)&&!['resolved','cancelled','closed','approved_by_admin'].includes(t.status)).length:0,case_count:allowed?2:1,cases:[{id:'case-0',updated_at:now,tasks_version:'task-snapshot-0'},{id:'case-2',updated_at:now,tasks_version:'task-snapshot-2'}]}};
    }
+   if(location.search.includes('appealFixture'))for(const id of ['case-0','case-2'])if(checks[id]){checks[id].reason='Internal work is unfinished';checks[id].manual.against_us=false;}
    const ready_ids=Object.keys(checks).filter(id=>checks[id].ready);return {data:{ready_ids,ready:ready_ids.length,kept:rows.filter(r=>r.status!=='closed').length-ready_ids.length,against_us:location.search.includes('historyArchiveFixture')?1:0,checks}};
   }
   if(name==='archive_finalized_customer_issues'){
@@ -84,6 +85,7 @@
    const row=rows.find(r=>r.id===args._case_id),prior=row.final_review;row.final_review={...prior,reviewer_id:args._owner,version:crypto.randomUUID(),status:args._action==='approve'?'approved':args._action==='changes'?'changes_requested':'pending',...(args._action==='submit'?{submitted_by:'me',submitted_at:new Date().toISOString(),submission_note:args._note}:{reviewed_by:'me',reviewed_at:new Date().toISOString(),review_note:args._note}),manual_refund_date:args._manual_refund_date};
    row.next_user=args._owner;row.updated_at=new Date().toISOString();if(args._manual_refund_date){row.refund_due_at=args._manual_refund_date+'T23:59:59-04:00';row.refund_deadline_source='manual';}return {data:{final_review:row.final_review}};
   }
+  if(name==='customer_issue_outcome_summary')return {data:rows.find(r=>r.id===args._case_id)?.provider_outcome||null};
   if(name==='customer_issue_chat_markers')return {data:args._case_ids.map((id)=>({case_id:id,conversation_count:id==='case-0'?1:0,unread_count:id==='case-0'?1:0,conversation_id:id==='case-0'?'chat-1':null,match_scope:'item',latest_buyer_message_at:now,latest_buyer_preview:id==='case-0'?'Can you compare it with the original item photos?':null}))};
   if(name==='customer_issue_notes')return {data:args._case_ids.map(id=>{const notes=caseNotes.filter(n=>n.return_case_id===id).sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.id.localeCompare(a.id));return {case_id:id,note_count:notes.length,notes:notes.slice(args._offset||0,(args._offset||0)+(args._limit||1))};})};
   if(name==='customer_issue_task_notes')return {data:args._case_ids.map(id=>{const linked=tasks.filter(t=>t.return_case_id===id).sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.id.localeCompare(a.id));return {case_id:id,task_count:linked.length,tasks:linked.slice(args._offset||0,(args._offset||0)+(args._limit||3))};})};

@@ -66,6 +66,10 @@
   if(!['against_us','final'].includes(member.outcome))return null;
   const id={case:d.caseId,inquiry:d.inquiryId,return:d.returnId,payment_dispute:d.paymentDisputeId}[c.source_lane];
   if(!id||String(id)!==String(c.ebay_return_id))return null;
+  const appeal=member.provider_outcome?.appeal;
+  if(member.outcome==='final'&&appeal?.seller_won){
+   return appeal.closed_at&&Number.isFinite(Date.parse(appeal.closed_at))?{at:appeal.closed_at,value:date(appeal.closed_at),source:`eBay appeal closure · ${nice(c.source_lane)} ${c.ebay_return_id}`} : null;
+  }
   const explicit=dated([d.closeDate,d.closedDate].map(v=>({at:v?.value||v})))[0];
   // Only a provider-authored resolution event can supply a missing close date.
   // Buyer/seller messages, lastModifiedDate, sync and internal archive times cannot.
@@ -87,7 +91,7 @@
    summarize('Shipped',outbound.length?shipped:i.shipmentDates,outbound.length||i.shipmentDates.length,'Date not recorded','No carrier acceptance or saved shipment date.'),
    summarize('Delivered',scans.map(s=>s.delivered),outbound.length,'Date not recorded',outbound.some(t=>/^delivered$/i.test(t.status))?'Marked delivered by eBay; delivery scan date not saved.':'No outbound delivery scan date saved.'),
    {label:'Issue opened',value:i.openedDate?.value||'Date not recorded',source:'Earliest linked eBay request / case'},
-   {label:i.against?'Closed against us':'Closed on eBay',value:i.decisions.length>1?`${i.decisions.filter(Boolean).length} of ${i.decisions.length} decision dates recorded`:i.decisions[0]?.value||(i.statuses.some(s=>['against_us','final'].includes(s.outcome))?'Decision date not recorded':'Not finalized'),source:i.decisions.length>1?'Multiple cases · review the full case timeline.':i.decisions[0]?.source||'No dated eBay closure event saved.',tone:i.against?'against':''}
+   {label:i.against?'Closed against us':i.statuses.some(s=>s.label==='Appeal won')?'Appeal won':'Closed on eBay',value:i.decisions.length>1?`${i.decisions.filter(Boolean).length} of ${i.decisions.length} decision dates recorded`:i.decisions[0]?.value||(i.statuses.some(s=>['against_us','final'].includes(s.outcome))?'Decision date not recorded':'Not finalized'),source:i.decisions.length>1?'Multiple cases · review the full case timeline.':i.decisions[0]?.source||'No dated eBay closure event saved.',tone:i.against?'against':''}
   ];
   return result;
  }
@@ -100,6 +104,8 @@
    {label:'Refund status',value:refunds.join(' / ')||'Not recorded',note:'Saved refund state; a case decision alone does not confirm a refund.'},
    {label:'Outbound tracking',value:outbound.length===1?outbound[0].status:outbound.length?`${delivered} of ${outbound.length} marked delivered`:'Not recorded',note:outbound.length===1?`${outbound[0].statusSource||'Saved tracking'} · tracking ending ${outbound[0].code.slice(-6)}`:outbound.length?'Review each shipment and its item coverage.':'No outbound tracking linked.',tone:delivered&&delivered===outbound.length?'delivered':''}
   ];
+  const repaid=i.statuses.filter(s=>s.reimbursement);
+  if(repaid.length)facts.push({label:'Money returned to us',value:repaid.map(s=>s.reimbursement).join(' / '),note:'Seller reimbursement confirmed by eBay’s appeal record. The original buyer refund is preserved in the timeline.',tone:'delivered'});
   const needs=[];const add=(label,section)=>needs.push({label,section});
   if(!i.review.position?.trim())add('Write our position','position');
   if(!i.review.requested_resolution?.trim())add('Specify the requested resolution','position');
@@ -135,7 +141,7 @@
   }
   for(const m of messages)add(m.sent_at,m.entry_type==='event'?'Case activity':m.direction==='outbound'?'Our response':m.direction==='inbound'?'Buyer message':'eBay response / activity',m.message_body,`${m.channel} · case ${m.caseNumber}`,m.sender_username);
   const chronological=timeline.sort((a,b)=>(Date.parse(a.at)||Infinity)-(Date.parse(b.at)||Infinity));
-  const statusFor=m=>{const c=m.case,d=c.raw_payload?.ebayDetail||{},reason=d.resolution?.reasonForClosure||d.closeInfo?.returnCloseReason||d.sellerOutcome;return {id:c.id,number:c.ebay_return_id,lane:nice(c.source_lane),status:nice(c.ebay_status),outcome:m.outcome,label:outcomes[m.outcome]||'Outcome not recorded',reason:nice(reason),claim:amount(d.claimAmount),refund:nice(m.refund_status),decision:decisionDate(m),opened:date(c.opened_at),deadline:c.ebay_due_at?date(c.ebay_due_at):'No current deadline recorded',synced:date(c.synced_at),url:caseUrl(c)};};
+  const statusFor=m=>{const c=m.case,d=c.raw_payload?.ebayDetail||{},reason=d.resolution?.reasonForClosure||d.closeInfo?.returnCloseReason||d.sellerOutcome;return {id:c.id,number:c.ebay_return_id,lane:nice(c.source_lane),status:nice(c.ebay_status),outcome:m.outcome,label:(m.provider_outcome?.case_id===c.id?m.provider_outcome.label:null)||outcomes[m.outcome]||'Outcome not recorded',reimbursement:m.provider_outcome?.outcome==='final'&&Number(m.provider_outcome?.appeal?.reimbursed_amount)>0?amount({value:m.provider_outcome.appeal.reimbursed_amount,currency:m.provider_outcome.appeal.currency}):null,reason:nice(reason),claim:amount(d.claimAmount),refund:nice(m.refund_status),decision:decisionDate(m),opened:date(c.opened_at),deadline:c.ebay_due_at?date(c.ebay_due_at):'No current deadline recorded',synced:date(c.synced_at),url:caseUrl(c)};};
   const statuses=currentCaseStages(members).map(({member,previous})=>({...statusFor(member),previous:previous.map(statusFor)}));
   const tracking=root.OGIssueReviewTracking.build(members,items,baseUrl,packet.tracking_history||[]);
   const warnings=[];if(members.some(m=>m.case.sync_error||!m.case.synced_at||Date.now()-Date.parse(m.case.synced_at)>86400000))warnings.push('Some eBay information needs refreshing. Last successful sync is shown for each record.');

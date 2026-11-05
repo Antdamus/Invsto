@@ -197,3 +197,6 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 @media (max-width:600px) {
   .return-filter-row { display:grid; grid-template-columns:minmax(0,1fr); }
 }
+
+.issue-appeal-result{display:grid;gap:7px;margin:18px 0;padding:16px 18px;border:1px solid #76b797;border-left:4px solid #98dcad;border-radius:14px;background:#1f3c2e;color:#c1f0d2;text-align:left;overflow-wrap:anywhere}
+.issue-appeal-result strong{font-size:1rem;line-height:1.5}.issue-appeal-result small{color:#c0d3c7;line-height:1.5}.issue-response-badge.is-won{background:#204532;color:#b8f2cb;border-color:#6ea886}

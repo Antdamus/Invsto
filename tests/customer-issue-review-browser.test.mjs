@@ -11,6 +11,23 @@ before(async()=>{
 });
 after(async()=>{const stop=setTimeout(()=>browserServer?.process()?.kill(),2500);try{await browser?.close();await browserServer?.close();}finally{clearTimeout(stop);await new Promise(r=>{server.close(r);server.closeAllConnections();});}});
 async function pageFor(t,width){const ctx=await browser.newContext({viewport:{width,height:1000},reducedMotion:'reduce'});t.after(()=>ctx.close());await ctx.route('**/*',r=>(r.request().url().startsWith(origin)||/^(blob:|data:)/.test(r.request().url()))?r.continue():r.abort());const page=await ctx.newPage();await page.goto(origin+'/customer-issue-review-report.html');for(const file of ['tests/fixtures/issue-review-fixture.js','vendor/pdf-lib/pdf-lib.min.js','buyer-report-refunds.js','ebay-buyer-report.js','customer-issue-evidence.js','customer-issue-review-tracking.js','customer-issue-review-model.js','customer-issue-review-pdf.js','catalogue-core.js','catalogue-viewer.js','customer-issue-review-report.js'])await page.addScriptTag({url:origin+'/'+file});await expect(page.locator('#download-packet')).toBeEnabled().catch(async error=>{throw new Error((await page.locator('body').innerText())+'\n'+error.message)});return page;}
+test('successful appeal report and PDF preserve the buyer refund and show the seller reimbursement',async t=>{
+ const p=await pageFor(t,1366);
+ await p.evaluate(()=>{
+  const m=reviewFixture.data.members[0];m.outcome='final';m.case.raw_payload.ebayDetail.sellerOutcome='WIN';
+  m.provider_outcome={case_id:m.case.id,outcome:'final',label:'Appeal won',appeal:{seller_won:true,reimbursed_amount:480,currency:'USD',closed_at:'2026-10-31T20:36:27Z'}};
+ });
+ await p.locator('#refresh-packet').click();
+ await expect(p.locator('.case-overview')).toContainText('Money returned to us');
+ await expect(p.locator('.case-overview')).toContainText('$480.00');
+ await expect(p.locator('.case-overview')).toContainText('Refunded');
+ await expect(p.locator('.key-dates')).toContainText('Saturday, Oct 31, 2026, 4:36 PM EDT');
+ await expect(p.locator('.case-overview')).not.toContainText('Closed against us');
+ const bytes=await p.evaluate(async()=>Array.from(await OGIssueReviewPdf.build({issues:OGIssueReviewReport.issues,generatedAt:'2026-11-05T01:00:00Z',includeInternal:false})));
+ await writeFile(new URL('../output/pdf/ebay-case-appeal-preview.pdf',import.meta.url),new Uint8Array(bytes));
+ assert.equal((await p.evaluate(()=>fixtureWrites)).length,0);
+});
+
 for(const width of [390,1366])test(`Review packet ${width}px: evidence, editable position, safe exchanges and navigation`,async t=>{
  const page=await pageFor(t,width);await expect(page.locator('.review-index .index-entry')).toHaveCount(1);await expect(page.locator('.status-card')).toHaveCount(1);await expect(page.locator('.photo-grid img')).toHaveCount(2);
  await expect(page.locator('.case-overview .fact-card')).toHaveCount(4);await expect(page.locator('.case-overview')).toContainText('Claim amount');await expect(page.locator('.case-overview')).toContainText('$895.00');await expect(page.locator('.key-dates li')).toHaveCount(5);await expect(page.locator('.key-dates li').first()).toContainText('Purchased');await expect(page.locator('.key-dates li').first()).toContainText('Friday, Oct 2, 2026, 11:30 AM EDT');await expect(page.locator('.key-dates')).toContainText('Saturday, Oct 3, 2026, 12:00 PM EDT');await expect(page.locator('.key-dates')).toContainText('Monday, Oct 12, 2026, 3:00 PM EDT');await expect(page.locator('.key-dates .against')).toContainText('Closed against us');await expect(page.locator('.key-dates .against')).toContainText('Tuesday, Oct 20, 2026, 8:00 AM EDT');await expect(page.locator('.item-row')).toContainText('Oct 2, 2026');

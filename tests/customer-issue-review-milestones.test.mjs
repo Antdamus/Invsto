@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import T from '../customer-issue-review-tracking.js';
 import M from '../customer-issue-review-model.js';
 
+test('a won appeal uses the appeal closure date instead of the original adverse decision date',()=>{
+ const m={outcome:'final',provider_outcome:{appeal:{seller_won:true,closed_at:'2026-10-31T20:36:27Z'}},case:{source_lane:'case',ebay_return_id:'C1',raw_payload:{ebayDetail:{caseId:'C1',closeDate:{value:'2026-10-23T17:37:07Z'}}}}};
+ assert.equal(M.decisionDate(m).at,'2026-10-31T20:36:27Z');assert.match(M.decisionDate(m).source,/appeal closure/);
+ m.provider_outcome.appeal.closed_at=null;assert.equal(M.decisionDate(m),null,'do not reuse the original loss date for an undated appeal');
+});
+
 const entry=(history_text,overrides={})=>({direction:'outbound',code:'940001234567890',carrier:'USPS',status:'Delivered',events:[],history:{history_text},...overrides});
 const member=(detail={},overrides={})=>({outcome:'against_us',case:{source_lane:'case',ebay_return_id:'C1',closed_at:'2026-10-31T15:00:00Z',synced_at:'2026-10-31T16:00:00Z',raw_payload:{ebayDetail:{caseId:'C1',sellerOutcome:'LOSE',...detail}},...overrides}});
 const issue=overrides=>({tracking:[],shipmentDates:[],openedDate:{value:'Oct 17, 2026, 11:01 AM EDT'},decisions:[],statuses:[{outcome:'against_us'}],against:true,...overrides});

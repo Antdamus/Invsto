@@ -91,6 +91,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261031071000_customer_issue_review_action_validation.sql'));
  await db.exec('alter table ebay_order_label_events add column id uuid default gen_random_uuid(),add column created_at timestamptz default now(),add column order_line_ids uuid[]');
  await db.exec(await sqlFile('20261031080000_customer_issue_review_tracking.sql'));
+ await db.exec(await sqlFile('20261105010000_customer_issue_appeal_outcomes.sql'));
 
 
 });
@@ -273,6 +274,37 @@ test('a finalized favorable decision with employee tasks requires explicit accep
  const plan=await manualPlan();assert.equal(plan.allowed,true);assert.equal(plan.against_us,false);assert.equal(plan.accept_decision,true);
  await assert.rejects(manualArchive(false),/Review and accept/);assert.equal((await archive()).archived,0);
  assert.equal((await manualArchive(true)).closed_tasks,1);
+ assert.doesNotMatch(await scalar('select resolution_notes v from ebay_return_tasks where id=$1',[id(200)]),/accepted as fair/);
+ assert.equal(await scalar("select metadata->>'decision_accepted_as_fair' v from ebay_return_tasks where id=$1",[id(200)]),'false');
+});
+
+test('successful appeal supersedes the original buyer win and is shared with its exact inquiry',async()=>{
+ const raw={ebayDetail:{caseId:'D100',sellerOutcome:'WIN',buyerOutcome:'WIN',caseContentOnHold:false,
+  appealDetails:{appealStatus:'GRANTED',appealStatusEnum:'SELLER_RECOUPED_BUYER_APPEALED',appealDate:{value:'2026-10-31T19:34:23Z'},appealRefundAmount:{value:480,currency:'USD'}},
+  caseHistoryDetails:{history:[{actor:'CSR',action:'Claim was resolved.',date:{value:'2026-10-23T17:37:07Z'}},{actor:'CSR',action:'Appeal has been closed.',date:{value:'2026-10-31T20:36:27Z'}}]}}};
+ await db.query("update ebay_return_cases set source_lane='case',issue_kind='request',raw_payload=$1 where id=$2",[JSON.stringify(raw),id(100)]);
+ await db.query("insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,synced_at,raw_payload) values($1,'inquiry','request','D100','open','CLOSED',now(),$2)",[id(101),JSON.stringify({ebayDetail:{inquiryId:'D100',state:'CLOSED',inquiryDetails:{escalationDate:{value:'2026-10-23'}}}})]);
+ const summary=()=>scalar('select customer_issue_outcome_summary($1) v',[id(100)]);
+ const result=await summary();assert.equal(result.label,'Appeal won');assert.equal(result.outcome,'final');
+ assert.equal(result.appeal.reimbursed_amount,480);assert.equal(result.appeal.closed_at,'2026-10-31T20:36:27Z');
+ assert.equal((await scalar('select customer_issue_outcome_summary($1) v',[id(101)])).case_id,id(100));
+ assert.equal((await manualPlan()).against_us,false);
+ await markReview();const packet=await scalar('select customer_issue_ebay_review_packet($1) v',[id(100)]);
+ assert.equal(packet.members.find(m=>m.case.id===id(100)).provider_outcome.appeal.reimbursed_amount,480);
+ await monitor("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"';");
+ assert.equal((await archive()).archived,0,'winning an appeal must not silently close employee work');
+ for(const patch of [{appealStatus:'PENDING'},{appealStatus:'OTHER',appealStatusEnum:'SELLER_APPEALED',appealRefundAmount:null}]){
+  const pending=structuredClone(raw);pending.ebayDetail.appealDetails={...raw.ebayDetail.appealDetails,...patch};pending.ebayDetail.caseHistoryDetails.history=[];
+  await db.query('update ebay_return_cases set raw_payload=$1 where id=$2',[JSON.stringify(pending),id(100)]);
+  assert.equal((await summary()).outcome,'unfinished');assert.equal((await manualPlan()).allowed,false);
+ }
+ const wrong=structuredClone(raw);wrong.ebayDetail.caseId='another-case';
+ await db.query('update ebay_return_cases set raw_payload=$1 where id=$2',[JSON.stringify(wrong),id(100)]);
+ assert.equal((await summary()).outcome,'unknown');assert.equal((await summary()).appeal,null);
+ const buyer=structuredClone(raw);buyer.ebayDetail.sellerOutcome='LOSE';buyer.ebayDetail.appealDetails.appealRefundAmount={value:0,currency:'USD'};
+ await db.query('update ebay_return_cases set raw_payload=$1 where id=$2',[JSON.stringify(buyer),id(100)]);
+ assert.equal((await summary()).outcome,'against_us','GRANTED alone may be a buyer appeal');
+ assert.equal((await summary()).appeal.reimbursed_amount,null);
 });
 
 test('accepting a decision closes tasks only after eBay and receiving work is finalized',async()=>{

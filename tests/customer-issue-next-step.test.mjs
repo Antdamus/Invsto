@@ -8,6 +8,16 @@ vm.runInNewContext(await readFile(new URL('../customer-issues.js',import.meta.ur
 const {nextText}=sandbox.OGCustomerIssues.testing;
 const payment={source_lane:'payment_dispute',issue_kind:'dispute',order_id:'order',status:'open',next_user:'admin',open_tasks:1,ebay_action:'2026-10-14T06:59:59.000Z'};
 
+test('appeal wins show seller reimbursement independently of the original buyer refund',()=>{
+ const {providerBadge,appealSummary,cardStatus}=sandbox.OGCustomerIssues.testing;
+ const c={...payment,source_lane:'inquiry',ebay_status:'CLOSED',provider_outcome:{outcome:'final',label:'Appeal won',case_number:'C100',appeal:{seller_won:true,reimbursed_amount:480,currency:'USD',closed_at:'2026-10-31T20:36:27Z'}},archive_check:{reason:'Escalated case still needs review',manual:{employee_task_count:2}}};
+ assert.equal(providerBadge(c).label,'Appeal won');assert.match(cardStatus(c),/Appeal won/);
+ assert.equal(nextText(c),'Finish internal follow-up');assert.doesNotMatch(cardStatus(c),/Escalated case still needs review/);
+ const html=appealSummary(c);assert.match(html,/\$480\.00 reimbursed to us/);assert.match(html,/Appeal closed/);assert.match(html,/original buyer refund remains/);
+ assert.equal(appealSummary({...c,provider_outcome:{...c.provider_outcome,outcome:'unfinished'}}),'');
+ assert.match(appealSummary({...c,provider_outcome:{...c.provider_outcome,appeal:{seller_won:true}}}),/amount not reported/);
+});
+
 test('final review remains the next action after provider closure without claiming a settled refund is overdue',()=>{
  const {cardStatus}=sandbox.OGCustomerIssues.testing;
  const c={source_lane:'return',issue_kind:'return',status:'closed',ebay_status:'CLOSED',open_tasks:0,final_review:{status:'pending'},refund_due_at:'2020-01-01T00:00:00Z'};

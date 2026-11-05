@@ -1,6 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import M from '../customer-issue-review-model.js';
+
+test('the report keeps a buyer refund and a seller appeal reimbursement as separate facts',()=>{
+ const o=M.overview(issue({against:false,statuses:[{number:'A',lane:'Case',label:'Appeal won',claim:'$480.00',refund:'Refunded',reimbursement:'$480.00'}]}));
+ assert.equal(o.facts[0].value,'Appeal won');assert.equal(o.facts[2].value,'Refunded');
+ assert.equal(o.facts.find(f=>f.label==='Money returned to us').value,'$480.00');
+ assert.match(o.facts.find(f=>f.label==='Money returned to us').note,/Seller reimbursement/);
+});
 const issue=overrides=>({review:{position:'Our position',requested_resolution:'Review the decision'},statuses:[{number:'A',lane:'Case',label:'Decided against us',claim:'$480.00',refund:'Not recorded'}],against:true,tracking:[],files:[{group:'completion',image:{}}],items:[{destination:{addressLines:['10 Example Street']}}],...overrides});
 test('overview keeps claim, refund and delivery distinct and does not count a delivered return as outbound',()=>{
  const o=M.overview(issue({tracking:[{direction:'return',status:'Delivered',code:'RETURN'}]}));
