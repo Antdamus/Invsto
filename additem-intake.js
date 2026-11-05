@@ -147,8 +147,8 @@
     $('item-label-print-later').onclick=()=>startNext(false);
     $('item-save-success-continue').onclick=()=>startNext(false);
     $('item-save-success-similar').onclick=()=>startNext(true);
-    $('item-print-last').onclick=()=>oneStrip([lastSaved]);
-    $('item-print-session').onclick=()=>oneStrip([...printQueue.values()]);
+    $('item-print-last').onclick=()=>printItems([lastSaved]);
+    $('item-print-session').onclick=()=>printItems([...printQueue.values()]);
     if(options.nextMode==='similar' && !options.warnings.length){await startNext(true);window.showToast?.('Item saved. Shared details are ready for the next item.');}
     else{$('item-save-success-modal').classList.remove('hidden');$('item-save-success-modal').setAttribute('aria-hidden','false');document.body.classList.add('modal-open');$('item-save-success-similar').focus();}
   }
