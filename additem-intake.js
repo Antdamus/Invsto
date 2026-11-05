@@ -3,6 +3,9 @@
   const form=$('add-item-form');if(!form)return;
   let lookupVersion=0, lookupTimer, lastSaved=null, lastSimilar=null, printing=false;
   const printQueue=new Map();
+  const twoUpPreferenceKey='invsto:item-label-two-up';
+  let twoUpLabels=true;
+  try{twoUpLabels=localStorage.getItem(twoUpPreferenceKey)!=='false';}catch{}
   const text=id=>$(id)?.value?.trim() || '';
   const snapshotFields=ids=>Object.fromEntries(ids.map(([key,id])=>[key,text(id)]));
   function captureSimilar() {
@@ -137,9 +140,13 @@
     $('item-label-print-status').textContent='Printing is optional. Your inventory is already saved.';
     const quantity=options.stockSaved && options.stockInfo?Math.max(1,Number(options.stockInfo.quantity)):1;
     $('item-label-quantity').value=String(quantity);
-    $('item-label-two-up').checked=true;
+    $('item-label-two-up').checked=twoUpLabels;
     $('item-label-quantity').oninput=updateLabelEstimate;
-    $('item-label-two-up').onchange=updateLabelEstimate;
+    $('item-label-two-up').onchange=()=>{
+      twoUpLabels=$('item-label-two-up').checked;
+      try{localStorage.setItem(twoUpPreferenceKey,String(twoUpLabels));}catch{}
+      updateLabelEstimate();
+    };
     updateLabelEstimate();
     $('item-label-print-batch').onclick=()=>{const plan=updateLabelEstimate();if(plan)return printItems([lastSaved],plan.copies,'individual_batch',plan);};
     const oneStrip=entries=>{const plan=labelPrintPlan($('item-label-two-up').checked?2:1);return printItems(entries,1,entries.length===1?'collective_only':'individual_batch',plan);};

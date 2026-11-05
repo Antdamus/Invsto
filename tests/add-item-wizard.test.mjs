@@ -305,6 +305,30 @@ test('post-save labels default to two per strip, validate quantities and record 
  assert.equal(await page.evaluate(()=>window.testWrites.length),1);
 });
 
+test('two-label checkbox remembers both choices for the next item and after reopening the page',async t=>{
+ const page=await pageFor(t);
+ const showSavedItem=async()=>{
+  await page.waitForFunction(()=>window.addItemIntake);
+  await page.evaluate(()=>window.addItemIntake.saved({id:'saved-label-test',title:'Saved pendant',barcode:'OG123'},
+   {warnings:[],similar:null,stockSaved:true,stockInfo:{quantity:13,location_name:'Tray 31'}}));
+ };
+ await showSavedItem();
+ assert.equal(await page.locator('#item-label-two-up').isChecked(),true);
+ assert.equal(await page.locator('#item-label-print-count').innerText(),'7 printed strips');
+ await page.locator('#item-label-two-up').uncheck();
+ await page.locator('#item-save-success-continue').click();
+ await showSavedItem();
+ assert.equal(await page.locator('#item-label-two-up').isChecked(),false);
+ assert.equal(await page.locator('#item-label-print-count').innerText(),'13 printed strips');
+ await page.reload();await showSavedItem();
+ assert.equal(await page.locator('#item-label-two-up').isChecked(),false);
+ assert.equal(await page.locator('#item-label-print-count').innerText(),'13 printed strips');
+ await page.locator('#item-label-two-up').check();
+ await page.reload();await showSavedItem();
+ assert.equal(await page.locator('#item-label-two-up').isChecked(),true);
+ assert.equal(await page.locator('#item-label-print-count').innerText(),'7 printed strips');
+});
+
 test('Save and add similar retains selected shared fields, clears unique facts, and saves a fresh draft',async t=>{
  const page=await pageFor(t);await seed(page,{kind:'coin',step:'review',details:{gradingStatus:'certified',grade:'MS 65',gradingService:'PCGS',certNumber:'000123',mint:'S',condition:'Cleaned',notes:'Scratch'},photos:twoPhotos,main:{distributorName:'Supplier A',distributorPhone:'555-0100'}});
  await page.evaluate(()=>window.testSaveSuccess=true);const originalBarcode=await page.locator('#scanned-barcode').inputValue();await page.locator('#item-keep-prices').check();
