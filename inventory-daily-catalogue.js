@@ -37,7 +37,7 @@
  }
  function piece(i,n){
   const images=(i.images||[]).map(C.safeImage).filter(Boolean);
-  const facts=[i.material&&String(i.material).replace(/^./,c=>c.toUpperCase()),i.purity_basis_points&&C.purityLabel(String(i.purity_basis_points),i.material),Number(i.weight)>0&&`${Number(i.weight)} g`].filter(Boolean);
+  const facts=[i.purity_basis_points?C.purityLabel(String(i.purity_basis_points),i.material):i.material&&String(i.material).replace(/^./,c=>c.toUpperCase()),Number(i.weight)>0&&`${Number(i.weight)} g`].filter(Boolean);
   return `<article class="review-piece" id="piece-${C.escape(i.id)}">${images.length?`<button class="piece-photo" data-photo="${C.escape(i.id)}" aria-label="Expand photo of ${C.escape(i.name)}"><img src="${C.escape(images[0])}" loading="lazy" alt="${C.escape(i.name)}"><span>View & zoom ↗</span></button>`:'<div class="empty-photo">Photo coming soon</div>'}<div class="piece-copy"><div class="piece-topline"><span>${String(n).padStart(2,'0')} / ${C.escape(i.reference||i.category)}</span><a href="#index">Index ↑</a></div><h3>${C.escape(i.name)}</h3><div class="piece-facts">${facts.map(f=>`<span>${C.escape(f)}</span>`).join('')}</div>${i.description?`<p class="piece-description">${C.escape(i.description)}</p>`:''}${images.length>1?`<div class="photo-strip">${images.map((src,index)=>`<button data-photo="${C.escape(i.id)}" data-index="${index}" aria-label="View photo ${index+1} of ${C.escape(i.name)}"><img src="${C.escape(src)}" loading="lazy" alt="${C.escape(i.name)} · photo ${index+1}"></button>`).join('')}</div>`:''}<div class="piece-price"><small>RETAIL / USD</small><strong>${i.retail_price>0?C.money(i.retail_price):'Price pending'}</strong></div></div></article>`;
  }
  async function rpc(name,args){const{data,error}=await client.rpc(name,args);if(error)throw new Error(error.message);return Array.isArray(data)?data[0]:data;}
@@ -91,14 +91,28 @@
  $('publish').addEventListener('click',()=>publish(true));$('unpublish').addEventListener('click',()=>publish(false));
  $('copy-link').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('share-link').value);message('Catalogue link copied.');}catch{$('share-link').select();message('Select and copy the catalogue link above.');}});
  document.addEventListener('click',e=>{const b=e.target.closest('[data-photo]');if(!b||!data)return;const i=data.items.find(i=>i.id===b.dataset.photo);if(i)window.CatalogueViewer.open(i,Number(b.dataset.index||0),b);});
+ async function printImage(src){
+  // Keep originals for zoom; use a sharp, bounded raster only in the PDF.
+  const img=new Image();img.crossOrigin='anonymous';
+  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Photo conversion timed out')),15000);img.onload=()=>{clearTimeout(timer);resolve();};img.onerror=()=>{clearTimeout(timer);reject(new Error('Photo conversion unavailable'));};img.src=src;});
+  const scale=Math.min(1,1280/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');
+  canvas.width=Math.round(img.naturalWidth*scale);canvas.height=Math.round(img.naturalHeight*scale);
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  return canvas.toDataURL('image/jpeg',.88);
+ }
  $('print-report').addEventListener('click',async()=>{
   if(busy||!data)return;lock(true);message('Preparing all photographs for your PDF…');
+  const originals=new Map();const restore=()=>{for(const [img,src]of originals)if(img.isConnected)img.src=src;originals.clear();};
   try{
    if(Date.now()-signedAt>(token?180000:1200000)){if(token)await loadPublic();else{data=await signDraft(record.draft);render();}}
    const photos=[...document.querySelectorAll('#report img')];photos.forEach(i=>i.loading='eager');
    await Promise.all(photos.map(i=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('A photo is taking too long to load. Try Print / Save PDF again.')),30000);const done=()=>{clearTimeout(timer);i.naturalWidth?resolve():reject(new Error('A photo could not load. Refresh before saving the PDF.'));};if(i.complete)done();else{i.addEventListener('load',done,{once:true});i.addEventListener('error',done,{once:true});}})));
+   const converted=new Map(),sources=[...new Set(photos.map(img=>img.src))];
+   for(let start=0;start<sources.length;start+=4)await Promise.all(sources.slice(start,start+4).map(async src=>{try{converted.set(src,await printImage(src));}catch{converted.set(src,src);}}));
+   for(const img of photos){originals.set(img,img.src);img.src=converted.get(img.src);await img.decode();}
+   window.addEventListener('afterprint',restore,{once:true});
    message('');window.print();
-  }catch(e){message(e.message,true);}finally{lock(false);}
+  }catch(e){restore();message(e.message,true);}finally{lock(false);}
  });
  if(token){loadPublic().catch(e=>message(e.message,true));setInterval(()=>{if(!document.hidden&&!busy&&!window.CatalogueViewer.isOpen)loadPublic().catch(e=>message(e.message,true));},240000);}
  else{document.addEventListener('supabase-ready',bootStaff);script('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2').then(()=>script('initSupabase.js')).then(bootStaff).catch(e=>message(e.message,true));}
