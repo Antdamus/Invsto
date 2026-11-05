@@ -150,6 +150,16 @@ test('targeted order-detail refresh updates evidence without importing lines or 
  }
 });
 
+test('closed-order refresh replaces stale refund amounts while preserving local closure and labels',()=>{
+ const ctx=backend(),fresh={...raw,orderPaymentStatus:'PARTIALLY_REFUNDED',paymentSummary:{refunds:[{refundReferenceId:'r1',refundStatus:'REFUNDED',amount:{value:'900.00',currency:'USD'}}]}};
+ const prior={...existing,status:'fulfilled',label_file_path:'keep.pdf',raw_payload:{...existing.raw_payload,order:{...raw,paymentSummary:{refunds:[]}}}};
+ const prepared=ctx.prepareOrder(fresh,new Map());
+ const patch=plain(ctx.existingOrderDetailsUpdate(prepared,prior,'checked'));
+ assert.deepEqual(patch.raw_payload.order,fresh);
+ assert.equal(patch.status,undefined);assert.equal(patch.label_file_path,undefined);
+ assert.deepEqual(plain(ctx.existingOrderDetailsUpdate(prepared,prior,'checked',false)).raw_payload.order,prior.raw_payload.order);
+});
+
 test('routine sync refreshes closed-order evidence without reopening or importing its lines',async()=>{
  const ctx=backend(),writes=[];
  ctx.getEbayAccessToken=async()=> 'fixture-token';

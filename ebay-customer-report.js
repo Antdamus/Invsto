@@ -3,8 +3,11 @@
   const buyer=root.OGBuyerReport||(typeof require==='function'?require('./ebay-buyer-report.js'):null);
   const shared=root.OGMissingReport||(typeof require==='function'?require('./ebay-missing-report.js'):null);
   const refunds=root.OGBuyerRefundReport||(typeof require==='function'?require('./buyer-report-refunds.js'):null);
+  const selection=root.OGCustomerSelection||(typeof require==='function'?require('./ebay-customer-selection.js'):null);
+  const financialStats=model=>model.financialStats||shared.stats(model.customer);
+  const financialNotes=model=>model.financialNotes||NOTES;
   const html=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const scopeName=scope=>scope==='map'?'Live show order map':scope==='pending'?'Pending items':'Full purchase history';
+  const scopeName=scope=>scope==='selected'?'Selected purchases':scope==='map'?'Live show order map':scope==='pending'?'Pending items':'Full purchase history';
   const NOTES='Financial statistics always cover all saved purchases for this exact eBay username, including closed orders. Confirmed refunds are counted once per order; partial refunds are included in total refunds. Requests and pending refunds are not deducted. Order totals include recorded shipping and tax; item values are original amounts before refunds, excluding shipping and tax. Missing or inconsistent amounts leave net spent unconfirmed. This is a saved-record snapshot; regenerate after updates.';
   const DEADLINE_NOTES='Pending items include pending and partially fulfilled lines. Shipping deadlines show Eastern time and the equivalent eBay Pacific time. Due today and due tomorrow follow the Pacific shipping calendar. Overdue duration is measured at report preparation, from the saved deadline. Date-only deadlines expire at the start of the next Pacific day. Closed lines are never presented as currently overdue.';
   function state(line,order){
@@ -56,10 +59,10 @@
     let content=`<header class="report-hero" id="customer-summary"><div class="eyebrow">OG JEWELERS / CUSTOMER COLLECTION</div><h1>${html(c.name||'Customer name not recorded')}<br><em>${html(model.title)}.</em></h1><p>eBay: ${html(model.username)}</p><div class="edition">Prepared ${html(model.date)}<br>${model.count} item lines across ${model.orderCount} orders · Original item value: ${html(model.itemValue)}${model.unknownPrices?` (${model.unknownPrices} prices not recorded)`:''}</div></header>
       <nav class="report-jump"><a href="#item-index">Explore the item index ↓</a><a href="#financial-summary">Customer financial summary ↓</a></nav>
       <div class="overview"><div><strong>${model.pending}</strong><span>Pending item lines</span></div><div><strong>${model.scope==='pending'?model.labeled:model.closed}</strong><span>${model.scope==='pending'?'Pending lines with a label':'Closed item lines'}</span></div><div class="is-overdue"><strong>${model.overdue}</strong><span>Overdue pending lines</span></div><div class="is-today"><strong>${model.today}</strong><span>Due today</span></div></div>
-      <p class="scope-note">${model.scope==='pending'?'Only pending and partially fulfilled item lines appear below.':'All saved item lines appear below, with pending items first and closed items after.'} ${model.labeled} pending lines have a label attached; ${model.unlabeled} do not.${model.unknown?` ${model.unknown} lines have an unrecognized status and need review.`:''}</p>
-      <section id="financial-summary"><div class="section-title"><span>01 / THE CUSTOMER</span><h2>Lifetime purchase summary</h2><p>All saved history for this buyer, in both report versions.</p></div><div class="customer-stats">${shared.stats(c).map(([label,value,note])=>`<div><small>${label}</small><strong>${html(value)}</strong><span>${html(note)}</span></div>`).join('')}</div>
-      <div class="customer-history"><span><b>First purchase</b>${html(c.firstPurchase)}</span><span><b>Most recent purchase</b>${html(c.lastPurchase)}</span></div><p class="timing-note">${html(refunds.timingText(c.financial))}</p>
-      ${c.financial.unverifiedOrders||c.financial.unmatched.length?`<p class="verification">Financial verification needed: ${c.financial.unverifiedOrders} orders with uncertain amounts; ${c.financial.unmatched.length} unmatched cases. Net spent may be unconfirmed.</p>`:''}</section>
+      <p class="scope-note">${model.selection?'Only your selected item lines appear below.':model.scope==='pending'?'Only pending and partially fulfilled item lines appear below.':'All saved item lines appear below, with pending items first and closed items after.'} ${model.labeled} pending lines have a label attached; ${model.unlabeled} do not.${model.unknown?` ${model.unknown} lines have an unrecognized status and need review.`:''}</p>
+      <section id="financial-summary"><div class="section-title"><span>01 / THE CUSTOMER</span><h2>${model.selection?'Selected purchase summary':'Lifetime purchase summary'}</h2><p>${model.selection?'Only the chosen items contribute to these totals.':'All saved history for this buyer, in both report versions.'}</p></div><div class="customer-stats">${financialStats(model).map(([label,value,note])=>`<div><small>${label}</small><strong>${html(value)}</strong><span>${html(note)}</span></div>`).join('')}</div>
+      <div class="customer-history"><span><b>First purchase</b>${html(c.firstPurchase)}</span><span><b>Most recent purchase</b>${html(c.lastPurchase)}</span></div><p class="timing-note">${html(model.selection?financialNotes(model):refunds.timingText(c.financial))}</p>
+      ${!model.selection&&(c.financial.unverifiedOrders||c.financial.unmatched.length)?`<p class="verification">Financial verification needed: ${c.financial.unverifiedOrders} orders with uncertain amounts; ${c.financial.unmatched.length} unmatched cases. Net spent may be unconfirmed.</p>`:''}</section>
       ${model.missingOrders.length?`<p class="verification">${model.missingOrders.length} saved orders have no item lines: ${model.missingOrders.map(o=>html(o.order_number)).join(', ')}. Their order totals are included in lifetime finances; item details are unavailable.</p>`:''}
       <section id="item-index"><div class="section-title"><span>02 / FIND A PURCHASE</span><h2>Your item index</h2><p>Select any item to open its details. Rose backgrounds identify confirmed item refunds; red deadline text identifies overdue pending items.</p></div>
       ${['pending','closed','unknown'].map(kind=>{const selected=model.rows.map((r,i)=>({r,i})).filter(({r})=>r.state.kind===kind);return selected.length?`<h3 class="item-index-heading">${{pending:'Pending items / earliest deadline first',closed:'Closed items / newest purchases first',unknown:'Status needs review'}[kind]} · ${selected.length}</h3><nav class="missing-item-index purchase-index" aria-label="${kind} items">${selected.map(({r,i})=>indexRow(r,i)).join('')}</nav>`:''}).join('')}
@@ -74,7 +77,7 @@
       <section class="refund-context"><strong>${html(r.refund?.label||'Refund status not recorded')}</strong>${refunds.detailLines(r.refund).map(s=>`<p>${html(s)}</p>`).join('')}${(r.refund?.requests||[]).map(q=>`<a href="${html(q.url)}" target="_blank" rel="noopener">Review case ${html(q.caseNumber)}</a>`).join('')}</section>
       <p class="fallback-note">Saved eBay status: ${html(r.ebayStatus)}</p><nav class="item-navigation"><a href="#item-index">↑ Item index</a><a href="#customer-summary">↑ Customer summary</a></nav>
       <div class="item-links"><a href="${html(r.orderUrl)}" target="_blank" rel="noopener">eBay order ↗</a><a href="${html(r.pending?r.pendingUrl:r.historyUrl)}" target="_blank" rel="noopener">${r.pending?'Pending order':'System record'} ↗</a><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>${!r.videoUrl?'<p class="fallback-note">No direct video URL is saved. The receipt link opens the eBay order to find its Live receipt.</p>':''}</article>`).join('')}
-      <footer class="report-notes"><div class="eyebrow">HOW TO READ THIS REPORT</div><p>${NOTES}</p><p>${DEADLINE_NOTES}</p><p>A label is attached only when that order has a saved label file. A label does not establish shipment or delivery. Screenshots use the saved item crop when available; a duplicate full screenshot is omitted. Order, receipt and case links may require sign-in.</p></footer>`;
+      <footer class="report-notes"><div class="eyebrow">HOW TO READ THIS REPORT</div><p>${html(financialNotes(model))}</p><p>${DEADLINE_NOTES}</p><p>A label is attached only when that order has a saved label file. A label does not establish shipment or delivery. Screenshots use the saved item crop when available; a duplicate full screenshot is omitted. Order, receipt and case links may require sign-in.</p></footer>`;
     if(model.orderMap){const start=content.indexOf('<section id="item-index">'),end=content.indexOf('</section>',start)+10;content=content.slice(0,start)+root.OGOrderMap.renderIndex(model)+content.slice(end);}
     return content;
   }
@@ -92,18 +95,34 @@
       const client=root.supabase;if(!client?.auth)throw Error('The connection did not load. Refresh this page.');
       const {data,error}=await client.auth.getSession();if(error)throw error;
       if(!data.session){$('sign-in').hidden=false;throw Error('Sign in to generate the customer report.');}
-      const records=await buyer.loadRecords(client,username,progress),model=makeModel(username,records,scope==='map'?'pending':scope,location.href,new Date());
-      if(scope==='map')root.OGOrderMap.attach(model,await root.OGOrderMap.load(client,model,progress));
+      const records=await buyer.loadRecords(client,username,progress),chosen=selection.select(records,params);
+      $('report-scope').querySelector('[value="selected"]').hidden=!chosen;
+      if(chosen){$('report-scope').value='selected';document.title=`${username} / Selected purchases | OG Jewelers`;}
+      const model=makeModel(username,chosen?chosen.records:records,chosen?'all':scope==='map'?'pending':scope,location.href,new Date());
+      if(chosen){selection.attach(model,chosen);
+        progress('Checking selected shipment records...');
+        try{const evidence=await client.functions.invoke('ebay-order-sync',{body:{shipmentsOnly:true,orderIds:chosen.records.orders.map(o=>o.order_number)}});if(evidence.error)throw evidence.error;selection.shipping(model,evidence.data);}catch{model.financialNotes+=' Current shipment lookup was unavailable; use the eBay order links to check tracking.';}
+      }
+      renderChooser(records,model,chosen);
+      if(scope==='map'&&!chosen)root.OGOrderMap.attach(model,await root.OGOrderMap.load(client,model,progress));
       await buyer.loadImages(client,model.rows,progress);$('report').innerHTML=render(model);buyer.bindReceiptLinks($('report'),model.rows);
       const bytes=await root.OGCustomerReportPdf.build(model,progress);pdfUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
-      $('download').href=pdfUrl;$('download').download=`${username.replace(/[^a-z0-9_.-]/gi,'_')}-${scope==='map'?'live-order-map':scope==='pending'?'pending-items':'full-history'}.pdf`;$('download').hidden=false;
+      $('download').href=pdfUrl;$('download').download=`${username.replace(/[^a-z0-9_.-]/gi,'_')}-${chosen?'selected-purchases':scope==='map'?'live-order-map':scope==='pending'?'pending-items':'full-history'}.pdf`;$('download').hidden=false;
       progress(`${model.title} ready: ${model.orderCount} orders / ${model.count} item lines / ${model.pending} pending / ${model.overdue} overdue.`);
     }catch(error){progress('Report could not be completed.');$('error').textContent=error.message||'Please try again.';$('error').hidden=false;}
     finally{busy=false;$('retry').disabled=false;$('report-scope').disabled=false;}
   }
-  const api={state,shippingLabel,timeline,makeModel,urgency,render,start,scopeName,NOTES,DEADLINE_NOTES};root.OGCustomerReport=api;if(typeof module!=='undefined')module.exports=api;
+  function renderChooser(records,model,chosen){
+    const target=document.getElementById('selection-items');if(!target)return;
+    const included=new Set(chosen?chosen.ids:records.lines.map(l=>l.id));
+    target.innerHTML=records.orders.map(o=>`<fieldset><legend>Order ${html(o.order_number)}</legend>${records.lines.filter(l=>l.order_id===o.id).map(l=>`<label><input type="checkbox" value="${html(l.id)}" ${included.has(l.id)?'checked':''}><span>${html(l.item_title)}<small>${html(shared.money(buyer.itemPrice(l).total,buyer.itemPrice(l).currency))}</small></span></label>`).join('')}</fieldset>`).join('');
+    document.getElementById('selection-label').textContent=chosen?`${model.count} selected item lines / change selection`:'Choose orders and items for this report';
+    document.getElementById('apply-selection').onclick=()=>{const ids=[...target.querySelectorAll('input:checked')].map(el=>el.value);if(!ids.length){document.getElementById('selection-error').textContent='Choose at least one item.';return;}const p=new URLSearchParams(location.search);p.delete('orders');p.delete('excludeItems');p.set('lines',ids.join(','));p.set('scope','all');history.replaceState(null,'',`${location.pathname}?${p}`);document.getElementById('report-scope').value='all';start();};
+    document.getElementById('clear-selection').onclick=()=>{const p=new URLSearchParams(location.search);['orders','lines','excludeItems'].forEach(k=>p.delete(k));p.set('scope','all');history.replaceState(null,'',`${location.pathname}?${p}`);document.getElementById('report-scope').value='all';start();};
+  }
+  const api={financialStats,financialNotes,state,shippingLabel,timeline,makeModel,urgency,render,start,scopeName,NOTES,DEADLINE_NOTES};root.OGCustomerReport=api;if(typeof module!=='undefined')module.exports=api;
   if(typeof document!=='undefined'&&document.body?.dataset.page==='ebay-customer-report'){
-    const boot=()=>{document.getElementById('report-scope').value=['pending','map'].includes(new URLSearchParams(location.search).get('scope'))?new URLSearchParams(location.search).get('scope'):'all';document.getElementById('retry').addEventListener('click',start);document.getElementById('report-scope').addEventListener('change',start);start();};
+    const boot=()=>{document.getElementById('report-scope').value=['pending','map'].includes(new URLSearchParams(location.search).get('scope'))?new URLSearchParams(location.search).get('scope'):'all';document.getElementById('retry').addEventListener('click',start);document.getElementById('report-scope').addEventListener('change',()=>{if(document.getElementById('report-scope').value!=='selected'){const p=new URLSearchParams(location.search);['orders','lines','excludeItems'].forEach(k=>p.delete(k));history.replaceState(null,'',`${location.pathname}?${p}`);}start();});start();};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
   }
 })(typeof window!=='undefined'?window:globalThis);

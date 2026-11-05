@@ -928,6 +928,9 @@ function existingOrderDetailsUpdate(entry: PreparedOrder, existing: any, now: st
     raw_payload: {
       ...rawPayload,
       ...(evidence ? {
+        // Reports read refund amounts and fulfillment evidence from this snapshot.
+        // Refresh it together with the status flags, including locally closed orders.
+        ...(incoming.order?.orderId === entry.order.order_number ? {order: incoming.order} : {}),
         ...Object.fromEntries(["orderPaymentStatus", "orderFulfillmentStatus", "orderCancelStatus"]
           .map(key => [key, toText(incoming[key])]).filter(([, value]) => value)),
         ebay_order_evidence: {source: "ebay_fulfillment_api", checked_at: now, order_number: entry.order.order_number},
