@@ -94,6 +94,8 @@ before(async()=>{
  await db.exec(await sqlFile('20261103190000_customer_return_money_marks.sql'));
  await db.exec(await sqlFile('20261105010000_customer_issue_appeal_outcomes.sql'));
  await db.exec(await sqlFile('20261105020000_customer_dispute_classification.sql'));
+ await db.exec(await sqlFile('20261105021000_customer_dispute_classification_queue.sql'));
+ await db.exec(await sqlFile('20261105022000_customer_dispute_review_batch_links.sql'));
 
 
 });

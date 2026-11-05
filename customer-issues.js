@@ -440,7 +440,7 @@
     if(control)control.outerHTML=moneyMarkControl(detail.c);
    }
    if($('issues-feedback').classList.contains('is-error'))feedback('');
-   const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&(c.updated_at!==detail.c.updated_at||JSON.stringify(c.provider_outcome)!==JSON.stringify(detail.c.provider_outcome)||JSON.stringify(c.dispute_review)!==JSON.stringify(detail.c.dispute_review)));
+   const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&(c.updated_at!==detail.c.updated_at||JSON.stringify(c.provider_outcome)!==JSON.stringify(detail.c.provider_outcome)||c.dispute_review?.version!==detail.c.dispute_review?.version||c.dispute_review?.eligible!==detail.c.dispute_review?.eligible));
    if(!root.OGCaseNotes?.isEditing&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
