@@ -96,6 +96,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261105020000_customer_dispute_classification.sql'));
  await db.exec(await sqlFile('20261105021000_customer_dispute_classification_queue.sql'));
  await db.exec(await sqlFile('20261105022000_customer_dispute_review_batch_links.sql'));
+ await db.exec(await sqlFile('20261105023000_customer_issue_appeal_placeholder.sql'));
 
 
 });
@@ -112,6 +113,11 @@ const archive=()=>scalar('select archive_finalized_customer_issues($1) v',[[id(1
 const status=()=>scalar('select status v from ebay_return_cases where id=$1',[id(100)]);
 const manualPlan=async()=> (await preview()).checks[id(100)].manual;
 const disputeReview=(caseId=id(100))=>scalar('select customer_issue_dispute_review($1) v',[caseId]);
+test('eBay OTHER appeal placeholders do not turn an ordinary seller win into an appeal win',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='case',ebay_return_id='C100',raw_payload='{"ebayDetail":{"caseId":"C100","sellerOutcome":"WIN","appealDetails":{"appealStatus":"OTHER","appealStatusEnum":"OTHER","appealCloseReasonEnum":"OTHER","eligibleForAppeal":false}}}'`);
+ const outcome=await scalar('select customer_issue_outcome_summary($1) v',[id(100)]);
+ assert.equal(outcome.outcome,'final');assert.equal(outcome.label,'Decided in our favor');assert.equal(outcome.appeal.seller_won,false);assert.equal(outcome.appeal.pending,false);
+});
 const classify=(classification,version=null,caseId=id(100))=>scalar('select set_customer_dispute_classification($1,$2,$3) v',[caseId,classification,version]);
 const reviewQueue=(filter='unreviewed',view='attention',limit=30)=>scalar("select list_customer_issues($1,'all','',0,$2,'newest','all',null,'all','all',$3) v",[view,limit,filter]);
 test('dispute classification is signed, reversible and leaves provider facts and open tasks intact',async()=>{
