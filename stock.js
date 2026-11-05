@@ -491,7 +491,7 @@ function applyStockAccessUi() {
     document.querySelector('input[name="costMax"]')?.classList.add("hidden-sensitive-filter");
     document.querySelectorAll('#sortDropdownMenu [data-value^="cost"], #sort-select option[value^="cost"]').forEach((el) => el.remove());
     const sortSelect = document.getElementById("sort-select");
-    if (sortSelect?.value?.startsWith("cost")) sortSelect.value = "title-asc";
+    if (sortSelect?.value?.startsWith("cost")) sortSelect.value = "date-desc";
   }
 }
 
@@ -1782,7 +1782,8 @@ function buildLocationChips(item) {
       if (params.page) currentPage = parseInt(params.page);
     
       if (params.sort) {
-        document.getElementById("sort-select").value = params.sort;
+        const sortSelect = document.getElementById("sort-select");
+        if ([...sortSelect.options].some(option => option.value === params.sort)) sortSelect.value = params.sort;
       }
     
       // 📂 Categories
@@ -1844,6 +1845,13 @@ function buildLocationChips(item) {
       console.warn("Dropdown setup failed. Missing elements:", { toggle, menu, container });
       return;
     }
+
+    const setToggleLabel = label => {
+      toggle.innerHTML = `${label} <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+    };
+    const initialValue = selectId ? document.getElementById(selectId)?.value : null;
+    const initialOption = [...menu.querySelectorAll("li")].find(option => option.getAttribute("data-value") === initialValue);
+    if (initialOption) setToggleLabel(initialOption.textContent);
   
     // 🔁 Toggle menu visibility
     toggle.addEventListener("click", (e) => {
@@ -1860,7 +1868,7 @@ function buildLocationChips(item) {
         const selectedLabel = optionEl.textContent;
   
         // ✏️ Update toggle button label
-        toggle.innerHTML = `${selectedLabel} <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+        setToggleLabel(selectedLabel);
   
         // 🧪 Sync with native <select> if provided
         if (selectId) {
