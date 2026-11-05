@@ -29,9 +29,9 @@ function normalizeKey(k: string) {
 
 // Curated catalogues use a separate, service-only RPC. Never spread inventory
 // records into the public response or accept photo keys supplied in a request.
-async function sharedCatalogue(client: any, token: string, projectUrl: string) {
+async function sharedCatalogue(client: any, token: string, projectUrl: string, daily = false) {
   if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(token)) return json(404, { error: "catalogue_unavailable" });
-  const { data, error } = await client.rpc("shared_inventory_catalogue", { _token: token });
+  const { data, error } = await client.rpc(daily ? "shared_inventory_daily_catalogue" : "shared_inventory_catalogue", { _token: token });
   if (error) return json(503, { error: "catalogue_temporarily_unavailable" });
   if (!data) return json(404, { error: "catalogue_unavailable" });
   const keys = new Map<string, string>();
@@ -51,16 +51,17 @@ async function sharedCatalogue(client: any, token: string, projectUrl: string) {
   }
   const signed = new Map<string, string>();
   const paths = uniq([...keys.values()]);
-  if (paths.length) {
-    const { data: urls, error: signingError } = await client.storage.from("photos").createSignedUrls(paths, 300);
+  for (let offset = 0; offset < paths.length; offset += 100) {
+    const { data: urls, error: signingError } = await client.storage.from("photos").createSignedUrls(paths.slice(offset, offset + 100), 300);
     if (signingError) return json(503, { error: "photos_temporarily_unavailable" });
     for (const row of urls || []) if (row.path && row.signedUrl) signed.set(row.path, row.signedUrl);
   }
   return json(200, {
-    title: data.title, introduction: data.introduction, credit: data.credit, currency: "USD",
+    ...(daily ? {title:data.title,recipient:data.recipient,company:"eBay",source_date:data.source_date,prepared_at:data.prepared_at} : {title:data.title,introduction:data.introduction,credit:data.credit}), currency: "USD",
     items: (data.items || []).map((item: any) => ({
       id: item.id, name: item.name, description: item.description,
       retail_price: item.retail_price, category: item.category,
+      ...(daily ? {reference:item.reference,material:item.material,purity_basis_points:item.purity_basis_points,weight:item.weight} : {}),
       images: (item.photos || []).map((p: string) => signed.get(keys.get(p) || "") || external.get(p)).filter(Boolean),
     })),
     expires_in: 300,
@@ -88,6 +89,11 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
+  // Representative reviews are read-only. They never submit a client order.
+  if (url.searchParams.has("daily_catalogue")) {
+    if (req.method !== "GET") return json(405, {error:"method_not_allowed"});
+    return sharedCatalogue(supabase, url.searchParams.get("daily_catalogue") || "", SUPABASE_URL, true);
+  }
   if (url.searchParams.has("catalogue")) {
     const token = url.searchParams.get("catalogue") || "";
     const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
