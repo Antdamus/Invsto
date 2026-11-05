@@ -2,6 +2,7 @@ import {test,before,after,beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
+import vm from 'node:vm';
 let db;const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 before(async()=>{
  db=new PGlite();await db.exec(`create role anon;create role authenticated;create schema auth;
@@ -21,6 +22,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261009060000_fulfillment_payment_safety.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261009061000_fulfillment_safety_observations.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261022020000_ebay_partial_refund_review.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261105191500_durable_partial_refund_approvals.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.manager='yes';select set_config('test.jwt',jsonb_build_object('amr',jsonb_build_array(jsonb_build_object('method','password','timestamp',floor(extract(epoch from now())))))::text,false);select set_config('test.actor','${id(9)}',false);select set_config('test.access','yes',false);truncate ebay_partial_refund_approvals,ebay_fulfillment_safety_events,packaging_events,ebay_orders,ebay_order_lines,ebay_order_label_events,packaging_shipments,packaging_items;update inventory set quantity=5;
@@ -140,4 +142,80 @@ test('explicit partial payment status can be reviewed; failed refund alone canno
  await block({orderPaymentStatus:'PARTIALLY_REFUNDED'});await approve();await fulfill();
  await block({orderPaymentStatus:'PAID',ebayFinance:{transactions:[{transactionType:'REFUND',transactionStatus:'FAILED'}]}});
  assert.equal((await review()).reviewable,false);await assert.rejects(approve(),/No reviewable/);
+});
+
+const feedRefund = () => ({orderPaymentStatus:'PARTIALLY_REFUNDED',orderCancelStatus:'NONE_REQUESTED',
+ order:{orderPaymentStatus:'PAID',paymentSummary:{refunds:[]}},ebayFinance:{transactions:[{
+  transactionId:'finance-refund-1',transactionType:'REFUND',transactionStatus:'FUNDS_AVAILABLE_FOR_PAYOUT',
+  amount:8.46,currency:'USD',bookingEntry:'DEBIT',transactionDate:'2026-11-04T03:46:55.768Z',payoutId:'',
+ }]}});
+const receipt = () => ({refundId:'refund-1',refundReferenceId:'refund-1',amount:{value:'8.46',currency:'USD'},refundStatus:'REFUNDED',refundDate:'2026-11-04T03:46:54.705Z'});
+
+test('daily sync can add/remove the delayed copy of an already approved shipping refund without hiding the order',async()=>{
+ const initial=feedRefund();await block(initial);const approved=await approve();
+ await db.exec(`insert into packaging_shipments(id,order_ids,status) values('${id(3)}',array['${id(1)}']::uuid[],'in_progress')`);
+ for(let day=0;day<5;day++){
+  const fresh=feedRefund();fresh.order.orderPaymentStatus='PARTIALLY_REFUNDED';
+  fresh.order.paymentSummary.refunds=day%2===0?[receipt()]:[];
+  fresh.ebayFinance.transactions[0].payoutId=`payout-${day}`;
+  fresh.ebayFinance.transactions[0].memo=`Sync ${day}`;
+  fresh.ebayFinance.transactions[0].transactionStatus='FUNDS_PAID_OUT';
+  await block(fresh);
+  assert.equal((await review()).approval.id,approved.id);
+  assert.deepEqual((await db.query('select check_ebay_fulfillment_allowed($1) r',[[id(2)]])).rows[0].r,[]);
+ }
+ assert.equal((await db.query('select status from packaging_shipments')).rows[0].status,'in_progress');
+ assert.equal((await db.query("select count(*)::int n from ebay_fulfillment_safety_events where source='partial_refund_approval_changed'")).rows[0].n,0);
+ await fulfill();
+});
+
+test('a newly imported line copy of the same approved order refund is not a second refund',async()=>{
+ const source=feedRefund();await block(source);const approved=await approve();
+ await db.query('update ebay_order_lines set raw_payload=$1',[JSON.stringify({ebayFinance:source.ebayFinance})]);
+ assert.equal((await review()).approval.id,approved.id);
+});
+
+for(const [name,change] of [
+ ['different refund ID',p=>{p.ebayFinance.transactions[0].transactionId='new-refund';}],
+ ['second equal refund',p=>{p.ebayFinance.transactions.push({...p.ebayFinance.transactions[0],transactionId:'second-refund'});}],
+ ['different amount',p=>{p.order.paymentSummary.refunds=[{...receipt(),amount:{value:'9.46',currency:'USD'}}];}],
+ ['same amount on another day',p=>{p.order.paymentSummary.refunds=[{...receipt(),refundDate:'2026-11-05T03:46:54.705Z'}];}],
+ ['missing evidence date',p=>{p.order.paymentSummary.refunds=[{...receipt(),refundDate:null}];}],
+ ['pending refund',p=>{p.order.paymentSummary.refunds=[{...receipt(),refundStatus:'PENDING'}];}],
+ ['two summary refunds for one finance debit',p=>{p.order.paymentSummary.refunds=[receipt(),{...receipt(),refundId:'second-refund'}];}],
+])test(`${name} still requires review even if another feed retains the old refund`,async()=>{
+ await block(feedRefund());await approve();const changed=feedRefund();change(changed);await block(changed);
+ assert.equal((await review()).approval,null);await assert.rejects(fulfill(),/Refund/);
+});
+
+test('browser and database agree on delayed evidence, reordered records and material changes',async()=>{
+ const context=vm.createContext({window:{}});
+ vm.runInContext(await readFile(new URL('../partial-refund-facts.js',import.meta.url),'utf8'),context);
+ const source=feedRefund();await block(source);const original=(await review()).snapshot;
+ for(const [name,modify,expected] of [
+  ['delayed summary',p=>{p.order.paymentSummary.refunds=[receipt()];p.order.orderPaymentStatus='PARTIALLY_REFUNDED';},true],
+  ['payout metadata',p=>{p.ebayFinance.transactions[0].payoutId='changed';p.ebayFinance.transactions[0].status='paid';},true],
+  ['duplicate hydration',p=>{p.ebayFinance.transactions.push({...p.ebayFinance.transactions[0],payoutId:'new'});},true],
+  ['new refund',p=>{p.ebayFinance.transactions[0].transactionId='new';},false],
+  ['different amount',p=>{p.ebayFinance.transactions[0].amount=9;},false],
+  ['full refund',p=>{p.orderPaymentStatus='FULLY_REFUNDED';},false],
+ ]){
+  const changed=feedRefund();modify(changed);await block(changed);const current=(await review()).snapshot;
+  const sql=(await db.query('select ebay_partial_refund_snapshots_match($1,$2) same',[original,current])).rows[0].same;
+  assert.equal(sql,expected,name);assert.equal(context.window.OGPartialRefundFacts.matches(original,current),expected,name);
+ }
+});
+
+test('repair restores only the latest mistakenly expired approval and preserves the original signature',async()=>{
+ await block(feedRefund());const original=await approve();
+ await db.exec("update ebay_partial_refund_approvals set revoked_at=now(),revocation_reason='Order, refund, or cancellation facts changed'");
+ const synced=feedRefund();synced.order.paymentSummary.refunds=[receipt()];synced.order.orderPaymentStatus='PARTIALLY_REFUNDED';await block(synced);
+ const migration=await readFile(new URL('../supabase/migrations/20261105191500_durable_partial_refund_approvals.sql',import.meta.url),'utf8');
+ const repair=migration.slice(migration.indexOf('with candidates as ('),migration.indexOf('\nrevoke all on function'));
+ await db.exec(repair);const restored=(await review()).approval;
+ assert.equal(restored.id,original.id);assert.equal(restored.at,original.at);assert.equal(restored.by,original.by);
+ const audit=(await db.query('select snapshot,sync_restoration from ebay_partial_refund_approvals')).rows[0];
+ assert.deepEqual(audit.snapshot.order.refunds,[]);assert.ok(audit.sync_restoration.previous_revoked_at);
+ synced.ebayFinance.transactions[0].amount=50;await block(synced);await db.exec(repair);
+ assert.equal((await review()).approval,null,'a real financial change cannot be restored automatically');
 });

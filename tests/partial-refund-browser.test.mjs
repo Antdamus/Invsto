@@ -12,7 +12,7 @@ after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);ser
 async function open(t,{width=1366,role='manager'}={}){
  const context=await browser.newContext({viewport:{width,height:1000}});t.after(()=>context.close());await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  const page=await context.newPage();page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(origin+'/pending-orders.html');await page.addScriptTag({url:origin+'/pending-orders.js'});await page.addScriptTag({url:origin+'/pending-partial-refunds.js'});
+await page.goto(origin+'/pending-orders.html');await page.addScriptTag({url:origin+'/pending-orders.js'});await page.addScriptTag({url:origin+'/partial-refund-facts.js'});await page.addScriptTag({url:origin+'/pending-partial-refunds.js'});
  await page.evaluate(async role=>{
   window.calls=[];window.passwordCalls=0;window.failure='';window.hold=false;
   state.user={id:'manager',email:'manager@example.test'};state.employee={active:true,role};

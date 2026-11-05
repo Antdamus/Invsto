@@ -7,9 +7,9 @@
   const canonical = value => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])]))
     : value ?? null;
-  const refundTransactions = finance => (Array.isArray(finance?.transactions) ? finance.transactions : [])
-    .filter(t => String(t.transactionType || '').toUpperCase() === 'REFUND')
-    .map(t => JSON.stringify(canonical(t))).sort();
+  const refundTransactions = sources => [...new Map(sources.flatMap(finance => (Array.isArray(finance?.transactions) ? finance.transactions : [])
+    .filter(t => String(t.transactionType || '').toUpperCase() === 'REFUND'))
+    .map(t => [JSON.stringify(canonical(t)),t])).values()];
   const statuses = values => [...new Set(values.map(v => String(v || '').trim().toUpperCase()).filter(Boolean))].sort();
   // Match the facts in ebay_refund_review_facts, plus the queue's status projections.
   // Loading labels, receipts or a newer sync timestamp must not expire an approval.
@@ -27,26 +27,26 @@
         p.pending_order_sync_mismatch?.ebayCancelStatus, p.api_order_status?.cancel_status,
         p.api_cancellation_case?.cancelStatus, p.cancellation_page_case?.cancelStatus, api.cancel_status]),
       refunds: order.paymentSummary?.refunds,
-      transactions: [p.ebayFinance, row.ebay_finance, row.finance].map(refundTransactions),
+      transactions: refundTransactions([p.ebayFinance, row.ebay_finance, row.finance]),
     };
   }
-  const key = line => JSON.stringify(canonical([reviewFacts(line), reviewFacts(getOrderFromLine(line))]));
+  const snapshot = line => canonical({order:reviewFacts(getOrderFromLine(line)),lines:[{id:line.id,facts:reviewFacts(line)}]});
   const orderId = line => line.order_id || getOrderFromLine(line).id;
-  const cached = line => { const entry = reviews.get(line.id); return entry?.key === key(line) ? entry.review : null; };
+  const cached = line => { const entry = reviews.get(line.id); return entry && window.OGPartialRefundFacts?.matches(entry.snapshot,snapshot(line)) ? entry.review : null; };
   const approved = line => Boolean(cached(line)?.approval);
   const refund = line => /^Refund/.test(getLineFulfillmentBlockUnreviewed(line));
   async function load(lines) {
     const run = ++sequence;
     reviews.clear();
     const candidates = lines.filter(refund), ids = [...new Set(candidates.map(orderId).filter(Boolean))];
-    const keys = new Map(candidates.map(line => [line.id, key(line)]));
+    const snapshots = new Map(candidates.map(line => [line.id, snapshot(line)]));
     try {
       for (let i = 0; i < ids.length; i += 100) {
         const {data, error} = await supabase.rpc('get_ebay_partial_refund_reviews', {_order_ids: ids.slice(i, i + 100)});
         if (error) throw error;
         if (run !== sequence) return;
         for (const review of data || []) for (const line of candidates.filter(l => orderId(l) === review.order_id)) {
-          reviews.set(line.id, {key: keys.get(line.id), review});
+          reviews.set(line.id, {snapshot: snapshots.get(line.id), review});
         }
       }
     } catch (error) {
@@ -72,7 +72,7 @@
       <h2 id="partial-refund-title">Review partial refund</h2>
       <p id="partial-refund-order"></p><ul id="partial-refund-items"></ul>
       <p class="fulfillment-blocked">Verify the partial refund and remaining payment in eBay. Approval allows these items to be completed, labeled, and shipped. Orders reported as fully refunded, cancelled, or unpaid remain blocked.</p>
-      <p>Refund history is preserved. Changed refund details or order items require a new review.</p>
+      <p>Approval stays saved across daily updates. Only a new or changed refund, changed items, cancellation, or payment problem requires another review.</p>
       <a id="partial-refund-ebay" target="_blank" rel="noopener">Open order in eBay ↗</a>
       <label>Reason and verified refund amount<textarea id="partial-refund-reason" required minlength="3" maxlength="2000" rows="3" placeholder="Partial refund of $… for …; the customer is keeping the item and it should still ship."></textarea></label>
       <label class="partial-refund-confirm"><input id="partial-refund-verified" type="checkbox" required> I verified this is only a partial refund, payment remains, and these items should still ship.</label>

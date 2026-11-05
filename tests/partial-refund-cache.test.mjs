@@ -5,6 +5,7 @@ import {test} from 'node:test';
 
 const pending = await readFile(new URL('../pending-orders.js', import.meta.url), 'utf8');
 const refunds = await readFile(new URL('../pending-partial-refunds.js', import.meta.url), 'utf8');
+const refundFacts = await readFile(new URL('../partial-refund-facts.js', import.meta.url), 'utf8');
 async function app() {
   const elements = new Map();
   const context = vm.createContext({console: {...console, error() {}}, URLSearchParams, setTimeout() {}, clearTimeout() {},
@@ -14,7 +15,7 @@ async function app() {
       return elements.get(id);
     }}});
   const run = code => vm.runInContext(code, context);
-  run(pending); run(refunds);
+  run(pending); run(refundFacts); run(refunds);
   run(`var approvedReview={order_id:'order',order_number:'01-12345-12345',reviewable:true,
       approval:{id:'approval',by:'manager@example.test',at:'2026-10-23T04:58:12Z',reason:'Verified discount'}};
     var calls=[],completionError=null,lineRawOverride=null;
@@ -94,6 +95,24 @@ test('reordered JSON properties do not invalidate the same reviewed refund', asy
   run(`const transaction=state.selectedLine.order.raw_payload.ebayFinance.transactions[0];
     state.selectedLine.order.raw_payload.ebayFinance.transactions[0]=Object.fromEntries(Object.entries(transaction).reverse());`);
   assert.equal(run('getLineFulfillmentBlock(state.selectedLine)'), '');
+});
+
+test('a delayed matching refund receipt keeps the approved line in the workers pending queue',async()=>{
+ const {run}=await app();
+ run(`state.selectedLine.order.raw_payload.ebayFinance.transactions[0].transactionDate='2026-11-04T03:46:55.768Z';`);
+ await run('window.OGPartialRefunds.load(state.orders)');
+ run(`state.selectedLine.order.raw_payload.order={orderPaymentStatus:'PARTIALLY_REFUNDED',paymentSummary:{refunds:[{
+  refundId:'summary-id',amount:{value:'100',currency:'USD'},refundStatus:'REFUNDED',refundDate:'2026-11-04T03:46:54.705Z'
+ }]}};state.selectedLine.order.raw_payload.ebayFinance.transactions[0].payoutId='later-payout';`);
+ assert.equal(run('window.OGPartialRefunds.approved(state.selectedLine)'),true);
+ assert.equal(run('isActiveCancellationReviewLine(state.selectedLine)'),false);
+ assert.match(run('window.OGPartialRefunds.markup(state.selectedLine)'),/Partial refund approved/);
+});
+
+test('different hydration copies of the same refund do not invalidate approval',async()=>{
+ const {run}=await app();
+ run(`state.selectedLine.order.ebay_finance={transactions:[{...state.selectedLine.order.raw_payload.ebayFinance.transactions[0],payoutId:'updated'}]};`);
+ assert.equal(run('window.OGPartialRefunds.approved(state.selectedLine)'),true);
 });
 
 test('a revoked server approval blocks the next refreshed queue', async () => {

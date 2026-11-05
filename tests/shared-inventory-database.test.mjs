@@ -334,6 +334,7 @@ test('partial refund approval uses the real completion RPC and deducts linked st
  await db.exec(await migration('20261009060000_fulfillment_payment_safety.sql'));
  await db.exec(await migration('20261009061000_fulfillment_safety_observations.sql'));
  await db.exec(await migration('20261022020000_ebay_partial_refund_review.sql'));
+ await db.exec(await migration('20261105191500_durable_partial_refund_approvals.sql'));
  await attach(1);await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PARTIALLY_REFUNDED"}' where id='${id(2)}'`);
  await assert.rejects(close(),/Refund/);
  assert.equal(await scalar(`select quantity v from item_stock_locations where id='${id(31)}'`),5);
