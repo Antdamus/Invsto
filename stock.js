@@ -1758,6 +1758,10 @@ function buildLocationChips(item) {
       const params = getURLParams();
       //console.log("🌐 URL Parameters on Load:", params);
       const form = document.getElementById("filter-form");
+      const sortSelect = document.getElementById("sort-select");
+      // Browsers may restore the old dropdown value, even with new HTML defaults.
+      // Only an explicit, valid sort in the link should override newest first.
+      sortSelect.value = "date-desc";
 
     
       // 🧹 Clear previous selection states to avoid duplicates
@@ -1782,7 +1786,6 @@ function buildLocationChips(item) {
       if (params.page) currentPage = parseInt(params.page);
     
       if (params.sort) {
-        const sortSelect = document.getElementById("sort-select");
         if ([...sortSelect.options].some(option => option.value === params.sort)) sortSelect.value = params.sort;
       }
     

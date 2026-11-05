@@ -4,6 +4,23 @@ import {test} from 'node:test';
 import vm from 'node:vm';
 
 const source=await readFile(new URL('../stock.js',import.meta.url),'utf8');
+const filterStart=source.indexOf('function applyFiltersFromURL()');
+const applyUrlSource=source.slice(filterStart,source.indexOf('//#endregion',filterStart));
+
+test('Stock startup replaces restored alphabetical sorting but respects an explicit valid sort link',()=>{
+  for(const [params,expected] of [[{},'date-desc'],[{sort:'title-asc'},'title-asc'],[{sort:'invalid'},'date-desc']]){
+    const select={value:'title-asc',options:[{value:'title-asc'},{value:'date-desc'}]};
+    const form={elements:{namedItem:()=>null}};
+    const context=vm.createContext({
+      getURLParams:()=>params,
+      document:{getElementById:id=>id==='sort-select'?select:form,querySelectorAll:()=>[]},
+      syncHiddenInputsWithDropdowns() {},
+    });
+    vm.runInContext(applyUrlSource+'\napplyFiltersFromURL();',context);
+    assert.equal(select.value,expected);
+  }
+});
+
 const renderSource=source.slice(source.indexOf('async function renderStockItems('),source.indexOf('function highlightReturnedStockCard('));
 function app() {
   const context=vm.createContext({console});
