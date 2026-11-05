@@ -32,6 +32,8 @@ The repaired stock trigger uses the real stock rows rather than nonexistent bag 
 
 ## Validation
 
+Destination lookup refreshes the location list once when an exact barcode is missing or cannot receive inventory. It distinguishes general storage, containers without an available parent, and unknown barcodes, with an **Open Locations** link for corrections. A location's name alone never changes its saved role; existing trays must be marked as trays in Locations. Each receiving search has one camera button that runs its corresponding lookup.
+
 - `npm run test:add-inventory`: browser coverage for multi-item saving, repeated scans, quantity validation, account confirmation, receipts, optional labels, mobile layout, safe rendering, removal/Undo and reload/lost-response recovery.
 - `INVSTO_ITEM_BROWSER=webkit` uses the phone browser engine.
 - `supabase/tests/inventory_receiving_test.sql`: 27 transactional pgTAP checks for permissions, validation, stock/audit atomicity, retries, isolation of bag/defective stock and catalog preservation. Tests roll back fixtures.

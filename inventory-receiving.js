@@ -3,6 +3,7 @@
   'use strict';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const validQuantity = value => /^[1-9]\d{0,5}$/.test(String(value));
+  const locationCode = value => String(value ?? '').trim().toUpperCase();
   const slimItem = item => Object.fromEntries(['id','title','barcode','weight','qr_code','qr_type','dymo_label_url','photos','photo_url','labels_per_order'].map(key=>[key,item[key]]));
   async function init({user,openLabels}) {
     const root=document.getElementById('inventory-receiving');
@@ -10,13 +11,13 @@
     document.querySelector('.add-inventory-wrapper').hidden=true;root.hidden=false;document.body.classList.add('receiving-mode');
     const key='invsto.receiving.v1.'+user.id;
     let state={locationId:'',lines:[],notes:'',pending:null,receipt:null,receiptItems:[]};
-    let locations=[],stores=[],itemsFound=[],searchSequence=0,stockSequence=0,searchTimer,removed=null,busy=false,currentStock=new Map();
+    let locations=[],stores=[],itemsFound=[],searchSequence=0,locationSearchSequence=0,stockSequence=0,searchTimer,removed=null,busy=false,currentStock=new Map();
     const photoCache=new Map();
     let restored=false;
     try{const saved=JSON.parse(localStorage.getItem(key)||'null');if(saved&&Array.isArray(saved.lines)){state={...state,...saved};restored=state.lines.length>0||Boolean(state.pending);}}catch{}
     root.innerHTML=`<div class="receiving-heading"><a href="stock.html">Back to Stock</a><a href="add-inventory.html?mode=count">Scan counting / bulk bags</a></div><h1>Add inventory</h1><p class="receiving-intro">Add more stock to items already in your catalog. Scan or search, enter quantities, then save together.</p><p id="receive-status" role="status" aria-live="polite"></p>
-      <section class="receiving-card"><h2>1. Destination</h2><details id="receive-destination-details" open><summary>Choose or change destination</summary><p>Everything in this batch goes here. The destination stays selected for your next batch.</p><form id="receive-location-form" class="receiving-find"><label for="receive-location-search">Find a tray or container</label><div><input id="receive-location-search" type="search" placeholder="Location name or barcode" autocomplete="off" data-camera-scan><button type="submit" id="receive-location-find">Find</button></div><button type="button" data-scan-target="receive-location-search" data-scan-action="receive-location-find">Scan location with camera</button></form><label for="receive-location">Destination</label><select id="receive-location"><option value="">Loading locations...</option></select><button type="button" id="receive-reload-locations" class="receiving-secondary">Refresh locations</button></details><p id="receive-location-info"></p></section>
-      <section class="receiving-card"><h2>2. Add existing items</h2><form id="receive-search-form" class="receiving-find"><label for="receive-search">Item name or barcode</label><div><input id="receive-search" type="search" placeholder="Scan a barcode or search by name" autocomplete="off" data-camera-scan><button id="receive-find" type="submit">Find item</button></div><button type="button" data-scan-target="receive-search" data-scan-action="receive-find">Scan item with camera</button></form><p id="receive-search-status" role="status"></p><div id="receive-results"></div></section>
+      <section class="receiving-card"><h2>1. Destination</h2><details id="receive-destination-details" open><summary>Choose or change destination</summary><p>Everything in this batch goes here. The destination stays selected for your next batch.</p><form id="receive-location-form" class="receiving-find"><label for="receive-location-search">Find a tray or container</label><div><input id="receive-location-search" type="search" placeholder="Location name or barcode" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="submit" id="receive-location-find">Find</button></div><button type="button" data-scan-target="receive-location-search" data-scan-action="receive-location-find">Scan location with camera</button></form><label for="receive-location">Destination</label><select id="receive-location"><option value="">Loading locations...</option></select><button type="button" id="receive-reload-locations" class="receiving-secondary">Refresh locations</button></details><p id="receive-location-info"></p><a id="receive-location-manage" href="locations.html" target="_blank" rel="noopener" hidden>Open Locations to check this destination ↗</a></section>
+      <section class="receiving-card"><h2>2. Add existing items</h2><form id="receive-search-form" class="receiving-find"><label for="receive-search">Item name or barcode</label><div><input id="receive-search" type="search" placeholder="Scan a barcode or search by name" autocomplete="off" autocapitalize="off" spellcheck="false"><button id="receive-find" type="submit">Find item</button></div><button type="button" data-scan-target="receive-search" data-scan-action="receive-find">Scan item with camera</button></form><p id="receive-search-status" role="status"></p><div id="receive-results"></div></section>
       <section class="receiving-card"><div class="receiving-section-head"><h2>3. Review quantities</h2><span id="receive-summary"></span></div><p>Enter how many units you are adding, not the total already in stock. Scanning the same item again adds one to this batch.</p><div id="receive-lines"></div><button id="receive-undo" type="button" hidden>Undo removal</button><button id="receive-add-another" type="button" class="receiving-secondary">Add another item</button><details class="receiving-notes"><summary>Batch note (optional)</summary><label for="receive-notes">Note for this batch</label><input id="receive-notes" maxlength="1000" placeholder="e.g. Shipment received today"></details><div class="receiving-save"><button id="receive-save" type="button" disabled>Review and add stock</button><button id="receive-clear" type="button" class="receiving-secondary">Clear draft</button><small id="receive-draft-status">Draft stays on this device until you save.</small></div></section>
       <section id="receive-receipt" class="receiving-card receiving-receipt" hidden></section>`;
     const $=id=>root.querySelector('#'+id);
@@ -51,8 +52,42 @@
         const [locationResult,storeResult]=await Promise.all([allLocations(),window.supabase.from('store_locations').select('id,name').eq('active',true).order('name')]);
         if(storeResult.error)throw storeResult.error;locations=locationResult;stores=storeResult.data||[];
         if(state.locationId&&!locations.some(l=>l.id===state.locationId&&canChoose(l))&&!state.pending){state.locationId='';tell('Your previous destination is no longer available. Choose another.',true);persist();}
-        locationOptions();$('receive-destination-details').open=!chosen();await refreshStock();
-      }catch(error){tell('Could not load locations: '+error.message,true);$('receive-location').innerHTML='<option value="">Locations unavailable - tap Refresh locations</option>';}
+        locationOptions();$('receive-destination-details').open=!chosen();await refreshStock();return true;
+      }catch(error){tell('Could not load locations: '+error.message,true);$('receive-location').innerHTML='<option value="">Locations unavailable - tap Refresh locations</option>';return false;}
+    }
+    async function findLocation(){
+      if(busy||state.pending)return;
+      const seq=++locationSearchSequence,q=locationCode($('receive-location-search').value);
+      $('receive-location-manage').hidden=true;
+      if(!q){locationOptions();tell('Enter a location name or scan its barcode.',true);return;}
+      let exact=locations.filter(l=>locationCode(l.location_code)===q);
+      // A tray may have been created or corrected after this page loaded.
+      // Refresh once before reporting a missing or ineligible destination.
+      if(exact.length!==1||!canChoose(exact[0])){
+        tell('Checking the latest locations...');
+        if(!await loadLocations())return;
+        if(seq!==locationSearchSequence||busy||state.pending)return;
+        exact=locations.filter(l=>locationCode(l.location_code)===q);
+      }
+      locationOptions();
+      if(exact.length===1&&canChoose(exact[0])){
+        state.locationId=exact[0].id;persist();locationOptions();
+        $('receive-destination-details').open=false;tell(`Destination selected: ${locationLabel(exact[0])}.`);void refreshStock();return;
+      }
+      $('receive-destination-details').open=true;
+      if(exact.length===1){
+        const loc=exact[0];
+        tell(loc.parent_location_id
+          ? `${loc.location_name} was found, but its parent storage is inactive or unavailable. Open Locations to check its placement.`
+          : loc.location_role==='container'
+            ? `${loc.location_name} was found, but this container needs a parent storage location. Open Locations to set its placement.`
+            : `${loc.location_name} was found, but it is saved as general storage. If this is a tray, mark it as a tray in Locations; otherwise choose a container inside it.`,true);
+        $('receive-location-manage').hidden=false;
+      }else{
+        const matches=locations.filter(canChoose).filter(l=>locationLabel(l).toUpperCase().includes(q));
+        tell(matches.length?`Choose the matching destination from the list (${matches.length} found).`:`No active tray or container matches “${$('receive-location-search').value.trim()}”. Check the barcode or open Locations.`,!matches.length);
+        $('receive-location-manage').hidden=matches.length>0;
+      }
     }
     async function allLocations(){
       const result=[];
@@ -151,9 +186,9 @@
     $('receive-add-another').onclick=()=>{$('receive-search-form').scrollIntoView({block:'center'});$('receive-search').focus({preventScroll:true});};
     $('receive-search-form').onsubmit=event=>{event.preventDefault();void searchItems(true);};
     $('receive-search').oninput=()=>{clearTimeout(searchTimer);searchSequence++;searchTimer=setTimeout(()=>void searchItems(false),300);};
-    $('receive-location-search').oninput=locationOptions;
-    $('receive-location-form').onsubmit=event=>{event.preventDefault();const q=$('receive-location-search').value.trim().toLowerCase();const matches=locations.filter(canChoose).filter(l=>l.location_code.toLowerCase()===q);if(matches.length===1){state.locationId=matches[0].id;persist();locationOptions();$('receive-destination-details').open=false;void refreshStock();}else{locationOptions();tell('Choose the matching destination from the list.',true);}};
-    $('receive-location').onchange=()=>{state.locationId=$('receive-location').value;persist();locationOptions();$('receive-destination-details').open=!chosen();void refreshStock();};
+    $('receive-location-search').oninput=()=>{locationSearchSequence++;$('receive-location-manage').hidden=true;locationOptions();};
+    $('receive-location-form').onsubmit=event=>{event.preventDefault();void findLocation();};
+    $('receive-location').onchange=()=>{locationSearchSequence++;state.locationId=$('receive-location').value;persist();locationOptions();$('receive-destination-details').open=!chosen();$('receive-location-manage').hidden=true;tell(chosen()?`Destination selected: ${locationLabel(chosen())}.`:'Choose a destination.');void refreshStock();};
     $('receive-notes').value=state.notes;$('receive-notes').oninput=()=>{state.notes=$('receive-notes').value;persist();};
     $('receive-reload-locations').onclick=()=>void loadLocations();
     renderLines();renderReceipt();await loadLocations();

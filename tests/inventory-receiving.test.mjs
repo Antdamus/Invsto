@@ -7,7 +7,7 @@ const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
  server=createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w.-]+$/.test(name))return res.writeHead(404).end();
-  try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:inventory-receiving|add-inventory|print-stations|additem-dymolabel)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}
+  try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:inventory-receiving|add-inventory|barcode-scanner|print-stations|additem-dymolabel)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}
  });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
 after(async()=>{await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});await browser.close();});
@@ -16,7 +16,7 @@ async function open(t,query=''){
  await context.addInitScript(()=>{
   const user={id:'worker',email:'worker@example.invalid'};window.lucide={createIcons(){}};window.calls=[];window.authFail=false;window.failSave='';window.deniedSave=false;
   window.testItems=[{id:'watch',title:'Tissot watch',barcode:'000123',photos:[],weight:48,labels_per_order:1},{id:'coin',title:'Silver collector coin',barcode:'COIN123',photos:[],weight:31.1,labels_per_order:1}];
-  const locations=[{id:'tray',location_name:'Show tray',location_code:'TRAY1',store_id:'store',active:true,is_tray:true,location_role:'tray',max_capacity:100},{id:'parent',location_name:'Vault',location_code:'VAULT',store_id:'store',active:true,is_tray:false,location_role:'storage_location'},{id:'box',location_name:'Coin box',location_code:'BOX1',store_id:'store',active:true,is_tray:false,location_role:'container',parent_location_id:'parent'}];
+  const locations=window.testLocations=[{id:'tray',location_name:'Show tray',location_code:'TRAY1',store_id:'store',active:true,is_tray:true,location_role:'tray',max_capacity:100},{id:'parent',location_name:'Vault',location_code:'VAULT',store_id:'store',active:true,is_tray:false,location_role:'storage_location'},{id:'box',location_name:'Coin box',location_code:'BOX1',store_id:'store',active:true,is_tray:false,location_role:'container',parent_location_id:'parent'},{id:'legacy-tray',location_name:'Legacy tray',location_code:'LOC-TEST30',store_id:'store',active:true,is_tray:false,location_role:'storage_location'}];
   window.supabase={auth:{getSession:async()=>({data:{session:{user}}}),signInWithPassword:async args=>{window.calls.push({name:'auth',email:args.email});return window.authFail?{error:{message:'Incorrect password'}}:{data:{user,session:{user}}};}},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:''}})})},from(table){
    const filters=[];let limit=1000,range=null;
    const q={select(){return q;},update(){return q;},eq(k,v){filters.push(row=>row[k]===v);return q;},is(k,v){filters.push(row=>v===null?row[k]==null:row[k]===v);return q;},in(k,v){filters.push(row=>v.includes(row[k]));return q;},ilike(k,v){const term=v.slice(1,-1).replace(/\\([\\%_])/g,'$1').toLowerCase();filters.push(row=>String(row[k]).toLowerCase().includes(term));return q;},order(){return q;},range(a,b){range=[a,b];return q;},limit(v){limit=v;return q;},maybeSingle:async()=>({data:{role:'admin',active:true}}),then(resolve){let rows=table==='item_types'?window.testItems:table==='locations'?locations:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='item_stock_locations'?[{item_id:'watch',quantity:4,location_id:'tray',condition_status:'good'},{item_id:'coin',quantity:2,location_id:'tray',condition_status:'good'}]:[];rows=rows.filter(row=>filters.every(f=>f(row)));if(range)rows=rows.slice(range[0],range[1]+1);return Promise.resolve({data:rows.slice(0,limit),error:null}).then(resolve);}};return q;
@@ -61,6 +61,50 @@ test('invalid quantities, wrong password and server validation never clear the u
 });
 test('location scans select the matching container and show its parent storage',async t=>{
  const page=await open(t);await page.locator('#receive-location-search').fill('BOX1');await page.locator('#receive-location-find').click();assert.equal(await page.locator('#receive-location').inputValue(),'box');assert.match(await page.locator('#receive-location-info').innerText(),/Showroom.*Vault.*Coin box/);assert.equal(await page.locator('#receive-location option[value=parent]').count(),0);
+});
+
+test('a misclassified tray explains its saved role, then a refreshed lookup sees the correction without losing quantities',async t=>{
+ const page=await open(t);await scan(page,'000123');await page.locator('[data-quantity=watch]').fill('7');
+ await page.locator('#receive-location-search').fill(' loc-test30 ');await page.locator('#receive-location-find').click();
+ await page.waitForFunction(()=>document.getElementById('receive-status').textContent.includes('saved as general storage'));
+ assert.match(await page.locator('#receive-status').innerText(),/Legacy tray was found/);
+ assert.equal(await page.locator('#receive-location-manage').isVisible(),true);
+ assert.equal(await page.locator('#receive-location option[value=legacy-tray]').count(),0);
+ assert.equal(await page.locator('#receive-save').isDisabled(),true);
+ // Supabase returns fresh objects on each fetch, as the real client does.
+ await page.evaluate(()=>{const index=window.testLocations.findIndex(l=>l.id==='legacy-tray');window.testLocations[index]={...window.testLocations[index],is_tray:true,location_role:'tray'};});
+ await page.locator('#receive-location-find').click();
+ await page.waitForFunction(()=>document.getElementById('receive-location').value==='legacy-tray');
+ assert.match(await page.locator('#receive-location-info').innerText(),/Showroom.*Legacy tray.*LOC-TEST30/);
+ assert.equal(await page.locator('#receive-location-manage').isVisible(),false);
+ assert.equal(await page.locator('[data-quantity=watch]').inputValue(),'7');
+ assert.equal(await page.locator('#receive-save').isDisabled(),false);
+ assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='receive_inventory_batch').length),0);
+});
+
+test('lookup distinguishes an unknown barcode and missing parent from matching choices, and tolerates a null barcode',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>window.testLocations.push(
+  {id:'no-code',location_name:'No barcode tray',location_code:null,active:true,is_tray:true},
+  {id:'orphan',location_name:'Unplaced box',location_code:'ORPHAN',active:true,location_role:'container',parent_location_id:'inactive-parent'}
+ ));
+ await page.locator('#receive-location-search').fill('UNKNOWN');await page.locator('#receive-location-find').click();
+ await page.waitForFunction(()=>document.getElementById('receive-status').textContent.includes('No active tray or container matches'));
+ assert.equal(await page.locator('#receive-location').inputValue(),'');
+ await page.locator('#receive-location-search').fill('ORPHAN');await page.locator('#receive-location-find').click();
+ await page.waitForFunction(()=>document.getElementById('receive-status').textContent.includes('parent storage is inactive or unavailable'));
+ await page.locator('#receive-location-search').fill('Coin');await page.locator('#receive-location-find').click();
+ await page.waitForFunction(()=>document.getElementById('receive-status').textContent.includes('(1 found)'));
+ assert.equal(await page.locator('#receive-location option[value=box]').count(),1);
+ assert.equal(await page.locator('#receive-location-manage').isVisible(),false);
+});
+
+test('receiving shows one camera control per field, each wired to the explicit lookup action',async t=>{
+ const page=await open(t);
+ for(const [field,action] of [['receive-location-search','receive-location-find'],['receive-search','receive-find']]){
+  const button=page.locator(`[data-scan-target="${field}"]`);
+  assert.equal(await button.count(),1);assert.equal(await button.getAttribute('data-scan-action'),action);
+ }
 });
 test('mobile layout fits 320 pixels and treats catalog names as text',async t=>{
  const page=await open(t);await page.setViewportSize({width:320,height:740});await page.evaluate(()=>window.testItems[0].title='<img src=x onerror="window.injected=true"> watch');await prepare(page);assert.equal(await page.evaluate(()=>Boolean(window.injected)),false);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await page.screenshot({path:new URL('../test-results/receiving-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});await page.locator('#receive-save').click();assert.ok(await page.locator('.receiving-confirm').evaluate(el=>el.scrollWidth<=el.clientWidth));
