@@ -278,8 +278,8 @@
 }
 
 /* A photograph fills the screen; controls stay outside the area used for gestures. */
-.client-catalogue.photo-viewer-open { overflow: hidden; }
-.client-catalogue dialog.photo-viewer { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; padding: 0; margin: 0; border: 0; border-radius: 0; background: #000; color: #f3eee2; overflow: hidden; overscroll-behavior: contain; }
+:is(.client-catalogue, .daily-catalogue).photo-viewer-open { overflow: hidden; }
+:is(.client-catalogue, .daily-catalogue) dialog.photo-viewer { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; padding: 0; margin: 0; border: 0; border-radius: 0; background: #000; color: #f3eee2; overflow: hidden; overscroll-behavior: contain; --serif: 'Cormorant Garamond', Georgia, serif; }
 .photo-viewer[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .photo-viewer::backdrop { background: #000; }
 .viewer-header { display: flex; justify-content: space-between; align-items: start; gap: 24px; padding: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) 16px max(28px, env(safe-area-inset-left)); border-bottom: 1px solid #ffffff1a; }

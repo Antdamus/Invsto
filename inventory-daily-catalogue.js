@@ -2,6 +2,7 @@
  'use strict';
  const C=window.Catalogue,$=id=>document.getElementById(id);
  const base='https://byhytmarmigalvawkedi.supabase.co',params=new URLSearchParams(location.search),token=params.get('share');
+ const publicShell=document.body?.dataset?.catalogueAudience==='public';
  const dayKey='invsto:manny-catalogue-date',datePattern=/^\d{4}-\d{2}-\d{2}$/;
  const easternDay=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const dateLabel=value=>new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'long',month:'long',day:'numeric',year:'numeric'}).format(new Date(value+'T12:00:00Z'));
@@ -11,11 +12,12 @@
  function missing(items){return items.filter(i=>!(Number(i.retail_price)>0)||!i.images?.length);}
  function lock(value){busy=value;for(const el of document.querySelectorAll('#staff-panel button,#staff-panel input'))el.disabled=value;$('print-report').disabled=value;updateActions();}
  function updateActions(){
+  if(!$('staff-panel'))return;
   $('draft-actions').hidden=!record;$('share-panel').hidden=!record?.published;
   $('publish').disabled=busy||!data?.items?.length||missing(data.items).length>0;
   $('publish').textContent=record?.published?'Update published link':'Publish share link';
   if(record){$('draft-status').textContent=`${record.draft.items.length} item styles · Draft gathered ${timeLabel(record.draft.prepared_at)}`;}
-  if(record?.published){const url=new URL('inventory-daily-catalogue.html',location.href);url.searchParams.set('share',record.share_token);$('share-link').value=url.href;$('open-link').href=url.href;}
+  if(record?.published){const url=new URL('https://www.og-jewelers.com/representative-catalogue');url.searchParams.set('share',record.share_token);$('share-link').value=url.href;$('open-link').href=url.href;}
  }
  function render(){
   const items=data.items||[],groups=[...new Set(items.map(i=>i.category||'Other'))],prices=items.map(i=>Number(i.retail_price)).filter(p=>p>0);
@@ -26,7 +28,7 @@
   $('prepared-at').textContent=`Prepared ${timeLabel(data.prepared_at)}`;
   $('style-count').textContent=items.length;$('type-count').textContent=groups.length;
   $('price-range').textContent=prices.length?(Math.min(...prices)===Math.max(...prices)?C.money(prices[0]):`${C.money(Math.min(...prices))} – ${C.money(Math.max(...prices))}`):'Pricing in progress';
-  const hero=items.find(i=>i.images?.length);$('hero-image').innerHTML=hero?`<img src="${C.escape(C.safeImage(hero.images[0]))}" alt="${C.escape(hero.name)}">`:'';
+  const hero=items.find(i=>i.images?.length);$('hero-image').innerHTML=hero?`<button class="hero-zoom" data-photo="${C.escape(hero.id)}" aria-label="Expand featured photo of ${C.escape(hero.name)}"><img src="${C.escape(C.safeImage(hero.images[0]))}" alt="${C.escape(hero.name)}"><span>View & zoom ↗</span></button>`:'';
   $('hero-image').hidden=!hero;
   const incomplete=missing(items);$('readiness').hidden=Boolean(token)||!incomplete.length;
   $('readiness').innerHTML=`<strong>${incomplete.length} ${incomplete.length===1?'item needs':'items need'} attention before publishing</strong><p>All additions are included below. Finish their photos or retail prices in Stock, then gather again.</p>`+incomplete.map(i=>`<a href="#piece-${C.escape(i.id)}">${C.escape(i.name)} · ${[!(Number(i.retail_price)>0)&&'Retail price needed',!i.images?.length&&'Photo needed'].filter(Boolean).join(' · ')}</a>`).join('');
@@ -85,11 +87,11 @@
    else message('Choose the inventory date, then click Gather all items.');
   }catch(e){message(e.message,true);}
  }
- $('gather').addEventListener('click',gather);
+ $('gather')?.addEventListener('click',gather);
  function clearDate(){record=null;data=null;$('report').hidden=true;$('print-report').hidden=true;updateActions();message('Click Gather all items for this date.');}
- $('today').addEventListener('click',()=>{$('source-date').value=easternDay();clearDate();});$('source-date').addEventListener('change',clearDate);
- $('publish').addEventListener('click',()=>publish(true));$('unpublish').addEventListener('click',()=>publish(false));
- $('copy-link').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('share-link').value);message('Catalogue link copied.');}catch{$('share-link').select();message('Select and copy the catalogue link above.');}});
+ $('today')?.addEventListener('click',()=>{$('source-date').value=easternDay();clearDate();});$('source-date')?.addEventListener('change',clearDate);
+ $('publish')?.addEventListener('click',()=>publish(true));$('unpublish')?.addEventListener('click',()=>publish(false));
+ $('copy-link')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('share-link').value);message('Catalogue link copied.');}catch{$('share-link').select();message('Select and copy the catalogue link above.');}});
  document.addEventListener('click',e=>{const b=e.target.closest('[data-photo]');if(!b||!data)return;const i=data.items.find(i=>i.id===b.dataset.photo);if(i)window.CatalogueViewer.open(i,Number(b.dataset.index||0),b);});
  async function printImage(src){
   // Keep originals for zoom; use a sharp, bounded raster only in the PDF.
@@ -115,5 +117,6 @@
   }catch(e){restore();message(e.message,true);}finally{lock(false);}
  });
  if(token){loadPublic().catch(e=>message(e.message,true));setInterval(()=>{if(!document.hidden&&!busy&&!window.CatalogueViewer.isOpen)loadPublic().catch(e=>message(e.message,true));},240000);}
+ else if(publicShell)message('Open the complete catalogue link shared by OG Jewelers to view your selection.');
  else{document.addEventListener('supabase-ready',bootStaff);script('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2').then(()=>script('initSupabase.js')).then(bootStaff).catch(e=>message(e.message,true));}
 })();
