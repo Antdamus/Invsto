@@ -43,6 +43,51 @@ async function openPage(t,admin=true,path='fixture.html'){
 async function begin(page,options={},dymo=false){await page.evaluate(({xml,options,dymo})=>{window.testResult=null;window.testError=null;const action=dymo?dymoModule.printDymoLabelXml(xml,options):window.printStations.printLabel(xml,options);action.then(value=>window.testResult=value).catch(error=>window.testError={message:error.message,cancelled:error.cancelled});},{xml:label,options,dymo});await page.locator('[data-destination]:enabled').waitFor();}
 async function send(page,station,copies){await page.locator('[data-destination]').selectOption(station);if(copies)await page.locator('[data-copies]').fill(String(copies));await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult||window.testError);}
 
+test('Stock first print and reprint work for staff without storage or inventory write permission',async t=>{
+ const page=await openPage(t,false);
+ const source=await readFile(new URL('stock.js',root),'utf8'),start=source.indexOf('async function queueStockDymoLabelForHelper('),end=source.indexOf('\ndocument.addEventListener',start);
+ await page.evaluate(()=>{
+  window.testItem={id:'saved',barcode:'OG17938635006115KQ',title:'Airplane pendant',weight:2.65,dymo_label_url:'',qr_type:'website'};
+  window.getStockItemById=()=>window.testItem;
+  window.supabase.storage.from=()=>{throw new Error('new row violates row-level security policy');};
+  window.supabase.from=()=>{throw new Error('Inventory editing is not allowed');};
+ });
+ await page.addScriptTag({content:source.slice(start,end)});
+ for(let print=0;print<2;print++){
+  await page.evaluate(()=>{window.testResult=null;window.testError=null;queueStockDymoLabelForHelper({dataset:{id:'saved'}}).then(value=>window.testResult=value).catch(e=>window.testError=e.message);});
+  await page.locator('[data-destination]:enabled').waitFor();
+  assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print').length),print);
+  await send(page,'a');
+  assert.equal(await page.evaluate(()=>window.testError),null);
+ }
+ const calls=await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print'));
+ assert.equal(calls.length,2);assert.notEqual(calls[0].args._request_id,calls[1].args._request_id);
+ assert.equal(calls[0].args._label_xml,calls[1].args._label_xml);assert.match(calls[0].args._label_xml,/OG17938635006115KQ/);
+ assert.equal(await page.evaluate(()=>window.testItem.dymo_label_url),'');
+});
+
+test('individual label quantity sends rounded strip copies once and keeps shipping copies unchanged',async t=>{
+ const page=await openPage(t);
+ for(const [requested,perCopy,expected] of [[13,2,7],[12,2,6],[1,2,1],[13,1,13],[200,2,100]]){
+  await begin(page,{copies:Math.ceil(requested/perCopy),labelQuantity:{requested,perCopy},listenerOnly:true},true);
+  assert.equal(await page.locator('[data-copies]').inputValue(),String(expected));
+  assert.equal(await page.locator('[data-copies]').getAttribute('readonly'),'');
+  assert.match(await page.locator('[data-label-quantity-summary]').innerText(),new RegExp(`${requested} individual labels? requested`));
+  await send(page,'a');
+  assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print').at(-1).args._copies),expected);
+ }
+ await begin(page,{copies:3});assert.equal(await page.locator('[data-copies]').getAttribute('readonly'),null);
+ await page.locator('[data-cancel]').click();
+});
+
+test('individual label quantity also uses strip copies in local download filenames',async t=>{
+ const page=await openPage(t);
+ await begin(page,{labelQuantity:{requested:13,perCopy:2},listenerOnly:true,barcode:'TEST'},true);
+ const download=page.waitForEvent('download');await send(page,'local');
+ assert.match((await download).suggestedFilename(),/_Copies_7_/);
+ assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print').length),0);
+});
+
 test('failed DYMO jobs explain full service restart and full-quantity retry without sending a job',async t=>{
  const page=await openPage(t,false,'print-stations.html');
  await page.evaluate(()=>window.testJobs=[

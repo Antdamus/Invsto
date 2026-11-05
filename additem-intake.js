@@ -56,33 +56,54 @@
     $('item-print-session').textContent=`Print batch (${printQueue.size})`;$('item-print-session').disabled=printing || !printQueue.size;
     $('item-print-last').disabled=printing || !lastSaved;
     ['item-label-print-batch','item-label-print-one','item-label-print-later','item-save-success-continue','item-save-success-similar'].forEach(id=>$(id).disabled=printing);
+    $('item-label-quantity').disabled=printing;
+    $('item-label-two-up').disabled=printing;
+    $('item-label-print-batch').disabled=printing || !labelPrintPlan();
   }
-  async function recordPrintChoice(item,strategy,copies,units=1) {
+  function labelPrintPlan(requested=Number($('item-label-quantity').value)) {
+    const perCopy=$('item-label-two-up').checked?2:1;
+    if(!Number.isInteger(requested) || requested<1 || requested>100*perCopy)return null;
+    const copies=Math.ceil(requested/perCopy);
+    return {requested,perCopy,copies,produced:copies*perCopy};
+  }
+  function updateLabelEstimate() {
+    const plan=labelPrintPlan(),max=$('item-label-two-up').checked?200:100;
+    $('item-label-quantity').max=String(max);
+    $('item-label-print-count').textContent=plan?`${plan.copies} printed strip${plan.copies===1?'':'s'}`:'Enter a label quantity';
+    $('item-label-print-formula').textContent=plan
+      ?`${plan.requested} individual label${plan.requested===1?'':'s'} needed → ${plan.copies} printed strip${plan.copies===1?'':'s'} → ${plan.produced} labels${plan.produced>plan.requested?' (1 spare)':''}. ${plan.perCopy===2?'Rounded up automatically.':'One label per strip.'}`
+      :`Enter a whole number from 1 to ${max} labels. For more, print another batch.`;
+    $('item-label-print-batch').textContent=plan?`Print ${plan.copies} strip${plan.copies===1?'':'s'}`:'Choose printer';
+    updateQueue();
+    return plan;
+  }
+  async function recordPrintChoice(item,strategy,copies,units=1,printNote='') {
     try {
       const {error}=await window.supabase.rpc('set_item_label_print_preference',{
         _item_id:item.id,_strategy:strategy,_labels_per_order:units,
-        _label_print_quantity:copies,_notes:strategy==='deferred'?'Print later from the intake batch or Stock.':'Labels queued to the selected print destination.'
+        _label_print_quantity:copies,_notes:strategy==='deferred'?'Print later from the intake batch or Stock.':printNote || 'Labels queued to the selected print destination.'
       });
       if(error)throw error;
       return true;
     }catch(error){console.warn('Label preference could not be recorded',error);return false;}
   }
-  async function printItems(entries,copies=1,strategy='individual_batch',units=1) {
+  async function printItems(entries,copies=1,strategy='individual_batch',labelQuantity=null) {
     if(printing)return;
     printing=true;updateQueue();
     const status=$('item-print-session-status');const modalStatus=$('item-label-print-status');
     let done=0,preferenceFailed=false;
     try {
-      const printDestination=window.printStations?await window.printStations.chooseDestination({copies,labelCount:entries.length}):null;
+      const printDestination=window.printStations?await window.printStations.chooseDestination({copies,labelCount:entries.length,labelQuantity}):null;
       copies=printDestination?.copies || copies;
       for(const entry of entries){
         status.textContent=modalStatus.textContent=`Preparing label ${done+1} of ${entries.length}…`;
         if(!entry.xml)entry.xml=(await window.dymoModule.prepareSavedItemLabel(entry.item)).templateXml;
         await window.dymoModule.printDymoLabelXml(entry.xml,{copies,barcode:entry.item.barcode,title:entry.item.title,labelKind:'ItemLabel',listenerOnly:true,printDestination});
         printQueue.delete(entry.item.id);done++;
-        if(!await recordPrintChoice(entry.item,strategy,copies,units))preferenceFailed=true;
+        const note=labelQuantity?`${labelQuantity.requested} individual labels requested; ${copies} printed strips queued, ${labelQuantity.perCopy} labels per strip (${copies*labelQuantity.perCopy} labels).` : '';
+        if(!await recordPrintChoice(entry.item,strategy,copies,1,note))preferenceFailed=true;
       }
-      status.textContent=modalStatus.textContent=`Queued ${done*copies} label${done*copies===1?'':'s'}${printDestination?.stationId?' for '+printDestination.name:''}. View Print stations for job status.${preferenceFailed?' The label preference could not be recorded.':''}`;
+      status.textContent=modalStatus.textContent=`Queued ${done*copies} printed strip${done*copies===1?'':'s'}${labelQuantity?` (${done*copies*labelQuantity.perCopy} individual labels)`:''}${printDestination?.stationId?' for '+printDestination.name:''}. View Print stations for job status.${preferenceFailed?' The label preference could not be recorded.':''}`;
     }catch(error){status.textContent=modalStatus.textContent=`${done} item labels queued. ${error.message || 'Printing unavailable'}. Remaining items are still saved; retry printing later.`;}
     finally{printing=false;updateQueue();}
   }
@@ -114,17 +135,20 @@
       };
     }
     $('item-label-print-status').textContent='Printing is optional. Your inventory is already saved.';
-    $('item-labels-per-order').value='1';
     const quantity=options.stockSaved && options.stockInfo?Math.max(1,Number(options.stockInfo.quantity)):1;
-    function estimate(){const count=Math.max(1,Math.ceil(quantity/Math.max(1,Number($('item-labels-per-order').value)||1)));$('item-label-print-count').textContent=`${count} labels`;$('item-label-print-formula').textContent=`${quantity} units; one label for every ${$('item-labels-per-order').value || 1} units.`;$('item-label-print-batch').textContent=`Print ${count} labels`;return count;}
-    $('item-labels-per-order').oninput=estimate;estimate();
-    $('item-label-print-batch').onclick=()=>printItems([lastSaved],estimate(),'individual_batch',Math.max(1,Math.floor(Number($('item-labels-per-order').value)||1)));
-    $('item-label-print-one').onclick=()=>printItems([lastSaved],1,'collective_only');
+    $('item-label-quantity').value=String(quantity);
+    $('item-label-two-up').checked=true;
+    $('item-label-quantity').oninput=updateLabelEstimate;
+    $('item-label-two-up').onchange=updateLabelEstimate;
+    updateLabelEstimate();
+    $('item-label-print-batch').onclick=()=>{const plan=updateLabelEstimate();if(plan)return printItems([lastSaved],plan.copies,'individual_batch',plan);};
+    const oneStrip=entries=>{const plan=labelPrintPlan($('item-label-two-up').checked?2:1);return printItems(entries,1,entries.length===1?'collective_only':'individual_batch',plan);};
+    $('item-label-print-one').onclick=()=>oneStrip([lastSaved]);
     $('item-label-print-later').onclick=()=>startNext(false);
     $('item-save-success-continue').onclick=()=>startNext(false);
     $('item-save-success-similar').onclick=()=>startNext(true);
-    $('item-print-last').onclick=()=>printItems([lastSaved]);
-    $('item-print-session').onclick=()=>printItems([...printQueue.values()]);
+    $('item-print-last').onclick=()=>oneStrip([lastSaved]);
+    $('item-print-session').onclick=()=>oneStrip([...printQueue.values()]);
     if(options.nextMode==='similar' && !options.warnings.length){await startNext(true);window.showToast?.('Item saved. Shared details are ready for the next item.');}
     else{$('item-save-success-modal').classList.remove('hidden');$('item-save-success-modal').setAttribute('aria-hidden','false');document.body.classList.add('modal-open');$('item-save-success-similar').focus();}
   }

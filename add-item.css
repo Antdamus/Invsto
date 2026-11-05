@@ -1370,6 +1370,20 @@ input[type="file"].add-input::file-selector-button {
   line-height: 1.45;
 }
 
+.item-label-pair-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(223, 190, 133, 0.3);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.item-label-pair-option input { width: 22px; height: 22px; flex: 0 0 22px; margin: 2px 0 0; accent-color: var(--accent, #dfbe85); }
+.item-label-pair-option strong { display: block; color: var(--text); }
+.item-label-pair-option small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+#item-label-quantity { font-size: 16px; }
+
 .item-label-print-actions {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

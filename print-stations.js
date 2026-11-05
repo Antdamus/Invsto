@@ -23,14 +23,30 @@
   const rollName = roll => roll==='Left'?'Left roll':roll==='Right'?'Right roll':'Printer default';
   const rollOptions = station => ['Left','Right'].map(roll=>`<option value="${roll}">${rollName(roll)}${station[roll.toLowerCase()+'_roll_label']?' - '+escape(station[roll.toLowerCase()+'_roll_label']):''}</option>`).join('');
   let choosing=false;
-  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1,configureOnly=false,allowBrowserPrint=false,documentTitle=''}={}) {
+  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1,configureOnly=false,allowBrowserPrint=false,documentTitle='',labelQuantity=null}={}) {
     if (choosing) throw new Error('Choose the destination in the open print window.');
     const pdf=documentType==='pdf', preference=pdf?PREF+'.pdf':PREF;
+    if(labelQuantity && !pdf){
+      const {requested,perCopy}=labelQuantity;
+      if(![1,2].includes(perCopy) || !Number.isInteger(requested) || requested<1 || requested>100*perCopy)throw new Error('Choose a valid label quantity before selecting the printer.');
+      // Convert individual labels to physical copies exactly once. Queueing and
+      // the helper receive these copies unchanged, including for local downloads.
+      copies=Math.ceil(requested/perCopy);
+    }
     const browserPrint=pdf&&allowBrowserPrint;
     choosing=true;
     const dialog=document.createElement('dialog');dialog.className='print-station-dialog print-destination-picker';
     dialog.innerHTML=`<form method="dialog"><div class="print-dialog-head"><h2>${pdf?'Print shipping label':'Print labels'}</h2><button value="cancel" aria-label="Close print destination">×</button></div></form><p>Choose the printer that should receive these labels.</p><p role="status" data-message>Loading print stations…</p><label>Send to<select data-destination disabled></select></label><div data-roll-section hidden><label>Label roll<select data-roll><option value="">Choose a roll...</option></select></label><p>Left and right as you face the front of the printer. Choose the roll loaded with labels that match this label’s size.</p><p data-roll-update hidden>Update the Windows helper on this computer to enable roll selection. <a href="downloads/Invsto-Print-Station-Windows.zip?v=1.2.0" download>Download helper update</a>. Extract it and run Install-Print-Station.cmd; your pairing is kept.</p></div>${pdf?`<p data-shipping-paper-help>This saved PDF contains <strong>${pageCount} page${pageCount===1?'':'s'}</strong>. Load 4 × 6 shipping labels in the 5XL.</p><label>Pages to print<input data-pages placeholder="e.g. 1, 3-5, or all" value="${pageCount===1?'1':''}" inputmode="text"></label><p data-shipping-pages-help>Check the PDF preview to match pages to this order. A bulk PDF may contain other orders.</p>`:''}<label>${pdf?'Copies of selected pages':'Copies per label'}<input data-copies type="number" min="1" max="100" value="${Math.max(1,Math.min(100,Number(copies)||1))}"></label><p>${labelCount>1?`${labelCount} item labels. `:''}<span data-destination-status></span></p><a href="print-stations.html">Set up a computer or view print jobs</a><div class="print-dialog-actions"><button type="button" data-cancel>Cancel</button><button type="button" data-send disabled>Send labels</button></div>`;
     const dialogBody=document.createElement('div');dialogBody.className='print-dialog-body';
+    if(labelQuantity && !pdf){
+      const input=dialog.querySelector('[data-copies]');
+      input.readOnly=true;
+      input.closest('label').firstChild.textContent=labelCount>1?'Printed strips per item':'Printed strips';
+      const quantityHelp=document.createElement('p');quantityHelp.dataset.labelQuantitySummary='';
+      const produced=copies*labelQuantity.perCopy;
+      quantityHelp.textContent=`${labelQuantity.requested} individual label${labelQuantity.requested===1?'':'s'} requested${labelCount>1?' per item':''} → ${copies} printed strip${copies===1?'':'s'} → ${produced} labels${produced>labelQuantity.requested?' (1 spare)':''}. ${labelQuantity.perCopy} label${labelQuantity.perCopy===1?'':'s'} per strip. Cancel to change the quantity.`;
+      input.closest('label').after(quantityHelp);
+    }
     if(pdf&&documentTitle){const title=document.createElement('p');title.className='print-document-title';title.textContent=documentTitle;dialog.querySelector('form').after(title);}
     if(browserPrint){
       dialog.querySelector('[data-destination]').insertAdjacentHTML('beforeend','<option value="">Loading registered printers…</option><option value="browser">This device — browser print dialog</option>');

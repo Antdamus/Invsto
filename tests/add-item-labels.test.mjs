@@ -3,22 +3,20 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { test } from 'node:test';
 const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
-function labels({uploadError=false,updateError=false}={}) {
-  const writes=[],uploads=[];
-  const context={window:{},console,Blob,Date,encodeURIComponent,supabase:{
-    storage:{from:bucket=>({upload:async(path,blob)=>{uploads.push({bucket,path,xml:await blob.text()});return {error:uploadError?new Error('Storage unavailable'):null};}})},
-    from:table=>({select(){return this;},update(value){writes.push({table,value});return this;},eq(key,value){if(writes.length)writes.at(-1).filter={key,value};return this;},limit(){return this;},maybeSingle:async()=>({data:null}),then(resolve){return Promise.resolve({error:updateError?new Error('Update unavailable'):null}).then(resolve);}})
-  }};
+function labels() {
+  // No database/storage client: printing a saved item must not need write access.
+  const context={window:{latestDymoXml:'unsaved item',latestDymoUrl:'labels/draft.dymo'},encodeURIComponent};
   vm.createContext(context);vm.runInContext(read('additem-dymolabel.js'),context);
-  return {api:context.window.dymoModule,writes,uploads};
+  return {api:context.window.dymoModule,window:context.window};
 }
-test('deferred labels use the saved item, escape XML and attach to its own ID',async()=>{
- const {api,writes,uploads}=labels();
- const item={id:'saved-1',barcode:'COIN&123',weight:26.73,qr_type:'website',qr_code:'https://example.invalid/?a=1&b=2'};
+test('first prints and reprints use saved item facts without storage or inventory writes',async()=>{
+ const {api,window}=labels();
+ const item=Object.freeze({id:'saved-1',barcode:'COIN&123',weight:26.73,qr_type:'website',qr_code:'https://example.invalid/?a=1&b=2',dymo_label_url:''});
  const result=await api.prepareSavedItemLabel(item);
- assert.equal(result.labelPath,'labels/saved-1.dymo');assert.equal(item.dymo_label_url,result.labelPath);
- assert.equal(uploads[0].bucket,'dymo-labels');assert.match(result.templateXml,/COIN&amp;123/);assert.match(result.templateXml,/a=1&amp;b=2/);assert.match(result.templateXml,/26.73/);
- assert.equal(writes.length,1);assert.equal(writes[0].filter.value,'saved-1');assert.equal(writes[0].value.dymo_label_url,result.labelPath);
+ assert.equal(result.labelPath,undefined);assert.equal(item.dymo_label_url,'');
+ assert.match(result.templateXml,/COIN&amp;123/);assert.match(result.templateXml,/a=1&amp;b=2/);assert.match(result.templateXml,/26.73/);
+ assert.equal((await api.prepareSavedItemLabel(item)).templateXml,result.templateXml);
+ assert.equal(window.latestDymoXml,'unsaved item');assert.equal(window.latestDymoUrl,'labels/draft.dymo');
 });
 test('deferred certificate labels retain their certificate QR fallback',async()=>{
  const {api}=labels();const {templateXml}=await api.prepareSavedItemLabel({id:'cert-item',barcode:'ABC123',qr_type:'CGL ID'});
@@ -39,12 +37,9 @@ test('one-off CGL labels reuse the jewelry layout without inventory or staged-la
  assert.match(api.buildCglLabelXml({qr:'0000123'}),/<DataString>0000123<\/DataString>/);
  for(const qr of ['', '   ', 'x'.repeat(2049), 'https://example.test/\u0000bad', 'line\nbreak'])assert.throws(()=>api.buildCglLabelXml({qr}),/CGL QR contents/);
 });
-test('label storage or attachment failures propagate for retry without marking a label prepared',async()=>{
- for(const failure of [{uploadError:true},{updateError:true}]){
-  const {api,writes}=labels(failure),item={id:'saved',barcode:'OG123'};
-  await assert.rejects(api.prepareSavedItemLabel(item),/unavailable/);assert.equal(item.dymo_label_url,undefined);
-  if(failure.uploadError)assert.equal(writes.length,0);
- }
+test('preparing a print still requires a saved item and its barcode',async()=>{
+ const {api}=labels();
+ for(const item of [null,{}, {id:'saved'},{barcode:'OG123'}])await assert.rejects(api.prepareSavedItemLabel(item),/Save the item/);
 });
 test('Stock prepares missing labels on demand and reuses attached labels',async()=>{
  const source=read('stock.js');const start=source.indexOf('async function queueStockDymoLabelForHelper(');const end=source.indexOf('\ndocument.addEventListener',start);

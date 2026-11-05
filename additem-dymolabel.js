@@ -1155,14 +1155,11 @@ window.dymoModule = (function () {
 
   async function prepareSavedItemLabel(item) {
     if(!item?.id || !item.barcode)throw new Error('Save the item before preparing its label.');
-    const {templateXml}=await generateAndUploadDymoLabel({barcode:item.barcode,qr:item.qr_code || (item.qr_type && item.qr_type !== 'website' ? 'https://ogjewelry.store/auth?id='+encodeURIComponent(item.barcode) : WEBSITE_QR_URL),price:item.weight ?? '',typeqr:item.qr_type || 'website'});
-    const labelPath=`labels/${item.id}.dymo`;
-    const {error}=await supabase.storage.from('dymo-labels').upload(labelPath,new Blob([templateXml],{type:'application/octet-stream'}),{upsert:true,contentType:'application/octet-stream'});
-    if(error)throw error;
-    const {error:updateError}=await supabase.from('item_types').update({dymo_label_url:labelPath}).eq('id',item.id);
-    if(updateError)throw updateError;
-    item.dymo_label_url=labelPath;
-    return {templateXml,labelPath};
+    // A print request stores its own XML. Preparing a saved item's label must
+    // not require storage overwrite or inventory-edit permission: workers can
+    // print, and a prior upload may exist without a saved item attachment.
+    const templateXml=buildDymoLabelXml({barcode:item.barcode,qr:item.qr_code || (item.qr_type && item.qr_type !== 'website' ? 'https://ogjewelry.store/auth?id='+encodeURIComponent(item.barcode) : WEBSITE_QR_URL),price:item.weight ?? '',typeqr:item.qr_type || 'website'});
+    return {templateXml};
   }
 
   return { 

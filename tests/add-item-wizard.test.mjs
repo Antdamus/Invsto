@@ -275,6 +275,36 @@ test('saving works with unavailable labels, and print retry never inserts anothe
  await page.locator('#item-save-success-continue').click();assert.equal(await step(page),'information');assert.equal(await page.locator('[name="item-kind"][value="jewelry"]').isChecked(),true);
 });
 
+test('post-save labels default to two per strip, validate quantities and record the actual print quantity',async t=>{
+ const page=await pageFor(t,{width:390,height:844});
+ await page.evaluate(()=>window.testSaveSuccess=true);await prepareWatch(page);
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.locator('#item-save-success-modal').waitFor({state:'visible'});
+ assert.equal(await page.locator('#item-label-two-up').isChecked(),true);
+ for(const [requested,strips] of [['13',7],['12',6],['1',1]]){
+  await page.locator('#item-label-quantity').fill(requested);
+  assert.equal(await page.locator('#item-label-print-count').innerText(),`${strips} printed strip${strips===1?'':'s'}`);
+ }
+ await page.locator('#item-label-quantity').fill('13');
+ assert.match(await page.locator('#item-label-print-formula').innerText(),/14 labels \(1 spare\)/);
+ await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
+ await page.locator('#item-label-print-batch').scrollIntoViewIfNeeded();
+ await page.screenshot({path:new URL('../test-results/item-label-quantity-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await page.locator('#item-label-print-batch').click();await page.waitForFunction(()=>window.testPrints.length===1);
+ assert.equal(await page.evaluate(()=>window.testPrints[0].copies),7);
+ assert.match(await page.locator('#item-label-print-status').innerText(),/7 printed strips \(14 individual labels\)/);
+ assert.equal(await page.evaluate(()=>window.testLabelPreferences.at(-1)._label_print_quantity),7);
+ assert.match(await page.evaluate(()=>window.testLabelPreferences.at(-1)._notes),/13 individual labels requested; 7 printed strips/);
+ await page.locator('#item-label-two-up').uncheck();
+ assert.equal(await page.locator('#item-label-print-count').innerText(),'13 printed strips');
+ await page.locator('#item-label-print-batch').click();await page.waitForFunction(()=>window.testPrints.length===2);
+ assert.equal(await page.evaluate(()=>window.testPrints[1].copies),13);
+ for(const value of ['0','-1','1.5','','101']){await page.locator('#item-label-quantity').fill(value);assert.equal(await page.locator('#item-label-print-batch').isDisabled(),true);}
+ await page.locator('#item-label-two-up').check();await page.locator('#item-label-quantity').fill('200');assert.equal(await page.locator('#item-label-print-batch').isDisabled(),false);
+ await page.locator('#item-label-quantity').fill('201');assert.equal(await page.locator('#item-label-print-batch').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ assert.equal(await page.evaluate(()=>window.testWrites.length),1);
+});
+
 test('Save and add similar retains selected shared fields, clears unique facts, and saves a fresh draft',async t=>{
  const page=await pageFor(t);await seed(page,{kind:'coin',step:'review',details:{gradingStatus:'certified',grade:'MS 65',gradingService:'PCGS',certNumber:'000123',mint:'S',condition:'Cleaned',notes:'Scratch'},photos:twoPhotos,main:{distributorName:'Supplier A',distributorPhone:'555-0100'}});
  await page.evaluate(()=>window.testSaveSuccess=true);const originalBarcode=await page.locator('#scanned-barcode').inputValue();await page.locator('#item-keep-prices').check();

@@ -112,7 +112,6 @@
   const similar=block('button','Add similar item','add-button');similar.type='button';similar.id='item-save-success-similar';
   const continueButton=byId('item-save-success-continue');continueButton.hidden=false;continueButton.classList.remove('hidden');continueButton.textContent='Add different item';continueButton.before(similar);
   byId('item-label-print-later').textContent='Print later';
-  byId('item-labels-per-order').previousElementSibling.textContent='Units per label';
   document.querySelector('.item-save-success-progress').hidden=true;
   byId('item-save-success-copy').textContent='The item is saved. Printing is optional.';
   byId('item-step-review').querySelector('.section-copy').textContent='Review the description and prices. Use Edit to change any section.';
