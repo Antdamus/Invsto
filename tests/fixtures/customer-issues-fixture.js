@@ -62,6 +62,14 @@
    const results=args._case_ids.map(id=>{const r=rows.find(r=>r.id===id),archived=r?.id==='case-1'&&!window.fixtureNewWork;if(archived){r.status='closed';r.open_tasks=0;}return {id,archived};});
    return {data:{results,archived:results.filter(r=>r.archived).length}};
   }
+  if(name==='customer_issue_dispute_review')return {data:rows.find(r=>r.id===args._case_id)?.dispute_review||null};
+  if(name==='set_customer_dispute_classification'){
+   fixtureWrites.push({name,args});if(window.fixtureDisputeReviewFailure)return {error:{message:'Could not save the classification'}};
+   const row=rows.find(r=>r.id===args._case_id),family=row.dispute_review?.family_ids||[row.id];
+   const review={eligible:true,family_ids:family,classification:args._classification,version:crypto.randomUUID(),signer_name:'Jose',recorded_at:now};
+   for(const r of rows)if(family.includes(r.id))r.dispute_review=review;
+   return {data:review};
+  }
   if(name==='set_customer_return_money_mark'){
    fixtureWrites.push({name,args});
    if(window.fixtureMoneyFailure)return {error:{message:'Could not save the mark'}};
@@ -70,7 +78,8 @@
    return {data:row.money_mark};
   }
   fixtureCalls.push({rpc:name,args});if(name==='can_access_post_order_issues')return {data:true};if(name==='list_customer_issues'){
-   const scoped=rows.filter(r=>(!args._search||[r.customer_name,r.buyer_username,r.order_number,r.ebay_return_id].some(v=>String(v||'').toLowerCase().includes(args._search.toLowerCase())))&&(args._scope==='all'||r[args._scope]));
+   const reviewFilter=args._dispute_review_filter||'all';
+   const scoped=rows.filter(r=>reviewFilter==='all'||(r.dispute_review?.classification||'unreviewed')===reviewFilter).filter(r=>(!args._search||[r.customer_name,r.buyer_username,r.order_number,r.ebay_return_id].some(v=>String(v||'').toLowerCase().includes(args._search.toLowerCase())))&&(args._scope==='all'||r[args._scope]));
    const matchesMoney=r=>args._view!=='return'||!args._money_filter||args._money_filter==='all'||Boolean(r.money_mark?.marked)===(args._money_filter==='marked');
    const return_stages={};for(const r of scoped.filter(r=>r.status!=='closed'&&r.issue_kind==='return'&&matchesMoney(r))){const stage=r.return_stage||'unknown';return_stages[stage]=(return_stages[stage]||0)+1;}
    let found=scoped.filter(r=>(args._view==='history'?r.status==='closed':r.status!=='closed'&&(args._view==='attention'||r.issue_kind===args._view||(args._view==='final_review'&&['pending','changes_requested'].includes(r.final_review?.status))))&&(args._view!=='return'||!args._return_stage||args._return_stage==='all'||(r.return_stage||'unknown')===args._return_stage));

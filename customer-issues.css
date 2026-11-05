@@ -194,6 +194,21 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 .return-money-control button { min-height:44px; border-color:#5f8f76; color:#c9edd8; }
 .return-money-signed { display:grid; gap:2px; color:#a4e1bc; }
 .return-money-signed small { color:#bbc8bd; overflow-wrap:anywhere; }
+.dispute-filter-row { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
+.dispute-filter-row .issues-return-filter { flex:1 1 250px; max-width:430px; }
+.dispute-review-hint { color:#b7c5bb; font-size:.85rem; margin:8px 0 18px; max-width:900px; }
+.dispute-review-control { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:16px; margin:16px 0; border:1px solid #5d7467; border-radius:16px; background:#1e3027; }
+.issue-card-row > .dispute-review-control { margin:12px 16px; }
+.dispute-review-control strong,.dispute-review-control small { display:block; }
+.dispute-review-control strong { color:#e6eee7; }
+.dispute-review-control small { color:#bbc8bd; margin-top:5px; overflow-wrap:anywhere; }
+.dispute-review-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.dispute-review-actions button { min-height:44px; padding:10px 18px; }
+.dispute-review-actions [data-classification="fair"] { border-color:#74b694; color:#c9f0d9; }
+.dispute-review-actions [data-classification="unfair"] { border-color:#d3a069; color:#ffe0b6; }
+.dispute-review-control.is-fair { border-color:#74b694; }
+.dispute-review-control.is-unfair { border-color:#d3a069; background:#302b20; }
+.dispute-review-actions [aria-pressed="true"] { opacity:1; background:#405348; }
 @media (max-width:600px) {
   .return-filter-row { display:grid; grid-template-columns:minmax(0,1fr); }
 }

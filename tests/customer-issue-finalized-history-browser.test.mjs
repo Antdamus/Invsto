@@ -12,6 +12,43 @@ before(async()=>{
  browserServer=await webkit.launchServer();browser=await webkit.connect(browserServer.wsEndpoint());await mkdir(new URL('../test-results/customer-issues',import.meta.url),{recursive:true});
 });
 
+for(const width of [390,1366])test(`Dispute review ${width}px: signed Fair/Unfair, default hiding, filters, undo and failed-save recovery`,async t=>{
+ const context=await browser.newContext({viewport:{width,height:1000}});t.after(()=>context.close());
+ await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
+ const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/ebay-returns.html');
+ for(const file of ['task-workflow.js','customer-issue-evidence.js','return-receiving.js','customer-issue-chats.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.waitForFunction(()=>window.fixtureReady);
+ await page.evaluate(()=>{
+  const review={eligible:true,family_ids:['case-0','case-2'],classification:'unreviewed',version:null};
+  fixtureUpdateCase({issue_kind:'dispute',source_lane:'payment_dispute',buyer_username:'sample.buyer',dispute_review:review},0);
+  fixtureUpdateCase({issue_kind:'request',source_lane:'inquiry',dispute_review:review},2);
+ });
+ await page.getByRole('button',{name:'Refresh customer issues'}).click();
+ await expect(page.locator('#issues-dispute-review')).toHaveValue('unreviewed');
+ await page.locator('[data-case="case-0"]').click();
+ await page.locator('#issues-detail [data-classification="unfair"]').click();
+ await expect(page.locator('#issues-feedback')).toContainText('Classified Unfair');
+ await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);await expect(page.locator('[data-case="case-2"]')).toHaveCount(0);
+ await page.locator('#issues-dispute-review').selectOption('unfair');
+ await expect(page.locator('[data-case="case-0"]')).toHaveCount(1);
+ await page.locator('[data-case="case-0"]').click();
+ const control=page.locator('#issues-detail .dispute-review-control');await expect(control).toContainText('Classified Unfair');await expect(control).toContainText('Jose');
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await control.scrollIntoViewIfNeeded();await page.screenshot({path:`test-results/customer-issues/dispute-review-${width}.png`});
+ await page.evaluate(()=>{window.fixtureDisputeReviewFailure=true;});
+ await control.locator('[data-classification="fair"]').click();await expect(page.locator('#issues-feedback')).toContainText('Could not save');await expect(control).toContainText('Classified Unfair');
+ await expect(control.locator('[data-classification="fair"]')).toBeEnabled();
+ await page.evaluate(()=>{window.fixtureDisputeReviewFailure=false;});
+ await control.locator('[data-classification="fair"]').click();await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);
+ await page.locator('#issues-dispute-review').selectOption('fair');await page.locator('[data-case="case-0"]').click();
+ await expect(control).toContainText('Classified Fair');
+ await control.locator('[data-classification="unreviewed"]').click();await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);
+ await page.locator('#issues-dispute-review').selectOption('unreviewed');await expect(page.locator('[data-case="case-0"]')).toHaveCount(1);
+ const writes=await page.evaluate(()=>fixtureWrites);assert.deepEqual(writes.map(w=>w.name),Array(4).fill('set_customer_dispute_classification'));
+ assert.equal(writes[0].args._expected_version,null);assert.ok(writes[2].args._expected_version);assert.deepEqual(errors,[]);
+});
+
 for(const width of [390,1366])test(`Won appeal ${width}px: card and detail show the reimbursement and preserve internal work`,async t=>{
  const context=await browser.newContext({viewport:{width,height:1000}});t.after(()=>context.close());
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
@@ -57,7 +94,7 @@ for(const width of [390,1366])test(`Send to History ${width}px: visible individu
  await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);await expect(page.locator('[data-case="case-2"]')).toHaveCount(0);
  await page.locator('#issues-open-history').click();await expect(page.locator('.issue-card')).toHaveCount(2);assert.deepEqual(errors,[]);
 });
-after(async()=>{const stop=setTimeout(()=>browserServer?.process()?.kill(),2500);try{await browser?.close();await browserServer?.close();}finally{clearTimeout(stop);await new Promise(r=>{server.close(r);server.closeAllConnections();});}});
+after(async()=>{let stop;await Promise.race([Promise.allSettled([browser?.close(),browserServer?.close()]),new Promise(resolve=>{stop=setTimeout(()=>{browserServer?.process()?.kill();resolve();},2500);})]);clearTimeout(stop);await new Promise(r=>{server.close(r);server.closeAllConnections();});});
 
 
 for(const width of [390,1366])test(`Finalized History banner ${width}px: visible rules, one-click archive and History navigation`,async t=>{

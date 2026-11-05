@@ -91,7 +91,9 @@ before(async()=>{
  await db.exec(await sqlFile('20261031071000_customer_issue_review_action_validation.sql'));
  await db.exec('alter table ebay_order_label_events add column id uuid default gen_random_uuid(),add column created_at timestamptz default now(),add column order_line_ids uuid[]');
  await db.exec(await sqlFile('20261031080000_customer_issue_review_tracking.sql'));
+ await db.exec(await sqlFile('20261103190000_customer_return_money_marks.sql'));
  await db.exec(await sqlFile('20261105010000_customer_issue_appeal_outcomes.sql'));
+ await db.exec(await sqlFile('20261105020000_customer_dispute_classification.sql'));
 
 
 });
@@ -107,6 +109,44 @@ const preview=()=>scalar('select customer_issue_history_preview() v');
 const archive=()=>scalar('select archive_finalized_customer_issues($1) v',[[id(100)]]);
 const status=()=>scalar('select status v from ebay_return_cases where id=$1',[id(100)]);
 const manualPlan=async()=> (await preview()).checks[id(100)].manual;
+const disputeReview=(caseId=id(100))=>scalar('select customer_issue_dispute_review($1) v',[caseId]);
+const classify=(classification,version=null,caseId=id(100))=>scalar('select set_customer_dispute_classification($1,$2,$3) v',[caseId,classification,version]);
+const reviewQueue=(filter='unreviewed',view='attention',limit=30)=>scalar("select list_customer_issues($1,'all','',0,$2,'newest','all',null,'all','all',$3) v",[view,limit,filter]);
+test('dispute classification is signed, reversible and leaves provider facts and open tasks intact',async()=>{
+ await monitor();const before=await scalar('select to_jsonb(c) v from ebay_return_cases c where id=$1',[id(100)]);
+ await db.exec('set role authenticated');
+ const mark=await classify('fair');assert.equal(mark.classification,'fair');assert.equal(mark.signer_name,'Operator');assert.ok(mark.version&&mark.recorded_at);
+ assert.equal((await classify('fair')).version,mark.version,'retry is idempotent');
+ assert.equal((await reviewQueue()).total,0);assert.equal((await reviewQueue('fair')).total,1);assert.equal((await reviewQueue('unfair')).total,0);
+ assert.equal((await reviewQueue('all')).rows[0].dispute_review.version,mark.version);
+ assert.deepEqual(await scalar('select to_jsonb(c) v from ebay_return_cases c where id=$1',[id(100)]),before);
+ assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(200)]),'open');
+ await assert.rejects(classify('unfair'),/Another worker classified/);
+ const changed=await classify('unfair',mark.version);assert.equal((await reviewQueue('unfair')).total,1);
+ await classify('unreviewed',changed.version);assert.equal((await reviewQueue()).total,1);
+ assert.equal(await scalar('select count(*)::int v from customer_dispute_classifications'),3);
+ await assert.rejects(db.exec('delete from customer_dispute_classifications'),/permission denied/);
+});
+test('classified linked request and case hide together, with correct counts before pagination',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='case',ebay_return_id='C100';
+ insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,order_id)
+ values('${id(101)}','inquiry','request','C100','open','CLOSED','${id(10)}'),
+ ('${id(102)}','payment_dispute','dispute','D102','open','OPEN','${id(10)}');`);
+ const mark=await classify('unfair');assert.deepEqual(mark.family_ids,[id(100),id(101)]);
+ assert.equal((await disputeReview(id(101))).version,mark.version);
+ const queue=await reviewQueue('unreviewed','attention',1);assert.equal(queue.total,1);assert.equal(queue.rows[0].id,id(102));assert.equal(queue.counts.attention,1);assert.equal(queue.counts.request,0);
+ assert.equal((await reviewQueue('unfair')).total,2);assert.equal((await reviewQueue('all')).total,3);
+ assert.equal((await disputeReview(id(102))).classification,'unreviewed','same-order unrelated dispute stays independent');
+ await classify('unreviewed',mark.version,id(101));assert.equal((await reviewQueue()).total,3);
+});
+test('dispute classification rejects unrelated returns, invalid choices and unauthorized access',async()=>{
+ await assert.rejects(classify('approved'),/Choose Fair/);
+ await db.exec("update ebay_return_cases set source_lane='return',issue_kind='return'");
+ assert.equal((await disputeReview()).eligible,false);await assert.rejects(classify('fair'),/Select a dispute/);
+ await db.exec("select set_config('test.access','no',false);set role authenticated");
+ await assert.rejects(disputeReview(),/access required/);await assert.rejects(classify('unfair'),/access required/);
+ assert.equal(await scalar('select count(*)::int v from customer_dispute_classifications'),0);
+});
 const manualArchive=async(accept=false,expected)=>scalar('select send_customer_issue_to_history($1,$2,$3) v',[id(100),JSON.stringify(expected||(await manualPlan()).cases),accept]);
 async function monitor(extra=''){
  await db.exec(`insert into ebay_return_tasks(id,return_case_id,task_type,title,status,metadata)

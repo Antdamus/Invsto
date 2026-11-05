@@ -32,6 +32,37 @@
  let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',returnCounts=null,disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  let historyPreview=null,historyReceipt='';
  let moneyFilter='unmarked';
+ let disputeReviewFilter='unreviewed';
+ const reviewValue=c=>c.dispute_review?.classification||'unreviewed';
+ function disputeReviewControl(c){
+  if(!c.dispute_review?.eligible)return '';
+  const review=c.dispute_review,value=reviewValue(c),marked=value!=='unreviewed';
+  return `<section class="dispute-review-control ${marked?'is-'+value:''}" data-dispute-review-control="${escape(c.id)}" aria-label="Our dispute classification">
+   <div><strong>${marked?`✓ Classified ${escape(nice(value))}`:'Is this dispute fair or unfair?'}</strong>
+   <small>${marked?`${escape(review.signer_name)} · ${escape(date(review.recorded_at))}`:'Your review · classified disputes are hidden by default.'}</small></div>
+   <div class="dispute-review-actions">${['fair','unfair',...(marked?['unreviewed']:[])].map(choice=>`<button type="button" class="secondary-btn" data-dispute-review-case="${escape(c.id)}" data-classification="${choice}" data-review-version="${escape(review.version||'')}" aria-pressed="${value===choice}" ${value===choice?'disabled':''}>${choice==='unreviewed'?'Undo classification':nice(choice)}</button>`).join('')}</div>
+  </section>`;
+ }
+ async function saveDisputeReview(button){
+  const id=button.dataset.disputeReviewCase,value=button.dataset.classification;
+  const position=captureListPosition(id);saving=true;
+  document.querySelectorAll('[data-dispute-review-case]').forEach(el=>el.disabled=true);
+  try{
+   const review=checked(await db.rpc('set_customer_dispute_classification',{
+    _case_id:id,_classification:value,_expected_version:button.dataset.reviewVersion||null
+   }));
+   const family=new Set(review.family_ids||[id]);
+   rows.forEach(c=>{if(family.has(c.id))c.dispute_review=review;});
+   if(detail&&family.has(detail.c.id))detail.c.dispute_review=review;
+   if(disputeReviewFilter!=='all'&&value!==disputeReviewFilter){
+    family.forEach(key=>bulkSelection.delete(key));rows=rows.filter(c=>!family.has(c.id));
+    if(family.has(selected))closeCase(true);
+   }
+   await refresh({detail:false});restoreListPosition(position);
+   feedback(value==='unreviewed'?'Classification cleared. The dispute is back in Unreviewed.':`Classified ${nice(value)}. Find it again with the Dispute review filter. Tasks and eBay status are unchanged.`);
+  }catch(error){feedback(error.message||'Could not save the classification. Refresh the dispute and retry.',true);}
+  finally{saving=false;cards();if(detail){const control=$('issues-detail').querySelector('[data-dispute-review-control]');if(control)control.outerHTML=disputeReviewControl(detail.c);}}
+ }
  function moneyMarkControl(c){
   if(kind(c)!=='return')return '';
   const mark=c.money_mark,marked=mark?.marked===true;
@@ -78,7 +109,7 @@
   const adverse=check?.against_us!==false&&check?.accept_decision;
   const reason=allowed?(adverse?'Decided against us. If you accept the decision as fair, click Send to History to clear this issue.':check.accept_decision?'The eBay decision is finalized. Send to History when the remaining internal work is finished.':'Closed on eBay with no remaining work on this issue.'):(check?.reason||'Checking whether this case can be archived…');
   const taskNotice=allowed&&tasks?`<p class="issue-history-scope"><strong>Also closes ${tasks} related task${tasks===1?'':'s'}.</strong> ${adverse?'Each task records “Decision reviewed and accepted as fair,”':'Each task records that the finalized issue was reviewed and archived,'} with your name and the time. Previous notes are kept.</p>`:'';
-  return `<section class="issue-case-history ${compact?'is-compact':''}" aria-label="Case History action"><div><strong>${allowed?'Send this issue to History':'Keep this case visible'}</strong><p>${escape(reason)}</p>${check?.case_count>1?`<p class="issue-history-scope">Includes all ${escape(check.case_count)} linked request / case records.</p>`:''}${taskNotice}${check?.related_case_id?`<a href="ebay-returns.html?caseId=${encodeURIComponent(check.related_case_id)}">View escalated case ${escape(check.related_case_number||'')} ↗</a>`:''}<small>New updates bring it back automatically.</small></div><button type="button" class="primary-btn" data-send-history="${escape(c.id)}" ${allowed?'':'disabled'}>Send to History</button></section>`;
+  return `<section class="issue-case-history ${compact?'is-compact':''}" aria-label="Case History action"><div><strong>${allowed?'Send this issue to History':reviewValue(c)!=='unreviewed'?'Case still needs follow-up':'Keep this case visible'}</strong><p>${escape(reason)}</p>${check?.case_count>1?`<p class="issue-history-scope">Includes all ${escape(check.case_count)} linked request / case records.</p>`:''}${taskNotice}${check?.related_case_id?`<a href="ebay-returns.html?caseId=${encodeURIComponent(check.related_case_id)}">View escalated case ${escape(check.related_case_number||'')} ↗</a>`:''}<small>New updates bring it back automatically.</small></div><button type="button" class="primary-btn" data-send-history="${escape(c.id)}" ${allowed?'':'disabled'}>Send to History</button></section>`;
  }
  async function sendCaseToHistory(id){
   const c=detail?.c.id===id?detail.c:rows.find(r=>r.id===id);if(!c||saving)return;
@@ -123,7 +154,7 @@
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
  let listReturnPosition=null,bulkReturnPosition=null;
- const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all',view==='return'?moneyFilter:'all',view==='dispute'?disputeState:'all']);
+ const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all',view==='return'?moneyFilter:'all',view==='dispute'?disputeState:'all',disputeReviewFilter]);
  function captureListPosition(id){
   const cards=Array.from($('issues-list').querySelectorAll('[data-case]'));
   const card=cards.find(el=>el.dataset.case===id)||cards.find(el=>el.getBoundingClientRect().bottom>80);
@@ -233,6 +264,7 @@
  }
  const disputeStates={all:'All dispute states',response_needed:'Response needed',awaiting_outcome:'Response submitted · awaiting outcome',protected:'Protected · no response needed',no_response:'No response needed · awaiting outcome',reviewing:'eBay reviewing',on_hold:'On hold',awaiting_delivery:'Awaiting delivery',open:'Open · check status',closed:'Closed on eBay · all outcomes',closed_won:'Closed · in our favor',closed_lost:'Closed · buyer’s favor',closed_other:'Closed · other outcome'};
  function disputeFilters(){
+  $('issues-dispute-review').value=disputeReviewFilter;
   $('issues-dispute-filter').hidden=view!=='dispute';
   const all=Object.values(disputeCounts).reduce((sum,n)=>sum+Number(n),0),closedCount=['closed_won','closed_lost','closed_other'].reduce((sum,key)=>sum+Number(disputeCounts[key]||0),0);
   $('issues-dispute-state').innerHTML=Object.entries(disputeStates).map(([key,label])=>`<option value="${key}">${escape(label)} (${key==='all'?all:key==='closed'?closedCount:disputeCounts[key]||0})</option>`).join('');
@@ -310,7 +342,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${view==='final_review'?'':customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${view==='final_review'?`<div class="issue-review-card-deadline">${reviewDeadline(c)}</div><p class="issue-review-card-submitted">Work finished ${escape(date(c.final_review?.submitted_at))}</p>`:cardFacts(c)}
    ${appealSummary(c)}<div class="issue-card-footer">${view==='final_review'?returnBadge(c)+`<span class="issue-tag">${escape(nextText(c))}</span>`:cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${moneyMarkControl(c)}${root.OGIssueReview?.button(c)||''}${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${moneyMarkControl(c)}${disputeReviewControl(c)}${root.OGIssueReview?.button(c)||''}${closed(c)?caseHistoryAction(c,true):''}${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='final_review'?`return${total===1?'':'s'} awaiting review`:`${view==='history'?'finished':'active'} case${total===1?'':'s'}`}`;
   returnFilters();
@@ -389,7 +421,7 @@
  async function refresh(options={}){
   const request=++listVersion;$('issues-list').setAttribute('aria-busy','true');
   try{
-   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',_dispute_state:view==='dispute'?disputeState:'all',_focus_case_id:options.focusCase||null,_money_filter:view==='return'?moneyFilter:'all'}));
+   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',_dispute_state:view==='dispute'?disputeState:'all',_focus_case_id:options.focusCase||null,_money_filter:view==='return'?moneyFilter:'all',_dispute_review_filter:disputeReviewFilter}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};returnCounts=result.return_stages||null;disputeCounts=result.dispute_states||{};total=result.total||0;
    if(ctx.employee.role==='admin'){
@@ -408,7 +440,7 @@
     if(control)control.outerHTML=moneyMarkControl(detail.c);
    }
    if($('issues-feedback').classList.contains('is-error'))feedback('');
-   const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&(c.updated_at!==detail.c.updated_at||JSON.stringify(c.provider_outcome)!==JSON.stringify(detail.c.provider_outcome)));
+   const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&(c.updated_at!==detail.c.updated_at||JSON.stringify(c.provider_outcome)!==JSON.stringify(detail.c.provider_outcome)||JSON.stringify(c.dispute_review)!==JSON.stringify(detail.c.dispute_review)));
    if(!root.OGCaseNotes?.isEditing&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
@@ -526,7 +558,7 @@
   const reason=c.source_lane==='inquiry'?'Item not received':/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
-   ${moneyMarkControl(c)}
+   ${moneyMarkControl(c)}${disputeReviewControl(c)}
    ${root.OGIssueReview?.button(c)||''}
    ${appealSummary(c)}
    ${caseHistoryAction({...c,open_tasks:summary.open_tasks})}
@@ -616,12 +648,12 @@
   const notices=!quiet?db.rpc('customer_issue_notification_ids',{_case_id:id}).then(checked).catch(()=>null):Promise.resolve([]);
   if(!quiet)$('issues-detail').innerHTML='<div class="issues-empty">Loading the case and its evidence…</div>';
   try{
-   const [c,tasks,items,caseEvents,outcome]=await Promise.all([
+   const [c,tasks,items,caseEvents,outcome,disputeReview]=await Promise.all([
     db.from('ebay_return_cases').select('*').eq('id',id).single(),db.from('ebay_return_tasks').select('*').eq('return_case_id',id).order('created_at',{ascending:false}),
-    db.from('ebay_return_items').select('*').eq('return_case_id',id),db.from('ebay_return_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50),db.rpc('customer_issue_outcome_summary',{_case_id:id})
+    db.from('ebay_return_items').select('*').eq('return_case_id',id),db.from('ebay_return_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50),db.rpc('customer_issue_outcome_summary',{_case_id:id}),db.rpc('customer_issue_dispute_review',{_case_id:id})
    ]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
-   c.provider_outcome=outcome;
+   c.provider_outcome=outcome;c.dispute_review=disputeReview;
    if(c.source_lane==='return')Object.assign(c,checked(await db.rpc('customer_return_review_details',{_case_id:id}))||{});
    if(kind(c)==='return'){
     const marks=checked(await db.from('customer_return_money_marks').select('marked,revision,signer_name,recorded_at')
@@ -633,6 +665,7 @@
     clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';disputeState='all';offset=0;
     const active=!['closed','cancelled'].includes(c.status)||tasks.some(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
     view=['pending','changes_requested'].includes(c.final_review?.status)?'final_review':active?kind(c):'history';resetSort();$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
+    if(disputeReviewFilter!=='all'&&reviewValue(c)!==disputeReviewFilter)disputeReviewFilter='all';
     if(view==='return'&&moneyFilter!=='all'&&(c.money_mark?.marked===true)!==(moneyFilter==='marked'))moneyFilter='all';
     await refresh({detail:false,focusCase:id});if(stamp!==version)return;
     if(!rows.some(row=>row.id===id))throw new Error('Could not locate this case in the list. Refresh and retry.');
@@ -751,7 +784,8 @@
   await root.OGIssueReview?.init({client:db,feedback,onChange:()=>{cards();if(detail&&!root.OGCaseNotes?.isEditing&&!$('issue-action-form'))renderDetail();}});
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
-   if(b.dataset.moneyCase)saveMoneyMark(b);
+   if(b.dataset.disputeReviewCase)saveDisputeReview(b);
+   else if(b.dataset.moneyCase)saveMoneyMark(b);
    else if(b.id==='issues-archive-finalized'){archiveFinalized();}
    else if(b.dataset.sendHistory){sendCaseToHistory(b.dataset.sendHistory);}
    else if(b.id==='issues-open-history'){clearBulk();view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';resetSort();closeCase();refresh({detail:false});}
@@ -797,6 +831,7 @@
   $('issues-scope').onchange=()=>{clearBulk();scope=$('issues-scope').value;offset=0;refresh({detail:false});};
   $('issues-return-stage').onchange=()=>{clearBulk();returnStage=$('issues-return-stage').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-money-filter').onchange=()=>{clearBulk();moneyFilter=$('issues-money-filter').value;offset=0;closeCase();refresh({detail:false});};
+  $('issues-dispute-review').onchange=()=>{clearBulk();disputeReviewFilter=$('issues-dispute-review').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-dispute-state').onchange=()=>{clearBulk();disputeState=$('issues-dispute-state').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-prev').onclick=()=>{offset=Math.max(0,offset-PAGE);refresh({detail:false});};$('issues-next').onclick=()=>{offset+=PAGE;refresh({detail:false});};
   $('issues-refresh').onclick=()=>{refresh();health();};$('issues-sync').onclick=()=>sync();

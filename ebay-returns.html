@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261105-appeals" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261105-dispute-review" />
   <link rel="stylesheet" href="ebay-buyer-insights.css?v=20261029-report-2" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -111,7 +111,10 @@
           </select></label>
           <label class="issues-return-filter"><span>Return progress</span><select id="issues-return-stage"><option value="all">All return stages</option><option value="requested">Return requested</option><option value="awaiting_shipment">Awaiting buyer shipment</option><option value="in_transit">In transit</option><option value="delivered">Delivered (eBay)</option><option value="partially_received">Partially received</option><option value="needs_review">Received · needs review</option><option value="received">Received in Invsto</option><option value="unknown">Shipment not reported</option></select></label>
         </div>
+        <div class="dispute-filter-row"><label class="issues-return-filter"><span>Dispute review</span><select id="issues-dispute-review" autocomplete="off"><option value="unreviewed">Unreviewed · hide classified</option><option value="fair">Fair only</option><option value="unfair">Unfair only</option><option value="all">All · include classified</option></select></label>
         <label id="issues-dispute-filter" class="issues-return-filter" hidden><span>Dispute status</span><select id="issues-dispute-state" autocomplete="off"><option value="all">All dispute states</option></select></label>
+        </div>
+        <p class="dispute-review-hint">Fair / Unfair is our internal review. Classified disputes and their linked requests stay saved; select Fair, Unfair or All to see them.</p>
         <div class="issues-list-caption"><span id="issues-count" aria-live="polite">Loading cases...</span><span id="issues-sort-caption">Newest arrivals · case opened date</span></div>
         <div class="issues-columns">
           <section id="issues-list-panel" aria-label="Customer cases"><div id="issues-bulk-toolbar" class="issue-bulk-toolbar" hidden></div><div id="issues-list" class="issues-list" aria-busy="true"><div class="issues-empty">Loading your workspace...</div></div><div class="issues-paging"><button id="issues-prev" type="button" class="secondary-btn" disabled>Previous</button><span id="issues-page"></span><button id="issues-next" type="button" class="secondary-btn" disabled>Next</button></div></section>
@@ -256,7 +259,7 @@
   <script src="customer-issue-notes.js?v=20261010-28"></script>
   <script src="customer-issue-chats.js?v=20261010-31"></script>
   <script src="customer-issue-review.js?v=20261031-1"></script>
-  <script src="customer-issues.js?v=20261105-appeals"></script>
+  <script src="customer-issues.js?v=20261105-dispute-review"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>
