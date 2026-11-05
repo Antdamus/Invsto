@@ -2,11 +2,13 @@
  'use strict';
  const C=window.Catalogue,$=id=>document.getElementById(id);
  const base='https://byhytmarmigalvawkedi.supabase.co',params=new URLSearchParams(location.search),token=params.get('share');
+ const collectionKey=params.get('collection')||'',collectionMode=Boolean(collectionKey);
  const publicShell=document.body?.dataset?.catalogueAudience==='public';
  const dayKey='invsto:manny-catalogue-date',datePattern=/^\d{4}-\d{2}-\d{2}$/;
  const easternDay=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const dateLabel=value=>new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'long',month:'long',day:'numeric',year:'numeric'}).format(new Date(value+'T12:00:00Z'));
  const timeLabel=value=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value));
+ const startLabel=value=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value));
  let client,record=null,data=null,busy=false,booted=false,signedAt=0;
  function message(text,error=false){$('message').textContent=text;$('message').className=error?'error':'';}
  function missing(items){return items.filter(i=>!(Number(i.retail_price)>0)||!i.images?.length);}
@@ -21,10 +23,14 @@
  }
  function render(){
   const items=data.items||[],groups=[...new Set(items.map(i=>i.category||'Other'))],prices=items.map(i=>Number(i.retail_price)).filter(p=>p>0);
-  document.title=`${data.recipient} · eBay catalogue · ${data.source_date} | OG Jewelers`;
+  const named=Boolean(data.source_start_at);
+  document.title=`${named?data.title+' · ':''}${data.recipient} · eBay catalogue · ${data.source_date} | OG Jewelers`;
+  $('catalogue-title').innerHTML=named?`${C.escape(data.title)}<br><em>for your consideration.</em>`:'New inventory<br><em>for your consideration.</em>';
+  $('catalogue-eyebrow').textContent=named?'OG JEWELERS / '+data.title.toUpperCase():'OG JEWELERS / NEW ARRIVALS';
+  $('footer-kind').textContent=named?`${data.title} · Retail catalogue`:'Retail catalogue';
   $('report').hidden=false;$('print-report').hidden=!items.length;
   $('recipient').textContent=`Prepared for ${data.recipient} · eBay`;$('footer-recipient').textContent=`${data.recipient} at eBay`;
-  $('report-date').textContent=`Inventory added ${dateLabel(data.source_date)} · Eastern time`;
+  $('report-date').textContent=named?`New items created from ${startLabel(data.source_start_at)}`:`Inventory added ${dateLabel(data.source_date)} · Eastern time`;
   $('prepared-at').textContent=`Prepared ${timeLabel(data.prepared_at)}`;
   $('style-count').textContent=items.length;$('type-count').textContent=groups.length;
   $('price-range').textContent=prices.length?(Math.min(...prices)===Math.max(...prices)?C.money(prices[0]):`${C.money(Math.min(...prices))} – ${C.money(Math.max(...prices))}`):'Pricing in progress';
@@ -33,7 +39,7 @@
   const incomplete=missing(items);$('readiness').hidden=Boolean(token)||!incomplete.length;
   $('readiness').innerHTML=`<strong>${incomplete.length} ${incomplete.length===1?'item needs':'items need'} attention before publishing</strong><p>All additions are included below. Finish their photos or retail prices in Stock, then gather again.</p>`+incomplete.map(i=>`<a href="#piece-${C.escape(i.id)}">${C.escape(i.name)} · ${[!(Number(i.retail_price)>0)&&'Retail price needed',!i.images?.length&&'Photo needed'].filter(Boolean).join(' · ')}</a>`).join('');
   $('category-index').innerHTML=groups.map((g,n)=>`<a href="#category-${n}">${C.escape(g)}<b>${items.filter(i=>(i.category||'Other')===g).length}</b></a>`).join('');
-  $('item-index').innerHTML=items.length?`<ol class="index-list">${items.map((i,n)=>`<li><span class="index-number">${String(n+1).padStart(2,'0')}</span><a href="#piece-${C.escape(i.id)}">${C.escape(i.name)}</a><strong>${i.retail_price>0?C.money(i.retail_price):'Price pending'}</strong></li>`).join('')}</ol>`:'<p>No new item styles were added on this date.</p>';
+  $('item-index').innerHTML=items.length?`<ol class="index-list">${items.map((i,n)=>`<li><span class="index-number">${String(n+1).padStart(2,'0')}</span><a href="#piece-${C.escape(i.id)}">${C.escape(i.name)}</a><strong>${i.retail_price>0?C.money(i.retail_price):'Price pending'}</strong></li>`).join('')}</ol>`:named?'<p>No new item styles have been created since this collection started. Gather latest items after the workers add inventory.</p>':'<p>No new item styles were added on this date.</p>';
   $('collection').innerHTML=groups.map((g,n)=>`<section class="category-section" id="category-${n}"><header class="category-heading"><div><p class="eyebrow">THE SELECTION / ${String(n+1).padStart(2,'0')}</p><h2>${C.escape(g)}</h2></div><a href="#index">Back to index ↑</a></header><div class="review-grid">${items.filter(i=>(i.category||'Other')===g).map(i=>piece(i,items.indexOf(i)+1)).join('')}</div></section>`).join('');
   updateActions();
  }
@@ -57,9 +63,9 @@
  async function useRecord(row){record=row;data=await signDraft(row.draft);render();}
  async function gather(){
   if(busy||!client)return;
-  const date=$('source-date').value;if(!datePattern.test(date)){message('Choose the date the inventory was added.',true);return;}
-  lock(true);message('Gathering every item added on the selected Eastern date…');
-  try{const row=await rpc('prepare_inventory_daily_catalogue',{_date:date,_recipient:'Manny'});await useRecord(row);try{localStorage.setItem(dayKey,date);}catch{}history.replaceState(null,'',`?date=${date}`);message(`${data.items.length} item styles gathered for Manny. ${missing(data.items).length?'See the items needing attention below.':'Review the selection, then publish the share link when ready.'}`);}
+  const date=$('source-date').value;if(!collectionMode&&!datePattern.test(date)){message('Choose the date the inventory was added.',true);return;}
+  lock(true);message(collectionMode?'Gathering every new item since this collection started…':'Gathering every item added on the selected Eastern date…');
+  try{const row=await rpc(collectionMode?'prepare_inventory_collection_catalogue':'prepare_inventory_daily_catalogue',collectionMode?{_key:collectionKey}:{_date:date,_recipient:'Manny'});await useRecord(row);if(!collectionMode){try{localStorage.setItem(dayKey,date);}catch{}history.replaceState(null,'',`?date=${date}`);}message(`${data.items.length} item styles gathered for Manny. ${missing(data.items).length?'See the items needing attention below.':!data.items.length?'Gather again after new items are created.':'Review the selection, then publish the share link when ready.'}`);}
   catch(e){message(e.message,true);}finally{lock(false);}
  }
  async function publish(value){
@@ -77,11 +83,22 @@
   if(booted||!window.supabase?.auth)return;booted=true;client=window.supabase;
   try{
    const{data:auth}=await client.auth.getSession();if(!auth.session)throw new Error('Please sign in to Invsto, then reopen the Manny catalogue.');
-   const{data:rows,error}=await client.from('inventory_daily_catalogues').select('*').eq('recipient','Manny').order('updated_at',{ascending:false}).limit(50);if(error)throw error;
+   const{data:rows,error}=await client.from('inventory_daily_catalogues').select('*').eq('recipient','Manny').eq('catalogue_key',collectionKey||'daily').order('updated_at',{ascending:false}).limit(50);if(error)throw error;
+   $('catalogue-modes').innerHTML=`<a href="inventory-daily-catalogue.html"${!collectionMode?' aria-current="page"':''}>New arrivals by day</a><a href="inventory-daily-catalogue.html?collection=rare-finds"${collectionKey==='rare-finds'?' aria-current="page"':''}>Rare Finds</a>`;
+   $('staff-panel').hidden=false;$('back-catalogues').hidden=false;
+   if(collectionMode){
+    const saved=rows?.[0];if(!saved)throw new Error('This collection is not available. Open Rare Finds from Client catalogues.');
+    $('builder-heading').textContent=`${saved.draft.title} · Prepared for Manny`;
+    $('builder-description').textContent='A separate selection of new pieces, with the same photography, retail prices and shareable catalogue.';
+    $('daily-fields').hidden=true;$('gather').textContent='Gather latest items';
+    $('collection-start').hidden=false;$('collection-start').textContent=`Starts ${startLabel(saved.source_start_at)} · This starting point stays fixed.`;
+    $('date-help').textContent='Gather all items created from this starting point forward, including on future days. Older items and restocks stay out. Review, then publish to update this collection’s own share link.';
+    await useRecord(saved);await gather();return;
+   }
    let remembered='';try{remembered=localStorage.getItem(dayKey)||'';}catch{}
    const explicit=params.get('date'),latest=rows?.[0];
    const date=datePattern.test(explicit||'')?explicit:latest?.source_date||(datePattern.test(remembered)?remembered:easternDay());
-   $('source-date').value=date;$('source-date').max=easternDay();$('staff-panel').hidden=false;$('back-catalogues').hidden=false;
+   $('source-date').value=date;$('source-date').max=easternDay();
    const saved=rows?.find(r=>r.source_date===date);
    if(saved){await useRecord(saved);message('Your saved draft is ready. Gather all items again to include the latest additions before sharing.');}
    else message('Choose the inventory date, then click Gather all items.');

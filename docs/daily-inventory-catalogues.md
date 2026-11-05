@@ -1,5 +1,9 @@
 # Manny's eBay catalogue
 
+**Rare Finds** is a separate named catalogue for Manny. Open **Stock → Rare Finds · Manny**, or choose **Rare Finds** on the catalogue builder / Client catalogues page. Its permanent starting point is **November 5, 2026 at 1:33 PM America/New_York (18:33 UTC)**, when the collection was requested. It includes active item types created at or after that instant and before the latest gather, across future calendar days. Editing or restocking an older item never adds it. The starting point is stored on the server and cannot move when a worker opens it later.
+
+Opening Rare Finds gathers its latest draft automatically; **Gather latest items** refreshes it while open. It has its own share token and published snapshot, so it cannot replace the daily Manny catalogue. Review and publish when ready; the title, photos, zoom, retail prices, index and PDF use the same renderer. The recipient sees only the latest published selection. Missing photos/prices still block publishing.
+
 Open **Stock → Manny · eBay catalogue** (also on Client catalogues).
 
 1. Choose the day the new inventory items were created, in America/New_York time.

@@ -5,16 +5,17 @@ import vm from 'node:vm';
 const read=p=>readFile(new URL('../'+p,import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const saved={id:'draft-id',share_token:'share-id',source_date:'2026-11-05',recipient:'Manny',revision:1,published:null,draft:{recipient:'Manny',source_date:'2026-11-05',prepared_at:'2026-11-05T14:00:00Z',items:[{id:'one',name:'Silver <Pendant>',category:'Pendants',retail_price:420,reference:'OG1',photos:['one.jpg']}]}};
-async function harness({publicView=false,incomplete=false,branded=false,published=false}={}){
+async function harness({publicView=false,incomplete=false,branded=false,published=false,collection=false}={}){
  const elements=new Map(),handlers=new Map(),calls=[],storage=new Map(),history=[],scripts=[];
  const staffIds=new Set(['staff-panel','gather','today','source-date','publish','unpublish','copy-link','draft-actions','share-panel','back-catalogues']);
  const el=id=>{if(branded&&staffIds.has(id))return null;if(!elements.has(id))elements.set(id,{id,hidden:false,disabled:false,value:'',textContent:'',innerHTML:'',addEventListener:(type,fn)=>handlers.set(id+':'+type,fn)});return elements.get(id);};
- const row=structuredClone(saved);if(incomplete)row.draft.items[0].retail_price=null;if(published)row.published=structuredClone(row.draft);
- const client={auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},from:()=>({select:()=>({eq:()=>({order:()=>({limit:async()=>({data:[row]})})})})}),storage:{from:()=>({createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:'https://photos.example/'+path}))})})},rpc:async(name,args)=>{calls.push({name,args});return{data:structuredClone(row)}}};
+ const row=structuredClone(saved);if(collection){row.catalogue_key='rare-finds';row.source_start_at='2026-11-05T18:33:00Z';Object.assign(row.draft,{title:'Rare Finds',source_start_at:row.source_start_at,catalogue_key:'rare-finds'});}if(incomplete)row.draft.items[0].retail_price=null;if(published)row.published=structuredClone(row.draft);
+ const queries=[];const query={select:()=>query,eq:(key,value)=>{queries.push({key,value});return query;},order:()=>query,limit:async()=>({data:[row]})};
+ const client={auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},from:()=>query,storage:{from:()=>({createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:'https://photos.example/'+path}))})})},rpc:async(name,args)=>{calls.push({name,args});return{data:structuredClone(row)}}};
  const document={body:{dataset:{catalogueAudience:branded?'public':'staff'}},readyState:'complete',getElementById:el,querySelectorAll:()=>[],addEventListener:()=>{},createElement:()=>({}),head:{append:s=>{scripts.push(s.src);queueMicrotask(()=>s.onload());}}};
- const context={document,Intl,URL,URLSearchParams,Date,Map,Set,Number,Promise,setTimeout,clearTimeout,queueMicrotask,setInterval:()=>{},navigator:{},location:{search:publicView?'?share=abc':'',href:'https://app.example/inventory-daily-catalogue.html'},history:{replaceState:(_s,_t,url)=>history.push(url)},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},supabase:client,CatalogueViewer:{},fetch:async()=>({ok:true,json:async()=>({...row.draft,items:row.draft.items.map(i=>({...i,images:['https://photos.example/one.jpg']}))})})};context.window=context;
+ const context={document,Intl,URL,URLSearchParams,Date,Map,Set,Number,Promise,setTimeout,clearTimeout,queueMicrotask,setInterval:()=>{},navigator:{},location:{search:publicView?'?share=abc':collection?'?collection=rare-finds':'',href:'https://app.example/inventory-daily-catalogue.html'},history:{replaceState:(_s,_t,url)=>history.push(url)},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},supabase:client,CatalogueViewer:{},fetch:async()=>({ok:true,json:async()=>({...row.draft,items:row.draft.items.map(i=>({...i,images:['https://photos.example/one.jpg']}))})})};context.window=context;
  vm.runInNewContext(await read('catalogue-core.js'),context);vm.runInNewContext(await read('inventory-daily-catalogue.js'),context);await tick();await tick();
- return{elements,el,handlers,calls,storage,history,scripts};
+ return{elements,el,handlers,calls,storage,history,scripts,queries};
 }
 test('saved Eastern date remains selected next morning and Gather refreshes the complete dated set',async()=>{
  const h=await harness();assert.equal(h.el('source-date').value,'2026-11-05');assert.equal(h.el('style-count').textContent,1);assert.match(h.el('recipient').textContent,/Manny · eBay/);
@@ -31,6 +32,23 @@ test('shared review has retail prices, safe anchors, no staff panel or authentic
 
 test('published links always use the branded website regardless of the staff page origin',async()=>{
  const h=await harness({published:true});assert.equal(h.el('share-link').value,'https://www.og-jewelers.com/representative-catalogue?share=share-id');assert.equal(h.el('open-link').href,h.el('share-link').value);
+});
+
+test('Rare Finds auto-gathers its separate draft using a server-owned cutoff and keeps the collection URL',async()=>{
+ const h=await harness({collection:true});
+ assert.ok(h.queries.some(q=>q.key==='catalogue_key'&&q.value==='rare-finds'));
+ assert.equal(h.calls[0].name,'prepare_inventory_collection_catalogue');assert.deepEqual(Object.keys(h.calls[0].args),['_key']);
+ assert.equal(h.el('daily-fields').hidden,true);assert.match(h.el('collection-start').textContent,/November 5, 2026.*1:33 PM EST/);
+ assert.match(h.el('catalogue-title').innerHTML,/Rare Finds/);assert.match(h.el('report-date').textContent,/1:33 PM EST/);
+ await h.handlers.get('gather:click')();assert.equal(h.calls.length,2);assert.equal(h.history.length,0);assert.equal(h.storage.size,0);
+ const daily=await harness();assert.ok(daily.queries.some(q=>q.key==='catalogue_key'&&q.value==='daily'));
+});
+
+test('published Rare Finds uses its name and starting date in the shared renderer without staff access',async()=>{
+ const h=await harness({collection:true,publicView:true,branded:true});
+ assert.match(h.el('catalogue-title').innerHTML,/Rare Finds/);assert.equal(h.el('footer-kind').textContent,'Rare Finds · Retail catalogue');
+ assert.equal(h.el('recipient').textContent,'Prepared for Manny · eBay');assert.match(h.el('report-date').textContent,/November 5, 2026.*1:33 PM EST/);
+ assert.equal(h.scripts.length,0);assert.equal(h.calls.length,0);
 });
 
 test('branded shell renders without staff elements and never attempts staff sign-in, even with a missing link',async()=>{

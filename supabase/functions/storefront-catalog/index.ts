@@ -57,7 +57,7 @@ async function sharedCatalogue(client: any, token: string, projectUrl: string, d
     for (const row of urls || []) if (row.path && row.signedUrl) signed.set(row.path, row.signedUrl);
   }
   return json(200, {
-    ...(daily ? {title:data.title,recipient:data.recipient,company:"eBay",source_date:data.source_date,prepared_at:data.prepared_at} : {title:data.title,introduction:data.introduction,credit:data.credit}), currency: "USD",
+    ...(daily ? {title:data.title,recipient:data.recipient,company:"eBay",source_date:data.source_date,catalogue_key:data.catalogue_key,source_start_at:data.source_start_at,prepared_at:data.prepared_at} : {title:data.title,introduction:data.introduction,credit:data.credit}), currency: "USD",
     items: (data.items || []).map((item: any) => ({
       id: item.id, name: item.name, description: item.description,
       retail_price: item.retail_price, category: item.category,

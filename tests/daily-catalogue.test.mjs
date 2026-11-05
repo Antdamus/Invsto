@@ -19,6 +19,7 @@ before(async()=>{
  const filters=await read('supabase/migrations/20261011001000_catalogue_inventory_filters.sql');
  await db.exec(filters.slice(filters.indexOf('create or replace function public.catalogue_piece_type'),filters.indexOf('create or replace function public.browse_catalogue_inventory')));
  await db.exec(await read('supabase/migrations/20261105080000_daily_inventory_catalogues.sql'));
+ await db.exec(await read('supabase/migrations/20261105183300_rare_finds_catalogue.sql'));
 });
 after(()=>db?.close());
 const prep=async(date,recipient='Manny')=>(await db.query('select * from prepare_inventory_daily_catalogue($1,$2)',[date,recipient])).rows[0];
@@ -61,10 +62,39 @@ test('incomplete items are visible in draft, block publication, and can be fixed
  await assert.rejects(publish(await prep('2001-01-01')),/no items/);
 });
 test('anonymous/non-staff cannot read drafts or create a shared selection; direct writes forbidden',async()=>{
- await db.exec('set role anon');await assert.rejects(db.query('select * from inventory_daily_catalogues'),/permission denied/);await assert.rejects(prep('2026-11-05'),/permission denied/);
- await db.exec("reset role;set test.staff='no';set role authenticated");assert.equal((await db.query('select * from inventory_daily_catalogues')).rows.length,0);await assert.rejects(prep('2026-11-05'),/staff access/);
+ await db.exec('set role anon');await assert.rejects(db.query('select * from inventory_daily_catalogues'),/permission denied/);await assert.rejects(prep('2026-11-05'),/permission denied/);await assert.rejects(db.query("select prepare_inventory_collection_catalogue('rare-finds')"),/permission denied/);
+ await db.exec("reset role;set test.staff='no';set role authenticated");assert.equal((await db.query('select * from inventory_daily_catalogues')).rows.length,0);await assert.rejects(prep('2026-11-05'),/staff access/);await assert.rejects(db.query("select prepare_inventory_collection_catalogue('rare-finds')"),/staff access/);
  await assert.rejects(db.query('select shared_inventory_daily_catalogue(gen_random_uuid())'),/permission denied/);
  await db.exec("reset role;set test.staff='yes';set role authenticated");await assert.rejects(db.exec("update inventory_daily_catalogues set published=draft"),/permission denied/);await db.exec('reset role');
+});
+
+test('Rare Finds has a fixed start, spans days, excludes older edits, and publishes independently',async()=>{
+ const original=(await db.query("select * from inventory_daily_catalogues where catalogue_key='rare-finds'")).rows[0];
+ assert.equal(new Date(original.source_start_at).toISOString(),'2026-11-05T18:33:00.000Z');
+ assert.equal(original.draft.title,'Rare Finds');
+ await db.exec('begin');
+ try{
+  // A past cutoff makes the multi-day test independent of the test runner clock.
+  await db.exec("update inventory_daily_catalogues set source_start_at='2026-09-29T17:33:00Z',source_date='2026-09-29' where catalogue_key='rare-finds'");
+  const before=await insert('Older edited pendant','2026-09-29T17:32:59Z');
+  const start=await insert('At the start','2026-09-29T17:33:00Z');
+  const next=await insert('Next day','2026-09-30T17:00:00Z');
+  const future=await insert('Future dated',new Date(Date.now()+86400000).toISOString());
+  await db.query('update item_types set sale_price=900 where id=$1',[before]);
+  const gather=async()=>(await db.query("select * from prepare_inventory_collection_catalogue('rare-finds')")).rows[0];
+  let rare=await gather();
+  assert.ok(rare.draft.items.some(i=>i.id===start));assert.ok(rare.draft.items.some(i=>i.id===next));assert.ok(!rare.draft.items.some(i=>i.id===before));
+  assert.ok(!rare.draft.items.some(i=>i.id===future)); // Future-dated inventory is not prematurely gathered.
+  const daily=await prep('2026-09-29');const dailyPublished=await publish(daily);
+  assert.notEqual(daily.id,rare.id);assert.notEqual(daily.share_token,rare.share_token);
+  rare=await publish(rare);const publishedCount=(await shared(rare)).items.length;
+  const late=await insert('Another day','2026-10-01T12:00:00Z');rare=await gather();
+  assert.equal(new Date(rare.source_start_at).toISOString(),'2026-09-29T17:33:00.000Z');assert.equal(rare.id,original.id);assert.equal(rare.share_token,original.share_token);
+  assert.ok(rare.draft.items.some(i=>i.id===late));assert.equal((await shared(rare)).items.length,publishedCount);
+  rare=await publish(rare);assert.equal((await shared(rare)).items.length,publishedCount+1);assert.equal((await shared(rare)).title,'Rare Finds');
+  assert.equal((await shared(dailyPublished)).items.length,2);
+  await assert.rejects(db.query("select prepare_inventory_collection_catalogue('daily')"),/Collection not found/);
+ }finally{await db.exec('rollback');}
 });
 test('public review endpoint allowlists retail fields and rejects purchasing/invalid tokens',async()=>{
  let handler;const calls=[];
