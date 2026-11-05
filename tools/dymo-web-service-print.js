@@ -183,8 +183,11 @@ function choosePrinter(printers, preferredPrinterName) {
 
 function buildPrintParams(roll = 'default') {
   if (!['default', 'Left', 'Right'].includes(roll)) throw new Error('Invalid printer roll');
-  // DYMO Connect's LabelWriterPrintParams schema. Never use Auto for different stock.
-  return roll === 'default' ? '' : `<LabelWriterPrintParams><TwinTurboRoll>${roll}</TwinTurboRoll></LabelWriterPrintParams>`;
+  // Text quality can feed a blank jewelry tag through DYMO Connect, even when the
+  // same XML prints in its desktop app. Use its barcode/graphics rendering path.
+  // Each call is one journaled copy. Never request Auto roll for different stock.
+  const selectedRoll = roll === 'default' ? '' : `<TwinTurboRoll>${roll}</TwinTurboRoll>`;
+  return `<LabelWriterPrintParams><Copies>1</Copies><PrintQuality>BarcodeAndGraphics</PrintQuality>${selectedRoll}</LabelWriterPrintParams>`;
 }
 
 async function printLabel(baseUrl, printerName, labelXml, copyIndex, totalCopies, roll = 'default', send = requestText) {
@@ -194,11 +197,14 @@ async function printLabel(baseUrl, printerName, labelXml, copyIndex, totalCopies
   params.set("labelXml", labelXml);
   params.set("labelSetXml", "");
 
-  await send(baseUrl, "POST", "/PrintLabel", params.toString(), {
+  const response = await send(baseUrl, "POST", "/PrintLabel", params.toString(), {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
   });
+  if (/^\s*"?false"?\s*$/i.test(String(response))) {
+    throw new Error('DYMO did not accept the label. Check the selected printer and DYMO Connect Web Service before retrying.');
+  }
 
-  console.log(`Printed copy ${copyIndex}/${totalCopies} on ${printerName}`);
+  console.log(`DYMO accepted copy ${copyIndex}/${totalCopies} on ${printerName}`);
 }
 
 async function main() {

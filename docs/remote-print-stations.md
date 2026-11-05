@@ -54,6 +54,21 @@ Jobs and label XML are retained in the database in this initial release; recent-
 
 ## Troubleshooting
 
+Helper **1.2.1** explicitly uses `BarcodeAndGraphics` quality for DYMO XML labels.
+With DYMO Connect 1.6.4.6 on the 450 Twin Turbo, omitting print quality fed a blank
+jewelry tag while the same XML printed correctly in the desktop app. One label
+using the new parameters was physically confirmed readable on the affected computer.
+Each call still submits one copy; explicit Left/Right selection is preserved.
+Update existing helpers with the normal installer; website publication alone does
+not replace software on printing computers. Check one physical label after updating.
+
+If the printer is connected but `/PrintLabel` returns 400 with a blank exception,
+close DYMO Connect, **Exit** DYMO Connect Web Service from its tray menu, and reopen
+DYMO Connect Web Service. In the observed failure, merely Stop/Start on the listener
+did not recover printing; a full process restart did. Print stations shows this
+guidance on affected jobs. This does not replay failed jobs. A manual retry repeats
+the full original quantity, so inspect the physical output first.
+
 Helper **1.1.1** searches the official DYMO loopback range 41951–41960 on 127.0.0.1 and localhost, using bounded parallel read-only probes. It prefers a service that reports the exact paired printer connected, then rechecks that service before every print. If the service moves or loses the printer, it rediscovers. A connected Copy 1 or differently named printer is never substituted. No changes to DYMO's single-port setting are needed for that supported range.
 
 After updating, open **Diagnose Invsto Printer** on the desktop (or `Diagnose-Print-Station.cmd` in the extracted download). It lists each responding service, printer names and DYMO connection flags, including the saved paired name. It never decrypts credentials, polls/claims jobs, submits labels, or changes the journal. Share its output instead of `station.json`. Normal queued jobs can resume automatically when the helper finds its printer again.

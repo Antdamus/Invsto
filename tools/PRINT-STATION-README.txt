@@ -1,4 +1,4 @@
-INVSTO PRINT STATION 1.2.0 - WINDOWS
+INVSTO PRINT STATION 1.2.1 - WINDOWS
 
 1. Install DYMO Connect and confirm your LabelWriter appears there.
 2. Extract all files from this ZIP into a folder.
@@ -77,3 +77,15 @@ The PDF helper checks the exact Windows printer queue, independently of DYMO's w
 service. It never uses the Windows default printer or another connected printer.
 "Sent to printer" does not confirm physical output. Check the printer, especially
 before requesting another copy after an interruption.
+
+HELPER 1.2.1: BLANK LABELS AND DYMO SERVICE RECOVERY
+Item, bag and location labels use BarcodeAndGraphics print quality. Each submission
+still prints exactly one copy on the selected roll. Update by extracting this ZIP
+and running Install-Print-Station.cmd; existing pairings and journals are kept.
+Check one physical label for readable text and QR codes before printing a batch.
+
+If DYMO is connected but PrintLabel returns 400, close DYMO Connect, right-click
+DYMO Connect Web Service in the system tray and choose Exit, then reopen DYMO
+Connect Web Service from Start. Stop/Start service alone may not clear the fault.
+Failed or interrupted jobs are not replayed automatically. Check the printer first;
+Send a new request repeats the original full quantity.

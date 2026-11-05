@@ -8,7 +8,7 @@ const { execFileSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const dymo = require('./dymo-web-service-print.js');
 const shipping = require('./shipping-pdf-print.cjs');
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function writeDurable(file, value) {

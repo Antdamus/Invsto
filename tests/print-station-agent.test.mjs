@@ -44,12 +44,30 @@ test('helper rejects non-label documents, external entities and excessive copies
 
 const dymo=require('../tools/dymo-web-service-print.js');
 test('every copy sends the chosen roll in the real DYMO request parameters',async()=>{
- for(const roll of ['Left','Right']){
+ for(const roll of ['default','Left','Right']){
   const requests=[];const {options}=fixture({isTwinTurbo:true,print:(xml,copy,copies,selected)=>dymo.printLabel('https://localhost:41951','DYMO A',xml,copy,copies,selected,async(base,method,route,body)=>requests.push({method,route,params:new URLSearchParams(body)}))});
   const result=await processPrintJob({...job(),printer_roll:roll},options);
   assert.equal(result.status,'submitted');assert.equal(requests.length,2);
-  for(const request of requests){assert.equal(request.method,'POST');assert.equal(request.route,'/PrintLabel');assert.equal(request.params.get('printerName'),'DYMO A');assert.equal(request.params.get('labelXml'),job().label_xml);assert.equal(request.params.get('printParamsXml'),`<LabelWriterPrintParams><TwinTurboRoll>${roll}</TwinTurboRoll></LabelWriterPrintParams>`);}
+  for(const request of requests){
+   assert.equal(request.method,'POST');assert.equal(request.route,'/PrintLabel');
+   assert.equal(request.params.get('printerName'),'DYMO A');assert.equal(request.params.get('labelXml'),job().label_xml);
+   const settings=request.params.get('printParamsXml');
+   assert.match(settings,/<Copies>1<\/Copies>/,'Each journaled submission prints exactly one label');
+   assert.match(settings,/<PrintQuality>BarcodeAndGraphics<\/PrintQuality>/,'QR jewelry labels must not use DYMO default Text quality');
+   if(roll==='default')assert.doesNotMatch(settings,/TwinTurboRoll/);
+   else assert.ok(settings.includes(`<TwinTurboRoll>${roll}</TwinTurboRoll>`));
+   assert.doesNotMatch(settings,/Auto/);
+  }
  }
+});
+
+test('DYMO false response stops a batch without counting or replaying an unaccepted label',async()=>{
+ let requests=0;
+ const {state,options}=fixture({print:(xml,copy,copies,roll)=>dymo.printLabel('https://localhost:41951','DYMO A',xml,copy,copies,roll,async()=>{requests++;return 'false';})});
+ const result=await processPrintJob(job(),options);
+ assert.equal(requests,1);assert.equal(result.status,'uncertain');assert.equal(result.submitted,0);
+ assert.match(result.detail,/did not accept the label/);
+ assert.equal(state.journal,null);
 });
 test('invalid rolls and roll selection on a single-roll printer fail before submission',async()=>{
  for(const [roll,twin] of [['Auto',true],['Left',false],['Right',false],['<Right/>',true]]){

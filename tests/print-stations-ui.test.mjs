@@ -42,6 +42,22 @@ async function openPage(t,admin=true,path='fixture.html'){
 }
 async function begin(page,options={},dymo=false){await page.evaluate(({xml,options,dymo})=>{window.testResult=null;window.testError=null;const action=dymo?dymoModule.printDymoLabelXml(xml,options):window.printStations.printLabel(xml,options);action.then(value=>window.testResult=value).catch(error=>window.testError={message:error.message,cancelled:error.cancelled});},{xml:label,options,dymo});await page.locator('[data-destination]:enabled').waitFor();}
 async function send(page,station,copies){await page.locator('[data-destination]').selectOption(station);if(copies)await page.locator('[data-copies]').fill(String(copies));await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult||window.testError);}
+
+test('failed DYMO jobs explain full service restart and full-quantity retry without sending a job',async t=>{
+ const page=await openPage(t,false,'print-stations.html');
+ await page.evaluate(()=>window.testJobs=[
+  {id:'bad',status:'uncertain',title:'Jewelry tag',station_name:'Sandra <counter>',printer_name:'DYMO',copies:7,submitted_copies:0,created_at:new Date().toISOString(),detail:'POST /PrintLabel returned 400: Error printing label. Exception: .'},
+  {id:'ok',status:'submitted',title:'Successful label',station_name:'Sandra',printer_name:'DYMO',copies:1,submitted_copies:1,created_at:new Date().toISOString()},
+ ]);
+ await page.getByRole('button',{name:'Refresh status'}).click();
+ const recovery=page.locator('.print-recovery');await recovery.waitFor();
+ assert.equal(await recovery.count(),1);assert.match(await recovery.innerText(),/Sandra <counter>/);
+ assert.match(await recovery.innerText(),/Exit/);assert.match(await recovery.innerText(),/repeats all 7 copies/);
+ assert.equal(await page.locator('#print-quality-help').isVisible(),true);
+ assert.equal(await page.evaluate(()=>window.calls.some(c=>/enqueue|retry_label/.test(c.name))),false);
+ await page.setViewportSize({width:320,height:740});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
 test('phone DYMO integration sends copies only to the explicitly chosen offline computer',async t=>{
  const page=await openPage(t);let downloads=0;page.on('download',()=>downloads++);await begin(page,{listenerOnly:true,title:'Watch',barcode:'123'},true);await page.locator('[data-destination]').selectOption('b');assert.match(await page.locator('[data-destination-status]').innerText(),/offline.*stay assigned/);await send(page,'b',3);
  const result=await page.evaluate(()=>({result:window.testResult,calls:window.calls.filter(c=>c.name==='enqueue_label_print'),pref:localStorage.getItem('invsto.print.destination.v1')}));

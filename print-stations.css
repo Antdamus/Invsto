@@ -22,6 +22,9 @@
 .print-stations-page input { box-sizing:border-box; width:100%; padding:12px; margin:8px 0 14px; border:1px solid #786747; border-radius:10px; background:#302b2d; color:#f5efe6; font:inherit; }
 #print-pair-code { display:block; font:700 clamp(18px,4vw,28px) monospace; letter-spacing:1px; overflow-wrap:anywhere; margin:15px 0; }
 .print-download-link { display:inline-block; text-decoration:none; }
+.print-recovery { margin:14px 0; padding:16px; border:1px solid #b99a58; border-left:4px solid #edc994; border-radius:12px; background:#edc9940c; }
+.print-recovery > strong { color:#edc994; }
+.print-recovery p { margin:10px 0; }
 @media(max-width:600px) { .print-stations-page { padding:12px; } .print-stations-page section { padding:14px; } .print-station-dialog { padding:16px; } }
 
 .print-station-dialog .print-dialog-actions { position:sticky; bottom:0; padding:12px 0 2px; background:#211e20; }
