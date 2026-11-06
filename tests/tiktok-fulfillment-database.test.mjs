@@ -30,11 +30,29 @@ async function apiSetup(){
   await db.exec(`create role service_role;create schema net;create schema cron;alter table auth.users add column if not exists email text;
    create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$select 1::bigint$$;
    create function cron.schedule(name text,schedule text,command text) returns bigint language sql as $$select 1::bigint$$;`);
-  await db.exec(await readFile(new URL('../supabase/migrations/20261025193000_tiktok_api_connection.sql',import.meta.url),'utf8'));apiInstalled=true;
+  await db.exec(await readFile(new URL('../supabase/migrations/20261025193000_tiktok_api_connection.sql',import.meta.url),'utf8'));
+  const weekly=await readFile(new URL('../supabase/migrations/20261101040000_weekly_marketplace_sales.sql',import.meta.url),'utf8');
+  await db.exec(weekly.slice(weekly.indexOf('alter table public.tiktok_order_lines add column api_cancelled_item_amount'),weekly.indexOf('\ncreate function public.weekly_sales_money')));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261106153000_tiktok_api_import_alias.sql',import.meta.url),'utf8'));apiInstalled=true;
  }
  await db.exec(`truncate tiktok_api_connection,tiktok_api_oauth_states;insert into tiktok_api_connection(shop_id,shop_cipher,shop_name,credentials,authorized_by,access_expires_at,authorization_expires_at,dispatch_token,lease_until)
  values('7494924429697648999','cipher','Real test shop','v1.encrypted.fixture','${actor}',now()+interval '1 day',now()+interval '90 days','${request}',now()+interval '3 minutes');`);
 }
+test('API cancellation amounts avoid the PL/pgSQL row-variable alias collision and keep imports atomic',async()=>{
+ await apiSetup();await db.query('select claim_tiktok_api_worker($1)',[request]);
+ const row={order_number:orders[0].order_number,sku_id:lines[0].sku_id,title:'Ring',quantity:1,buyer_username:'buyer',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',api_buyer_id:'7021436810468230477',api_update_time:new Date().toISOString(),api_cancelled_item_amount:'4.12'};
+ const run=()=>db.query('select import_tiktok_api_order($1,$2,$3) r',[request,JSON.stringify([row]),'f'.repeat(64)]);
+ const definition=(await db.query("select pg_get_functiondef('public.import_tiktok_api_order(uuid,jsonb,text)'::regprocedure) d")).rows[0].d;
+ await db.exec(definition.replaceAll('imported_line','l'));
+ await assert.rejects(run(),error=>error.code==='42702'&&/l\.order_id/.test(error.message));
+ assert.equal((await db.query('select count(*)::int n from tiktok_order_imports')).rows[0].n,0);
+ const fix=await readFile(new URL('../supabase/migrations/20261106153000_tiktok_api_import_alias.sql',import.meta.url),'utf8');
+ await db.exec(fix);await db.exec(fix);
+ assert.equal((await run()).rows[0].r.refreshed,1);
+ assert.equal(Number((await db.query('select api_cancelled_item_amount from tiktok_order_lines where id=$1',[lines[0].id])).rows[0].api_cancelled_item_amount),4.12);
+ assert.equal((await run()).rows[0].r.already_imported,true);
+});
+
 test('TikTok API worker claims once, imports idempotently, preserves evidence and existing handles, and audits its source',async()=>{
  await apiSetup();await objects();await attach();
  await db.query("update tiktok_orders set stage='preparing',notes='Keep notes',seller_note='Keep seller note',recipient_name='Known customer',ship_by_date='2026-11-02',ship_by_source='staff' where id=$1",[orders[0].id]);

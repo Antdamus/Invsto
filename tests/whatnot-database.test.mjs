@@ -16,6 +16,10 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261031234500_whatnot_queue_screenshots.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261101000500_whatnot_marketplace_status.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261101003000_whatnot_shipping_label_summary.sql',import.meta.url),'utf8'));
+ const legacy=(await run("select pg_get_functiondef('public.whatnot_queue_summary(text,text,text,integer,text,date,text,text)'::regprocedure) definition"))[0].definition;
+ await db.exec(legacy.replace('public.whatnot_queue_summary(', 'public.whatnot_queue_summary_before_optimization('));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261106154500_whatnot_recent_order_cursor.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261106160000_whatnot_pending_queue_performance.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('all historical orders import; missing filters show only matching lines and counts',async()=>{
@@ -153,4 +157,25 @@ test('Whatnot label summaries distinguish attached PDFs, platform issuance, and 
  assert.deepEqual(rows.map(l=>l.label_state),['attached','issued','missing','review','missing']);
  const filtered=(await run("select whatnot_queue_summary('pending','label-scope','missing',0,'all',null,'due','all') as s"))[0].s.groups[0].lines;
  assert.deepEqual(filtered.map(l=>[l.id,l.order_label_pdfs,l.order_labels_issued_only,l.order_label_pdfs_to_check]),[[c.id,2,1,1]]);
+});
+
+test('optimized queue preserves all views, full-order shares, global history, labels and filtered counts',async()=>{
+ const mixed=record('975001');mixed.buyer_id='queue-parity';mixed.username='parity';mixed.lines.push({...mixed.lines[0],id:'975002',unit_price:3,quantity:1});await save(mixed);
+ await run("update whatnot_order_lines set work_state='external_history' where id='975002'");
+ const cancelled=record('975003');cancelled.buyer_id='queue-parity';cancelled.username='parity';cancelled.status='cancelled';await save(cancelled);
+ const variants=[
+  ...['pending','review','history','all','closeout','market_open','market_completed','market_cancelled','market_failed','unfulfilled'].map(view=>[view,'','all',0,'all',null,'due','all']),
+  ['pending','parity','all',0,'all',null,'newest','cancellations'],
+  ['pending','parity','all',0,'all',null,'due','none'],
+  ['all','label-scope','missing',0,'all',null,'value','all'],
+  ['pending','screenshotBuyer','no_screenshot',0,'all',null,'due','all'],
+  ['all','','all',40,'all',null,'oldest','all'],
+  ['all','','all',0,'all','2026-10-27','due','all'],
+  ['all','!scan:12345670','all',0,'all',null,'due','all'],
+ ];
+ for(const args of variants){
+  const [actual]=await run('select whatnot_queue_summary($1,$2,$3,$4,$5,$6,$7,$8) result',args);
+  const [before]=await run('select whatnot_queue_summary_before_optimization($1,$2,$3,$4,$5,$6,$7,$8) result',args);
+  assert.deepEqual(actual.result,before.result,JSON.stringify(args));
+ }
 });

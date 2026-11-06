@@ -10,8 +10,12 @@ export function safeUrl(value) {
   if (!value) return null;
   try { const u = new URL(value); return u.protocol === 'https:' && ['whatnot.com','www.whatnot.com'].includes(u.hostname) && !u.username && !u.password ? u.href : null; } catch { return null; }
 }
-export function money(value) {
-  if (!value || typeof value.amount !== 'string' || !/^\d+(\.\d{1,6})?$/.test(value.amount) || !/^[A-Z]{3}$/.test(value.currency)) throw new WhatnotError('Whatnot returned an invalid amount.');
+export function money(value, field = 'price', signed = false) {
+  const decimal = signed ? /^-?\d+(\.\d{1,6})?$/ : /^\d+(\.\d{1,6})?$/;
+  if (!value || typeof value.amount !== 'string' || !decimal.test(value.amount) || !/^[A-Z]{3}$/.test(value.currency)) {
+    const sample = /^[+\-\d.eE]{1,80}$/.test(String(value?.amount)) ? String(value.amount) : typeof value?.amount;
+    throw new WhatnotError(`Whatnot returned an invalid ${field} amount (${sample}).`);
+  }
   return {amount:value.amount,currency:value.currency};
 }
 export function date(value) {
@@ -32,7 +36,7 @@ export function mapOrder(order, items, shipments, show = null) {
     if (item.shipment_id && !shipment) throw new WhatnotError('A shipment could not be verified. The order was not imported.');
     // Replacement IDs are not package coverage. Only use the exact item.shipment_id.
     const current = shipment && !shipment.replacement_shipment_id && !String(shipment.status).startsWith('cancelled');
-    const unit = money(item.unit_price);
+    const unit = money(item.unit_price, 'item price');
     const due = current ? date(shipment.dropoff_due) : null;
     return {id:item.id,order_id:id,title:item.purchased_item?.title || 'Title not provided',sku:item.purchased_item?.sku || null,
       product_id:item.product_id || null,quantity:item.quantity,unit_price:unit.amount,currency:unit.currency,
@@ -43,7 +47,9 @@ export function mapOrder(order, items, shipments, show = null) {
       ship_by_date:due?.slice(0,10) || null,dropoff_due:due,
       holds:shipment?.required_actions || [],replacement_shipment_id:shipment?.replacement_shipment_id || null};
   });
-  const totals = Object.fromEntries(['subtotal','shipping','tax','total'].map(k => [k,money(order.amounts?.[k])]));
+  // Provider totals can be signed (including historical adjustments). Preserve
+  // the exact amount; item unit prices still have to be non-negative.
+  const totals = Object.fromEntries(['subtotal','shipping','tax','total'].map(k => [k,money(order.amounts?.[k], k, true)]));
   if (new Set(Object.values(totals).map(v=>v.currency)).size !== 1 || lines.some(l=>l.currency!==totals.total.currency)) throw new WhatnotError('The order contains inconsistent currencies.');
   return {id,url:safeUrl(order.url),status:order.status,buyer_id:order.buyer?.id || null,
     username:order.buyer?.username || null,customer_name:order.buyer?.display_name || null,

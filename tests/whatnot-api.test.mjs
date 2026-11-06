@@ -9,6 +9,20 @@ const shipments=()=>new Map([['521043001',{id:'521043001',url:'https://www.whatn
 test('official IDs remain strings; line identity is not product or shipment identity',()=>{
  const record=mapOrder(order(),items(),shipments());assert.equal(record.lines[0].id,'9999999999999999999');assert.equal(record.lines[0].tracking_number,'9400000000000000000000');assert.equal(record.lines[0].ship_by_date,'2026-10-29');assert.equal(record.subtotal,'12');assert.equal(record.shipping,'3');assert.equal(record.total,'16');assert.throws(()=>identifier(1484060355));
 });
+
+test('signed provider order totals are retained exactly without allowing negative item prices',()=>{
+ const source=order();
+ for(const key of ['subtotal','shipping','tax','total'])source.amounts[key].amount='-4.120000';
+ const record=mapOrder(source,items(),shipments());
+ for(const key of ['subtotal','shipping','tax','total'])assert.equal(record[key],'-4.120000');
+ assert.equal(record.status,'pending_fulfillment');assert.equal(record.lines[0].unit_price,'6');
+ const negativeItems=items();negativeItems[0].unit_price.amount='-4';
+ assert.throws(()=>mapOrder(source,negativeItems,shipments()),/invalid item price/);
+ for(const value of ['NaN','Infinity','1e2','--4',' 4',4,null]){
+  source.amounts.subtotal.amount=value;
+  assert.throws(()=>mapOrder(source,items(),shipments()),/invalid subtotal/);
+ }
+});
 test('a current last-mile-only tracking code can identify the physical package',()=>{
  const s=shipments();s.get('521043001').tracking={last_mile_tracking_code:'9400000000000000000000'};
  const line=mapOrder(order(),items(),s).lines[0];assert.equal(line.tracking_number,'9400000000000000000000');assert.equal(line.last_mile_tracking,line.tracking_number);

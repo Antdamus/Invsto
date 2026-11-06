@@ -1,6 +1,7 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {client,mapOrder,seal,unseal,WhatnotError} from './whatnot.mjs';
 import {syncWeeklyWhatnot} from './weekly-sales.ts';
+import {syncRecentOrders} from './recent.mjs';
 const CORS={'Access-Control-Allow-Origin':'https://antdamus.github.io','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS','Vary':'Origin','Cache-Control':'no-store'};
 const env=(n:string)=>{const v=Deno.env.get(n);if(!v)throw new WhatnotError('Whatnot server setup is incomplete.');return v;};
 const reply=(status:number,data:unknown)=>new Response(JSON.stringify(data),{status,headers:{...CORS,'Content-Type':'application/json'}});
@@ -12,31 +13,33 @@ async function worker(db:any,token:string){
  try{
   if(!check(await db.rpc('whatnot_api_authorizer_allowed',{_user:c.authorized_by})))throw new WhatnotError('An active administrator must reconnect Whatnot.');
   const api=client(await unseal(c.credentials,env('WHATNOT_TOKEN_ENCRYPTION_KEY')));
-  const shipments=new Map(),shows=new Map();let saved=0;
+  const shipments=new Map(),shows=new Map(),imported=new Set();let saved=0;
   async function importOrder(order:any){
+   if(imported.has(order.id))return;
    const items=await api.items(order.id);
    for(const item of items)if(item.shipment_id&&!shipments.has(item.shipment_id))shipments.set(item.shipment_id,await api.read(`/shipments/${item.shipment_id}`));
    if(order.show_id&&!shows.has(order.show_id))shows.set(order.show_id,await api.read(`/shows/${order.show_id}`));
    const record=mapOrder(order,items,shipments,shows.get(order.show_id));
-   check(await db.rpc('import_whatnot_worker_order',{_token:token,_record:record}));saved++;
+   check(await db.rpc('import_whatnot_worker_order',{_token:token,_record:record}));saved++;imported.add(order.id);
   }
-  const p=await api.page('/orders',c.full_in_progress?c.page_cursor:null,30);
+  // Persist recent progress independently: a bad historical record must not
+  // prevent the next run from continuing the recent-order catch-up.
+  const recent=await syncRecentOrders(db,c,token,api,importOrder);
+  const p=c.full_in_progress?await api.page('/orders',c.page_cursor,30):{data:[],next_cursor:null};
   for(const o of p.data)await importOrder(o);
-  // While a backfill is running, periodically revisit the newest orders too.
-  if(c.full_in_progress&&c.page_cursor){const recent=await api.page('/orders',null,5);for(const o of recent.data)if(!p.data.some((x:any)=>x.id===o.id))await importOrder(o);}
   {
    // Labels can change hours after a sale while the first history import is still paging.
    let work=db.from('whatnot_order_lines').select('order_id,synced_at,whatnot_orders!inner(status)').eq('work_state','pending');
    if(c.full_in_progress)work=work.in('whatnot_orders.status',['pending','pending_fulfillment','completed']);
    const pending=check(await work.order('synced_at').order('id').limit(50));
-   const ids=[...new Set(pending.map((l:any)=>l.order_id))].filter(id=>!p.data.some((x:any)=>x.id===id)).slice(0,c.full_in_progress?10:20);
+   const ids=[...new Set(pending.map((l:any)=>l.order_id))].filter(id=>!imported.has(id)).slice(0,c.full_in_progress?10:20);
    for(const id of ids)await importOrder(await api.read(`/orders/${id}`));
   }
   const more=c.full_in_progress&&Boolean(p.next_cursor);
   const changes=c.full_in_progress?{page_cursor:more?p.next_cursor:null,full_in_progress:more,orders_processed:c.orders_processed+p.data.length,...(!more?{last_full_sync_at:new Date().toISOString()}:{} )}:{};
   try{await syncWeeklyWhatnot(db,api);}catch{console.warn('Weekly Whatnot report deferred; order sync continues.');}
-  check(await db.from('whatnot_api_connection').update({...changes,last_synced_at:new Date().toISOString(),last_error:null,next_sync_at:new Date(Date.now()+(more?0:300000)).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',token));
-  return reply(200,{ok:true,orders_read:saved,more});
+  check(await db.from('whatnot_api_connection').update({...changes,last_synced_at:new Date().toISOString(),last_error:null,next_sync_at:new Date(Date.now()+(more||recent.more?0:300000)).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',token));
+  return reply(200,{ok:true,orders_read:saved,more,recent_more:recent.more});
  }catch(e){const error=message(e);await db.from('whatnot_api_connection').update({last_error:error,next_sync_at:new Date(Date.now()+300000).toISOString(),dispatch_token:null,lease_until:null,claimed:false}).eq('singleton',true).eq('dispatch_token',token);return reply(502,{error});}
 }
 Deno.serve(async req=>{

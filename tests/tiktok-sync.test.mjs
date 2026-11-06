@@ -52,6 +52,12 @@ test('invalid pages, unreadable orders, API failures and import failures preserv
 test('a lost lease cannot report a successfully completed window',async()=>{
  const f=fixture([{total_count:0}]);f.state.dispatch_token='different-lease';await assert.rejects(f.run(),/lease expired/);assert.equal(f.updates.length,0);
 });
+test('persistence errors identify the failed operation without exposing row details or credentials',async()=>{
+ const f=fixture([{orders:[order()]}]);
+ f.db.rpc=async()=>({error:{code:'23505',message:'duplicate key value violates unique constraint "tiktok_order_imports_file_hash_key"',details:'private row data and token=secret'}});
+ await assert.rejects(f.run(),error=>/order import; 23505; tiktok_order_imports_file_hash_key/.test(error.message)&&!/private|secret/.test(error.message));
+ assert.equal(f.updates.length,0);
+});
 test('failed or paused pagination does not lock the retry button as perpetually syncing',()=>{
  assert.equal(syncInProgress({enabled:true,page_token:'next',last_error:'failed'},now),false);
  assert.equal(syncInProgress({enabled:false,page_token:'next'},now),false);
