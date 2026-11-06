@@ -72,6 +72,7 @@ function validateEbayExportItems(items, profile, requirements) {
   for (const item of items) {
     const watch = item.watch_details;
     const name = item.title || item.barcode || "Selected item";
+    if (item.collectible_details) throw new Error(`${name}: carved gemstones use their selected collectible category. Use eBay sync instead of a jewelry spreadsheet template.`);
     if (!Number.isFinite(Number(item.sale_price)) || Number(item.sale_price) <= 0) throw new Error(`${name}: enter a retail price before exporting.`);
     if (item.coin_details && profile.type !== "Coin") throw new Error(`${name}: choose the Coin export category.`);
     if (profile.type === "Coin" && !item.coin_details?.ebay?.categoryId) throw new Error(`${name}: complete the coin eBay category and grading details in Edit Item.`);

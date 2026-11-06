@@ -34,6 +34,14 @@ const mockServices = () => {
     auth: { getUser: async () => ({ data: { user } }), getSession: async () => ({ data: { session: { user } } }), signInWithPassword:async()=>({data:{user}}) },
     functions: { invoke: async (name, options) => {
       if (name === "ebay-inventory-sync") {
+        if (options.body.action === 'collectibleCategories') return {data:{ok:true,categories:[{id:'test-carving',label:'Collectibles > Carvings'}]}};
+        if (options.body.action === 'collectibleRequirements') {
+          if (window.testCollectibleMetadataFailure) return {error:{message:'Category requirements offline'}};
+          return {data:{ok:true,category:{id:'test-carving',label:'Collectibles > Carvings'},aspects:[
+            {localizedAspectName:'Material',aspectConstraint:{aspectRequired:true,aspectMode:'FREE_TEXT'}},
+            {localizedAspectName:'Country of Origin',aspectConstraint:{aspectRequired:true,aspectMode:'SELECTION_ONLY'},aspectValues:[{localizedValue:'Unknown'},{localizedValue:'China'}]},
+          ],policy:{itemConditionRequired:true,itemConditions:[{conditionId:'3000',conditionDescription:'Used'},{conditionId:'1000',conditionDescription:'New'}]}}};
+        }
         if (window.testCoinMetadataFailure) return { error: { message: "Metadata offline. Try again." } };
         if (options.body.action === "coinCategories") return { data: { ok:true, categories:Object.values(window.testCoinMetadata).map(data => data.category) } };
         if (options.body.action === "coinRequirements") {
@@ -49,6 +57,7 @@ const mockServices = () => {
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
         if (window.testGenerationHold) await new Promise((resolve) => { window.testReleaseGeneration = resolve; });
+        if (options.body.itemKind === 'collectible') return {data:{mode:'openai',generatedTitle:window.CollectibleFacts.title(options.body.collectibleDetails),generatedDescription:'Carved jade vase with floral details.'}};
         return { data: { mode: "openai", generatedTitle: "Watch copy", generatedDescription: "Reviewed watch copy", watchReference: {
           status: "found", matchedName: "Rolex Datejust", matchedReference: options.body.watchDetails?.model,
           facts: [{ label: "Case diameter", value: "36 mm", sourceUrl: "https://www.rolex.com/watches/datejust", sourceTitle: "Rolex specifications" }],
@@ -114,7 +123,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["inventory-item-facts.js", "admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "item-photo-editor.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["inventory-item-facts.js", "collectible-core.js", "collectible-intake.js", "admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "item-photo-editor.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -726,6 +735,64 @@ test('the first successful gallery photo becomes the new cover when an earlier f
 });
 
 
+test('large camera photos and oversized edited PNGs upload under 8 MB, with edits preserved on retry', async t => {
+ const page = await pageFor(t, {width:390,height:844});
+ await seed(page, {kind:'watch',step:'photos',photos:twoPhotos});
+ const sourceBytes = await page.evaluate(async () => {
+   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 2200;
+   const context = canvas.getContext('2d'), pixels = context.createImageData(2200, 2200);
+   let random = 123456789;
+   for (let i = 0; i < pixels.data.length; i += 4) {
+     random ^= random << 13; random ^= random >>> 17; random ^= random << 5;
+     pixels.data[i] = random & 255; pixels.data[i+1] = (random >>> 8) & 255;
+     pixels.data[i+2] = (random >>> 16) & 255; pixels.data[i+3] = 255;
+   }
+   context.putImageData(pixels, 0, 0);
+   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+   const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'Large camera photo.png', {type:'image/png'}));
+   const input = document.getElementById('assisted-local-image-upload');
+   input.files = transfer.files; input.dispatchEvent(new Event('change', {bubbles:true}));
+   canvas.width = canvas.height = 0;
+   return blob.size;
+ });
+ assert.ok(sourceBytes > 8 * 1024 * 1024, 'The fixture must reproduce an oversized phone photo');
+ await page.waitForFunction(() => window.addItemAssistedModule.getAISelectedUploadedImagePath() === 'uploaded-1.jpg');
+ const upload = await page.evaluate(() => ({type:window.testUploads[0].processedMimeType,bytes:atob(window.testUploads[0].processedImageBase64).length}));
+ assert.equal(upload.type, 'image/jpeg'); assert.ok(upload.bytes <= 8 * 1024 * 1024);
+ await page.getByText('Crop, background and recent station photos', {exact:true}).click();
+ await page.locator('#assisted-open-image-editor').click();
+ await page.waitForFunction(() => document.getElementById('assisted-editor-status').textContent.startsWith('Your original photo'));
+ await page.locator('#assisted-editor-zoom-in').click();
+ await page.evaluate(() => {
+   window.testFailUploadAt = 2; window.testEncodedPhotos = [];
+   const encode = HTMLCanvasElement.prototype.toBlob;
+   HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+     const width = this.width, height = this.height;
+     return encode.call(this, blob => {
+       window.testEncodedPhotos.push({type:blob.type,bytes:blob.size,width,height}); callback(blob);
+     }, type, quality);
+   };
+ });
+ await page.locator('#assisted-editor-save').click();
+ await page.waitForFunction(() => document.getElementById('assisted-editor-status').textContent.includes('Photo upload offline'));
+ assert.equal(await page.locator('.assisted-editor-dialog').isVisible(), true);
+ assert.equal(await page.locator('#assisted-editor-zoom-value').innerText(), '115%');
+ assert.deepEqual(await page.evaluate(() => window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(photo => photo.path)), ['uploaded-1.jpg','front.jpg','back.jpg']);
+ await page.locator('#assisted-editor-save').click();
+ await page.locator('.assisted-editor-dialog').waitFor({state:'hidden'});
+ const edited = await page.evaluate(async () => {
+   const payload = window.testUploads.at(-1), image = new Image();
+   image.src = `data:${payload.processedMimeType};base64,${payload.processedImageBase64}`;
+   await image.decode();
+   return {type:payload.processedMimeType,bytes:atob(payload.processedImageBase64).length,width:image.naturalWidth,height:image.naturalHeight,
+     pngBytes:window.testEncodedPhotos.find(photo => photo.type === 'image/png').bytes};
+ });
+ assert.ok(edited.pngBytes > 8 * 1024 * 1024, 'The actual edited PNG must exceed the server limit');
+ assert.equal(edited.type, 'image/jpeg'); assert.ok(edited.bytes <= 8 * 1024 * 1024);
+ assert.deepEqual([edited.width, edited.height], [2200, 2200]);
+ assert.deepEqual(await page.evaluate(() => window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(photo => photo.path)), ['uploaded-3.jpg','front.jpg','back.jpg']);
+});
+
 test('preview navigation cycles included photos with the gallery collapsed and cropping retains the full set',async t=>{
  const page=await pageFor(t,{width:390,height:844});
  assert.equal(await page.locator('#assisted-photo-previous').isDisabled(),true);
@@ -783,4 +850,77 @@ test('new item bag retries retain its printed barcode and never insert the catal
  await page.evaluate(()=>window.testBagFailure=false);await page.locator('#item-retry-bag-save').click();await page.locator('#item-retry-bag-save').waitFor({state:'detached'});
  assert.match(await page.locator('#item-save-success-stock').innerText(),/5 units added to Tray one/);assert.equal(await page.evaluate(()=>window.testWrites.length),1);
  const calls=await page.evaluate(()=>window.testBagCalls);assert.equal(calls.length,3);assert.ok(calls.every(c=>c.item==='item-1'&&c.barcode==='BAG-PRINTED-123'&&c.location==='tray-1'));
+});
+
+
+test('carved gemstones save their own facts and survive drafts without jewelry pricing', async t => {
+ const page=await pageFor(t,{width:390,height:844},{deferred:true});
+ await page.locator('[name="item-kind"][value="collectible"]').check();
+ await page.locator('#collectible-objectType').fill('Vase'); await page.locator('#collectible-material').fill('Jade');
+ await page.locator('#collectible-height').fill('24.5'); await page.locator('#collectible-dimensionUnit').selectOption('cm');
+ await page.locator('#collectible-condition').fill('Pre-owned'); await page.locator('#collectible-conditionNotes').fill('Small chip on rim');
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('test-draft'))?.payload?.wizard?.collectibleDetails?.conditionNotes==='Small chip on rim');
+ await page.reload(); await page.waitForFunction(()=>window.addItemWizard?.isCollectible() && document.getElementById('collectible-height').value==='24.5');
+ assert.equal(await page.locator('#jewelry-material-fields').isVisible(),false);
+ assert.equal(await page.locator('#weight').getAttribute('required'),null);
+ assert.equal(await page.locator('#category').inputValue(),'Carved Gemstones');
+ await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
+ await page.screenshot({path:new URL('../test-results/carved-gemstone-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+ await next(page); await next(page); assert.equal(await page.locator('#auto-cost-checkbox').isDisabled(),true); await next(page);
+ assert.equal(await page.locator('#title').inputValue(),'Jade Vase');
+ assert.match(await page.locator('#item-review-summary').innerText(),/24.5 cm/);
+ await page.evaluate(()=>window.testSaveSuccess=true);
+ await page.getByRole('button',{name:'Save & add similar',exact:true}).click();
+ await page.waitForFunction(()=>window.testWrites.length===1 && !document.getElementById('add-item-form').dataset.savedItemId);
+ const saved=await page.evaluate(()=>window.testWrites[0]);
+ assert.equal(saved.collectible_details.material,'Jade'); assert.equal(saved.collectible_details.height,'24.5');
+ assert.match(saved.description,/Small chip on rim/); assert.match(saved.description,/Height: 24.5 cm/);
+ assert.deepEqual(saved.categories,['Carved Gemstones']); assert.equal(saved.metal,null); assert.equal(saved.purity_basis_points,null);
+ assert.equal(saved.price_per_weight,null); assert.equal(saved.ebay_category_id,null); assert.equal(saved.ebay_condition,null);
+ assert.equal(saved.watch_details,undefined); assert.equal(saved.coin_details,undefined);
+ assert.equal(await page.locator('#collectible-objectType').inputValue(),'Vase'); assert.equal(await page.locator('#collectible-material').inputValue(),'Jade');
+ for(const key of ['height','width','depth','variety','condition','conditionNotes','origin','period']) assert.equal(await page.locator('#collectible-'+key).inputValue(),'');
+ await assertPhoneLayout(page,'Carved gemstones');
+});
+
+test('carved gemstone eBay categories are explicitly selected, validated and restored',async t=>{
+ const page=await pageFor(t,{width:390,height:844},{deferred:true});
+ await page.locator('[name="item-kind"][value="collectible"]').check();
+ await page.locator('#collectible-objectType').fill('Vase');await page.locator('#collectible-material').fill('Jade');
+ await page.locator('#item-prepare-ebay').check();await next(page);await next(page);await next(page);
+ await page.locator('#collectible-ebay-search').fill('carved jade vase');await page.locator('#collectible-ebay-find').click();
+ await page.waitForFunction(()=>document.querySelector('#collectible-ebay-category option[value="test-carving"]'));
+ assert.equal(await page.locator('#collectible-ebay-category').inputValue(),'');
+ await page.locator('#collectible-ebay-category').selectOption('test-carving');
+ await page.locator('#collectible-ebay-condition').waitFor();
+ let missing=await page.evaluate(()=>window.collectAddItemEbayReadiness().missing.join(','));
+ assert.match(missing,/Country of Origin/);assert.match(missing,/condition/);assert.doesNotMatch(missing,/purity|metal|watch/i);
+ await page.locator('[data-collectible-aspect="Country of Origin"]').selectOption('Unknown');
+ await page.locator('#collectible-ebay-condition').selectOption('3000');
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('test-draft'))?.payload?.wizard?.collectibleDetails?.ebay?.conditionId==='3000');
+ await page.reload();await page.waitForFunction(()=>window.collectibleIntake?.getMetadata());
+ assert.equal(await page.locator('#collectible-ebay-condition').inputValue(),'3000');
+ assert.equal(await page.locator('[data-collectible-aspect="Country of Origin"]').inputValue(),'Unknown');
+ await page.evaluate(()=>window.testCollectibleMetadataFailure=true);await page.locator('#collectible-ebay-retry').click();
+ await page.waitForFunction(()=>document.getElementById('collectible-ebay-status').textContent.includes('offline'));
+ assert.match(await page.evaluate(()=>window.collectAddItemEbayReadiness().missing.join(',')),/requirements/);
+ await page.evaluate(()=>window.testCollectibleMetadataFailure=false);await page.locator('#collectible-ebay-retry').click();
+ await page.waitForFunction(()=>window.collectibleIntake.getMetadata());await next(page);
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1);
+ const saved=await page.evaluate(()=>window.testWrites[0]);assert.equal(saved.ebay_category_id,'test-carving');assert.equal(saved.ebay_condition,'USED_EXCELLENT');
+ assert.deepEqual(saved.ebay_aspects,{Material:['Jade'],'Country of Origin':['Unknown']});
+});
+
+test('carved gemstone copy uses its own details without a photo, metal purity or watch facts',async t=>{
+ const page=await pageFor(t,{width:390,height:844},{deferred:true});await page.locator('[name="item-kind"][value="collectible"]').check();
+ await next(page);assert.equal(await step(page),'information');
+ await page.locator('#collectible-objectType').fill('Vase');await page.locator('#collectible-material').fill('Jade');
+ await page.locator('#collectible-height').fill('-3');await next(page);assert.equal(await step(page),'information');
+ await page.locator('#collectible-height').fill('20');await page.locator('#item-auto-copy').check();await next(page);
+ await page.waitForFunction(()=>window.testGeneration.length>0);
+ const payload=await page.evaluate(()=>window.testGeneration.at(-1));assert.equal(payload.itemKind,'collectible');assert.equal(payload.collectibleDetails.height,'20');
+ assert.equal(payload.purity,'');assert.equal(payload.watchDetails,null);assert.equal(payload.coinDetails,null);assert.equal(payload.imagePath,'');
+ await page.locator('#item-step-back').click();await page.locator('[name="item-kind"][value="jewelry"]').check();
+ assert.equal(await page.locator('#collectible-fields').isVisible(),false);assert.equal(await page.locator('#collectible-height').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>window.addItemWizard.getCollectibleDetails()),null);
 });

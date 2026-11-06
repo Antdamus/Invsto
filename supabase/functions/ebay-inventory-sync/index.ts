@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { buildCoinListing } from "../../../coin-ebay-core.mjs";
 import "../../../inventory-item-facts.js";
+import "../../../collectible-core.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -28,6 +29,7 @@ type ItemRow = {
   sale_price: number | null;
   watch_details?: JsonRecord | null;
   coin_details?: JsonRecord | null;
+  collectible_details?: JsonRecord | null;
   barcode: string | null;
   photos: string[] | null;
   photo_url: string | null;
@@ -176,6 +178,7 @@ function collectPhotoPaths(item: ItemRow): string[] {
 }
 
 function chooseCategory(item: ItemRow, settings: SyncSettings): { categoryId: string; source: "override" | "rule" | "default" } {
+  if (item.collectible_details) return { categoryId: String((item.collectible_details.ebay as any)?.categoryId ?? ""), source: "override" };
   if (item.coin_details) return { categoryId: String((item.coin_details.ebay as any)?.categoryId ?? item.ebay_category_id ?? ""), source: "override" };
   if (item.watch_details) return { categoryId: "31387", source: "override" };
   const override = String(item.ebay_category_id || "").trim();
@@ -291,7 +294,7 @@ function inferColor(item: ItemRow): string | null {
 }
 
 function isWatch(item: ItemRow): boolean {
-  return !item.coin_details && Boolean(item.watch_details || item.ebay_category_id === "31387");
+  return !item.coin_details && !item.collectible_details && Boolean(item.watch_details || item.ebay_category_id === "31387");
 }
 
 function watchAspects(item: ItemRow): Record<string, string[]> {
@@ -396,6 +399,36 @@ async function loadCoinMetadata(marketplace: string, categoryId: string): Promis
   return metadata;
 }
 
+const collectibleMetadataCache = new Map<string, {until:number; metadata:any}>();
+async function searchCollectibleCategories(marketplace: string, query: string) {
+  const trimmed = query.trim().slice(0,200);
+  if (!trimmed) throw new Error("Enter a collectible description to search eBay categories.");
+  const {token,treeId} = await coinMetadataClient(marketplace);
+  const result = await ebayRequest(token,"GET",`/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(trimmed)}`);
+  return (result.categorySuggestions || []).slice(0,20).map((entry:any) => ({
+    id:String(entry.category.categoryId),
+    label:[...(entry.categoryTreeNodeAncestors || []).sort((a:any,b:any) => a.categoryTreeNodeLevel-b.categoryTreeNodeLevel).map((ancestor:any)=>ancestor.categoryName),entry.category.categoryName].filter(Boolean).join(" > "),
+  }));
+}
+async function loadCollectibleMetadata(marketplace: string, categoryId: string) {
+  if (!/^\d+$/.test(categoryId)) throw new Error("Choose an eBay category for the collectible.");
+  const key = `${marketplace}:${categoryId}`, cached = collectibleMetadataCache.get(key);
+  if (cached && cached.until > Date.now()) return cached.metadata;
+  const {token,treeId} = await coinMetadataClient(marketplace);
+  const [tree,taxonomy,policies] = await Promise.all([
+    ebayRequest(token,"GET",`/commerce/taxonomy/v1/category_tree/${treeId}/get_category_subtree?category_id=${categoryId}`),
+    ebayRequest(token,"GET",`/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${categoryId}`),
+    ebayRequest(token,"GET",`/sell/metadata/v1/marketplace/${marketplace}/get_item_condition_policies?filter=${encodeURIComponent(`categoryIds:{${categoryId}}`)}`),
+  ]);
+  const node = tree.categorySubtreeNode;
+  if (!node?.leafCategoryTreeNode || String(node.category?.categoryId) !== categoryId) throw new Error("Select a final eBay category, not a parent category.");
+  const policy = policies.itemConditionPolicies?.find((entry:any) => String(entry.categoryId) === categoryId);
+  if (!Array.isArray(taxonomy.aspects) || !policy) throw new Error("eBay could not verify this category's requirements. Try again.");
+  const metadata = {category:{id:categoryId,label:node.category.categoryName},aspects:taxonomy.aspects,policy};
+  collectibleMetadataCache.set(key,{until:Date.now()+3600000,metadata});
+  return metadata;
+}
+
 function validateWatchMetadata(item: ItemRow, aspects: Record<string, string[]>, metadata: WatchMetadata): string[] {
   const reasons: string[] = [];
   for (const aspect of metadata.aspects) {
@@ -411,6 +444,7 @@ function validateWatchMetadata(item: ItemRow, aspects: Record<string, string[]>,
 }
 
 function buildAspects(item: ItemRow, categoryId: string): Record<string, string[]> {
+  if (item.collectible_details) return {};
   if (item.coin_details) return {};
   if (isWatch(item)) return watchAspects(item);
   const aspects: Record<string, string[]> = {
@@ -456,7 +490,7 @@ function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: n
   if (!categoryId || categorySource === "default") reasons.push("missing eBay category");
   if (!imageReady) reasons.push("missing eBay image");
 
-  for (const aspectName of (item.coin_details ? [] : isWatch(item) ? ["Brand", "Department", "Type"] : ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"])) {
+  for (const aspectName of (item.coin_details || item.collectible_details ? [] : isWatch(item) ? ["Brand", "Department", "Type"] : ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"])) {
     if (!firstText(aspects[aspectName])) reasons.push(`missing ${aspectName}`);
   }
 
@@ -606,7 +640,7 @@ async function prepareItem(
   item: ItemRow,
   quantity: number,
   settings: SyncSettings,
-  options: { copyMissingPhotos: boolean; watchMetadata?: WatchMetadata; watchMetadataError?: string; coinMetadata?: any; coinMetadataError?: string },
+  options: { copyMissingPhotos: boolean; watchMetadata?: WatchMetadata; watchMetadataError?: string; coinMetadata?: any; coinMetadataError?: string; collectibleMetadata?: any; collectibleMetadataError?: string },
 ): Promise<PreparedItem> {
   const warnings: string[] = [];
   const sku = normalizeSku(item.barcode || "");
@@ -625,11 +659,13 @@ async function prepareItem(
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
   const coinListing = item.coin_details && options.coinMetadata ? buildCoinListing(item, options.coinMetadata) : null;
+  const collectibleListing = item.collectible_details ? (globalThis as any).CollectibleFacts.listing(item, options.collectibleMetadata) : null;
   const rawCondition = isWatch(item) ? String(item.watch_details?.condition || "") : item.ebay_condition || settings.default_condition;
-  const condition = item.coin_details ? coinListing?.condition : isWatch(item) ? rawCondition : normalizeEbayCondition(rawCondition);
-  if (!item.coin_details && !isWatch(item) && condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
-  const aspects = (coinListing?.aspects || buildAspects(item, categoryId)) as Record<string, string[]>;
+  const condition = collectibleListing ? collectibleListing.condition : item.coin_details ? coinListing?.condition : isWatch(item) ? rawCondition : normalizeEbayCondition(rawCondition);
+  if (!item.coin_details && !item.collectible_details && !isWatch(item) && condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
+  const aspects = (collectibleListing?.aspects || coinListing?.aspects || buildAspects(item, categoryId)) as Record<string, string[]>;
   const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageReady, categoryId, categoryChoice.source, aspects);
+  if (collectibleListing) blockingReasons.push(...collectibleListing.reasons, ...(options.collectibleMetadataError ? [options.collectibleMetadataError] : []));
 
   if (item.coin_details) blockingReasons.push(...(coinListing?.reasons || [options.coinMetadataError || "eBay coin requirements could not be verified"]));
   if (item.coin_details && options.copyMissingPhotos && new Set(imageUrls).size < 2) blockingReasons.push("both front and back photos must be available for the coin listing");
@@ -640,7 +676,7 @@ async function prepareItem(
 
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
-    description: coinListing?.description || watchDescription(item) || sku,
+    description: collectibleListing?.description || coinListing?.description || watchDescription(item) || sku,
     aspects,
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
@@ -671,7 +707,7 @@ async function prepareItem(
         value: toMoney(price),
       },
     },
-    listingDescription: coinListing?.description || watchDescription(item) || sku,
+    listingDescription: collectibleListing?.description || coinListing?.description || watchDescription(item) || sku,
     listingPolicies: {
       fulfillmentPolicyId: settings.fulfillment_policy_id,
       paymentPolicyId: settings.payment_policy_id,
@@ -708,7 +744,7 @@ async function loadItems(supabase: any, itemIds: string[], limit: number, dirtyO
 
   let query = supabase
     .from("item_types")
-    .select("id,title,description,sale_price,watch_details,coin_details,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
+    .select("id,title,description,sale_price,watch_details,coin_details,collectible_details,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
     .is("deleted_at", null)
     .neq("ebay_sync_enabled", false)
     .not("barcode", "is", null)
@@ -877,6 +913,8 @@ Deno.serve(async (req) => {
     const settings = await loadSettings(supabase);
     if (body.action === "coinCategories") return jsonResponse(200, { ok: true, categories: await loadCoinCategories(settings.marketplace_id) });
     if (body.action === "coinRequirements") return jsonResponse(200, { ok: true, ...(await loadCoinMetadata(settings.marketplace_id, String(body.categoryId || ""))) });
+    if (body.action === "collectibleCategories") return jsonResponse(200, {ok:true,categories:await searchCollectibleCategories(settings.marketplace_id,String(body.query || ""))});
+    if (body.action === "collectibleRequirements") return jsonResponse(200, {ok:true,...await loadCollectibleMetadata(settings.marketplace_id,String(body.categoryId || ""))});
     if (body.action === "watchRequirements") {
       const metadata = await loadWatchMetadata(settings.marketplace_id);
       return jsonResponse(200, { ok: true, categoryId: "31387", marketplace: settings.marketplace_id,
@@ -924,6 +962,11 @@ Deno.serve(async (req) => {
       catch (error) { watchMetadataError = error instanceof Error ? error.message : "Could not verify eBay watch requirements."; }
     }
     const coinMetadata = new Map<string, any>();
+    const collectibleMetadata = new Map<string, any>(), collectibleMetadataErrors = new Map<string, string>();
+    for (const categoryId of new Set(items.filter(item => item.collectible_details).map(item => chooseCategory(item, settings).categoryId))) {
+      try { collectibleMetadata.set(categoryId, await loadCollectibleMetadata(settings.marketplace_id, categoryId)); }
+      catch (error) { collectibleMetadataErrors.set(categoryId, error instanceof Error ? error.message : "Could not verify collectible requirements."); }
+    }
     const coinMetadataErrors = new Map<string, string>();
     const coinCategories = [...new Set(items.filter(item => item.coin_details).map(item => chooseCategory(item, settings).categoryId))];
     for (let index = 0; index < coinCategories.length; index += 3) {
@@ -943,7 +986,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun, watchMetadata, watchMetadataError, coinMetadata: coinMetadata.get(chooseCategory(item, settings).categoryId), coinMetadataError: coinMetadataErrors.get(chooseCategory(item, settings).categoryId) });
+        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun, watchMetadata, watchMetadataError, coinMetadata: coinMetadata.get(chooseCategory(item, settings).categoryId), coinMetadataError: coinMetadataErrors.get(chooseCategory(item, settings).categoryId), collectibleMetadata:collectibleMetadata.get(chooseCategory(item,settings).categoryId), collectibleMetadataError:collectibleMetadataErrors.get(chooseCategory(item,settings).categoryId) });
         prepared.push(next);
         if (dryRun) {
           const status = next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only";
@@ -977,7 +1020,7 @@ Deno.serve(async (req) => {
             warnings,
           });
         } else {
-          if ((item.coin_details || isWatch(item)) && next.blockingReasons.some(reason => reason !== "quantity is 0")) {
+          if ((item.coin_details || item.collectible_details || isWatch(item)) && next.blockingReasons.some(reason => reason !== "quantity is 0")) {
             throw new Error(`Item is not ready for eBay: ${[...new Set(next.blockingReasons)].join(", ")}`);
           }
           const link = linkByItem.get(item.id);

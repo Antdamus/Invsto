@@ -52,7 +52,9 @@
   const value = (id) => id === "category" ? getCategory() : document.getElementById(id)?.value?.trim() || "";
   const isWatch = () => form.querySelector('[name="item-kind"]:checked')?.value === "watch";
   const isCoin = () => form.querySelector('[name="item-kind"]:checked')?.value === "coin";
-  const usesDirectPricing = () => isWatch() || isCoin();
+  const isCollectible = () => form.querySelector('[name="item-kind"]:checked')?.value === 'collectible';
+  const getCollectibleDetails = () => window.collectibleIntake.getDetails();
+  const usesDirectPricing = () => isWatch() || isCoin() || isCollectible();
   const getCoinDetails = () => {
     if (!isCoin()) return null;
     const coin = Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)]));
@@ -76,6 +78,7 @@
 
   function descriptionForSave() {
     const description = value("description");
+    if (isCollectible()) return window.CollectibleFacts.description(description, getCollectibleDetails(), value('weight'));
     const coin = getCoinDetails();
     if (coin) {
       const statusNames = { ungraded: "Raw / ungraded", "self-assessed": "Seller-assessed (not third-party graded)", certified: "Third-party graded (as entered)" };
@@ -90,7 +93,10 @@
   function updateMode({ restoring = false } = {}) {
     const watch = isWatch();
     const coin = isCoin();
-    const directPricing = watch || coin;
+    const collectible = isCollectible();
+    const directPricing = watch || coin || collectible;
+    const titleInput = document.getElementById('title');
+    if (!collectible && titleInput.dataset.collectibleTitle && titleInput.value === titleInput.dataset.collectibleTitle) titleInput.value = '';
     document.getElementById("coin-fields").hidden = !coin;
     coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).disabled = !coin; });
     document.getElementById("coin-name").required = coin;
@@ -108,10 +114,10 @@
     document.getElementById("use-coin-details").hidden = !coin;
     const stoneGrid = watch ? document.querySelector('#watch-stones-section .form-grid') : document.getElementById('watch-stones-home').parentElement;
     ['stone-type-choice','assisted-stone-type'].reverse().forEach(id => stoneGrid.prepend(document.getElementById(id).closest('label')));
-    document.getElementById('stone-type-choice').closest('label').hidden = coin;
+    document.getElementById('stone-type-choice').closest('label').hidden = coin || collectible;
     document.getElementById('assisted-length').closest('label').hidden = directPricing;
-    document.getElementById('item-details-heading').textContent = watch ? 'Additional description details' : 'Measurements, stones and description details';
-    document.querySelector('.intake-item-details > .field-helper').textContent = watch ? 'Add any other confirmed details you want included in the description.' : 'Check these details for every piece. Enter what you know; use “No stone” or “Not applicable” where appropriate.';
+    document.getElementById('item-details-heading').textContent = watch || collectible ? 'Additional description details' : 'Measurements, stones and description details';
+    document.querySelector('.intake-item-details > .field-helper').textContent = watch || collectible ? 'Add any other confirmed details you want included in the description.' : 'Check these details for every piece. Enter what you know; use “No stone” or “Not applicable” where appropriate.';
     syncStoneChoice();
     updateWatchDisclosure();
 
@@ -125,13 +131,13 @@
     salePrice.required = true;
     salePrice.placeholder = "Enter retail price ($)";
     salePrice.inputMode = "decimal";
-    document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, isCoin: coin, restoring } }));
+    document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, isCoin: coin, isCollectible: collectible, restoring } }));
     document.getElementById("item-coin-photo-guide").hidden = !coin;
     document.getElementById("price-per-weight").closest("label").hidden = directPricing;
     document.getElementById("auto-cost-checkbox").closest(".form-field").hidden = directPricing;
     const category = getCategory();
-    if (!category || (!restoring && ["Watches", "Coins"].includes(category))) {
-      setCategory(watch ? "Watches" : coin ? "Coins" : "", { notify: !restoring });
+    if (!category || (!restoring && (["Watches", "Coins", "Carved Gemstones"].includes(category) || collectible))) {
+      setCategory(watch ? "Watches" : coin ? "Coins" : collectible ? "Carved Gemstones" : "", { notify: !restoring });
     }
     rebuildRoute();
     window.addItemPricing?.apply();
@@ -165,7 +171,8 @@
     const photos = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
     const rows = [
       ['Item', isWatch() ? window.InventoryItemFacts.watchTitle(getWatchDetails(), value('assisted-stone-type'), value('title')) || 'Not entered' : value('title') || getCoinDetails()?.name || 'Not entered','information'],
-      ['Categories',window.InventoryItemFacts.categories(value('category'), isCoin() ? '' : value('assisted-stone-type'), getWatchDetails()).join(' · ') || 'Not selected','information'],
+      ['Categories',window.InventoryItemFacts.categories(value('category'), isCoin() || isCollectible() ? '' : value('assisted-stone-type'), getWatchDetails()).join(' · ') || 'Not selected','information'],
+      ...(isCollectible() ? Object.entries(window.CollectibleFacts.labels).filter(([key]) => getCollectibleDetails()[key]).map(([key,label]) => [label, getCollectibleDetails()[key] + (['height','width','depth'].includes(key) ? ` ${getCollectibleDetails().dimensionUnit}` : ''), 'information']) : []),
       ...(!usesDirectPricing() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information']] : []),
       ...(isWatch() ? [
         ['Serial · internal',value('watch-serial') || 'Not entered','information'],
@@ -174,7 +181,7 @@
         ['Factory dimensions', (getWatchDetails().referenceLookup?.facts || []).filter(fact=>/^Case (diameter|dimensions|width|thickness)$/i.test(fact.label)).map(fact=>fact.value).join(' · ') || 'Not confirmed from reference','information'],
         ...(value('watch-braceletFit') ? [['Measured fit',value('watch-braceletFit'),'information']] : []),
       ] : []),
-      ...(!isCoin() ? [['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
+      ...(!isCoin() && !isCollectible() ? [['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
       ...(isWatch() && window.InventoryItemFacts.watchStoneSetting(getWatchDetails(),value('assisted-stone-type')) ? [['Stone setting',window.InventoryItemFacts.watchStoneSettingLabel(getWatchDetails(),value('assisted-stone-type')),'information']] : []),
       ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
         ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
@@ -296,7 +303,13 @@
     }
     if (isWatch()) fillWatchTitle();
     if (isCoin()) fillCoinTitle();
-    if(!isWatch() && !isCoin()){
+    if (isCollectible()) {
+      const title = document.getElementById('title');
+      if (!title.value || title.value === title.dataset.collectibleTitle || title.value === title.dataset.coinTitle || title.value === title.dataset.watchTitle) {
+        title.value = window.CollectibleFacts.title(getCollectibleDetails()); title.dataset.collectibleTitle = title.value;
+      }
+    }
+    if(!usesDirectPricing()){
       const material=document.getElementById('assisted-material').value,purity=document.getElementById('assisted-purity').value;
       if(!value('title'))document.getElementById('title').value=[purity,material,value('category')].filter(Boolean).join(' ');
       if(!value('description'))document.getElementById('description').value=[value('category'),material && `Material: ${purity} ${material}.`,value('weight') && `Weight: ${value('weight')} g.`].filter(Boolean).join(' ');
@@ -339,7 +352,7 @@
     const choice = document.getElementById('stone-type-choice');
     const stone = value('assisted-stone-type');
     choice.value = !stone ? '' : window.InventoryItemFacts.stoneChoices.find(value => value.toLowerCase() === stone.toLowerCase()) || 'other';
-    document.getElementById('assisted-stone-type').closest('label').hidden = isCoin() || choice.value !== 'other';
+    document.getElementById('assisted-stone-type').closest('label').hidden = isCoin() || isCollectible() || choice.value !== 'other';
     syncWatchStoneSetting();
   }
   document.getElementById('stone-type-choice').addEventListener('change', event => {
@@ -404,6 +417,7 @@
     furthest = 0;
     delete document.getElementById("title").dataset.watchTitle;
     delete document.getElementById("title").dataset.coinTitle;
+    delete document.getElementById("title").dataset.collectibleTitle;
     updateMode({ restoring: true });
     showStep(0, { focus: false, persist: false });
   });
@@ -412,6 +426,8 @@
     goTo, renderReview, rebuildRoute,
     isWatch,
     isCoin,
+    isCollectible,
+    getCollectibleDetails,
     usesDirectPricing,
     getWatchDetails,
     getCoinDetails,
@@ -423,7 +439,9 @@
       autoCopy: document.getElementById("item-auto-copy").checked,
       step: steps[current].dataset.itemStep,
       furthest,
-      itemKind: isWatch() ? "watch" : isCoin() ? "coin" : "jewelry",
+      itemKind: isWatch() ? "watch" : isCoin() ? "coin" : isCollectible() ? "collectible" : "jewelry",
+      collectibleDetails: getCollectibleDetails(),
+      autoCollectibleTitle: document.getElementById('title').dataset.collectibleTitle || '',
       coinDetails: { ...Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)])), ebay: window.coinEbayForm?.getDetails() },
       watchDetails: Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)])),
       manualRetail: document.getElementById("sale-price").dataset.manualRetail === "true",
@@ -437,8 +455,10 @@
       document.getElementById("item-assign-stock").checked = Boolean(draft.assignStock);
       document.getElementById("item-auto-copy").checked = draft.autoCopy !== false;
       document.getElementById("item-prepare-ebay").checked = document.getElementById("ebay-sync-enabled").checked;
-      const kind = ["watch", "coin"].includes(draft.itemKind) ? draft.itemKind : "jewelry";
+      const kind = ["watch", "coin", "collectible"].includes(draft.itemKind) ? draft.itemKind : "jewelry";
       form.querySelector(`[name="item-kind"][value="${kind}"]`).checked = true;
+      window.collectibleIntake.restore(draft.collectibleDetails || {});
+      document.getElementById('title').dataset.collectibleTitle = draft.autoCollectibleTitle || '';
       watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).value = draft.watchDetails?.[key] || ""; });
       coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).value = draft.coinDetails?.[key] || (key === "gradingStatus" ? "ungraded" : ""); });
       window.coinEbayForm?.reset(draft.coinDetails || {}, kind === "coin");

@@ -4,7 +4,7 @@
   const label=key=>key==='silver'?'Sterling silver · 925':key.replace('gold_','')+'K gold';
   const rateMoney=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(value);
   function itemKey(item){
-    if(item.watch_details||item.coin_details||/\b(plated|filled|vermeil|tone|gp|gf|hge|overlay)\b/i.test(item.title||''))return null;
+    if(item.watch_details||item.coin_details||item.collectible_details||/\b(plated|filled|vermeil|tone|gp|gf|hge|overlay)\b/i.test(item.title||''))return null;
     const metal=String(item.metal||'').toLowerCase(),bp=Number(item.purity_basis_points)||null;
     if(metal==='silver')return bp==null||bp===9250?'silver':null;
     if(metal!=='gold')return null;

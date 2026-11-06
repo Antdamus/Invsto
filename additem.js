@@ -681,7 +681,7 @@ let uploadedImages = [];
   }
 
   function getAssistedMaterialPurityForSave() {
-    if (window.addItemWizard?.isWatch()) return { metal: null, purity_basis_points: null };
+    if (window.addItemWizard?.isWatch() || window.addItemWizard?.isCollectible()) return { metal: null, purity_basis_points: null };
     const coin = window.addItemWizard?.getCoinDetails();
     if (coin) return {
       metal: ["Gold", "Silver"].includes(coin.metal) ? coin.metal.toLowerCase() : null,
@@ -716,13 +716,15 @@ let uploadedImages = [];
 
   function getAddItemEbayCategoryOption(categoryId) {
     const normalized = String(categoryId || "").trim();
+    const collectible = window.addItemWizard?.getCollectibleDetails();
+    if (collectible) return normalized && collectible.ebay?.categoryId === normalized ? {id:normalized,label:collectible.ebay.categoryLabel || normalized} : null;
     const coin = window.addItemWizard?.getCoinDetails();
     if (coin?.ebay?.categoryId === normalized && normalized) return { id: normalized, label: coin.ebay.categoryLabel || `Coin category ${normalized}` };
     return ADD_ITEM_EBAY_CATEGORY_OPTIONS.find((option) => option.id === normalized) || null;
   }
 
   function inferAddItemEbayCategory() {
-    if (window.addItemWizard?.isCoin()) return null;
+    if (window.addItemWizard?.isCoin() || window.addItemWizard?.isCollectible()) return null;
     if (window.addItemWizard?.isWatch()) return getAddItemEbayCategoryOption("31387");
     const text = [
       document.getElementById("title")?.value || "",
@@ -829,6 +831,8 @@ let uploadedImages = [];
   }
 
   function buildAddItemEbayAspects(categoryId, materialPurity, weightValue = null, itemLengthValue = null) {
+    const collectible = window.addItemWizard?.getCollectibleDetails();
+    if (collectible) return window.CollectibleFacts.listing({collectible_details:collectible},window.collectibleIntake.getMetadata()).aspects;
     const text = getAddItemEbayTextBlob();
     const aspects = {};
 
@@ -892,6 +896,8 @@ let uploadedImages = [];
       const preview = window.CoinEbay?.buildCoinListing({ coin_details: coin, ebay_category_id: categoryId, title: document.getElementById("title").value, description: document.getElementById("description").value,
         sale_price: Number(document.getElementById("sale-price").value.replace(/,/g,"")), photos: [...assistedSelectedImages.map((image,index)=>image.path || `selected-${index}`), ...Array.from(photoFiles).map(file=>file.name)] }, window.coinEbayForm?.getMetadata());
       missing.push(...(preview?.reasons || ["coin category requirements are still loading"]));
+    } else if (window.addItemWizard?.isCollectible()) {
+      missing.push(...window.CollectibleFacts.listing({collectible_details:window.addItemWizard.getCollectibleDetails()},window.collectibleIntake.getMetadata()).reasons);
     } else if (window.addItemWizard?.isWatch()) {
       const watch = window.addItemWizard.getWatchDetails();
       if (!watch.brand) missing.push("watch brand (Information)");
@@ -915,16 +921,18 @@ let uploadedImages = [];
     if (!select || !enabled || !summary) return;
 
     const coin = Boolean(window.addItemWizard?.isCoin());
+    const collectible = Boolean(window.addItemWizard?.isCollectible());
     enabled.disabled = false;
-    if (coin) {
-      const details = window.addItemWizard.getCoinDetails();
+    if (coin || collectible) {
+      const details = collectible ? window.addItemWizard.getCollectibleDetails() : window.addItemWizard.getCoinDetails();
       const categoryId = details.ebay?.categoryId || "";
       if (categoryId && !Array.from(select.options).some(option => option.value === categoryId)) select.add(new Option(details.ebay.categoryLabel || `Coin category ${categoryId}`, categoryId));
       select.value = categoryId;
       select.disabled = true;
     }
 
-    select.disabled = coin || !enabled.checked;
+    select.disabled = coin || collectible || !enabled.checked;
+    select.closest('label').hidden = collectible;
     if (enabled.checked && !select.value && options.infer !== false) {
       const inferred = inferAddItemEbayCategory();
       if (inferred) select.value = inferred.id;
@@ -953,12 +961,14 @@ let uploadedImages = [];
     updateAddItemEbayReadiness();
 
     document.addEventListener("coin-ebay:change", () => updateAddItemEbayReadiness({ infer: false }));
+    document.addEventListener("collectible-ebay:change", () => updateAddItemEbayReadiness({ infer: false }));
     document.addEventListener("add-item:mode-change", (event) => {
       if (!event.detail?.restoring) {
         const category = document.getElementById("ebay-category-id");
         if (event.detail?.isCoin && !document.getElementById("item-prepare-ebay")?.checked) document.getElementById("ebay-sync-enabled").checked = false;
         if (event.detail?.isWatch) category.value = "31387";
         else if (category.value === "31387") category.value = "";
+        if (event.detail?.isCollectible) category.value = "";
       }
       updateAddItemEbayReadiness();
     });
@@ -3012,16 +3022,17 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const watch_details = window.addItemWizard?.getWatchDetails() || null;
   const title = watch_details ? window.InventoryItemFacts.watchTitle(watch_details, document.getElementById('assisted-stone-type')?.value, enteredTitle) : enteredTitle;
   const coin_details = window.addItemWizard?.getCoinDetails() || null;
+  const collectible_details = window.addItemWizard?.getCollectibleDetails() || null;
   const weightInputValue = document.getElementById("weight").value.trim();
   const weight = weightInputValue ? parseFloat(weightInputValue) : null;
-  const stone_type = coin_details ? null : document.getElementById("assisted-stone-type")?.value?.trim() || null;
-  const item_length = coin_details ? null : watch_details ? watch_details.braceletFit || null : document.getElementById("assisted-length")?.value?.trim() || null;
+  const stone_type = collectible_details ? collectible_details.material || null : coin_details ? null : document.getElementById("assisted-stone-type")?.value?.trim() || null;
+  const item_length = coin_details || collectible_details ? null : watch_details ? watch_details.braceletFit || null : document.getElementById("assisted-length")?.value?.trim() || null;
   const deferredPricing = window.addItemPricing?.deferred() === true;
   const pricingFields = window.addItemPricing?.fields() || {};
-  const price_per_weight = deferredPricing || watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
+  const price_per_weight = deferredPricing || watch_details || coin_details || collectible_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
   const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
-  const categories = window.InventoryItemFacts.categories(categoryValue, stone_type, watch_details);
+  const categories = collectible_details ? [categoryValue] : window.InventoryItemFacts.categories(categoryValue, stone_type, watch_details);
   const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
   const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
   const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
@@ -3131,6 +3142,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       description,
       ...(watch_details ? { watch_details } : {}),
       ...(coin_details ? { coin_details } : {}),
+      ...(collectible_details ? { collectible_details } : {}),
       weight,
       stone_type,
       item_length,
@@ -3138,7 +3150,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       purity_basis_points: materialPurity.purity_basis_points,
       ebay_sync_enabled,
       ebay_category_id,
-      ebay_condition: coin_details ? window.CoinEbay?.CONDITION_ENUMS[coin_details.ebay?.conditionId] || null : watch_details ? watch_details.condition || null : "NEW",
+      ebay_condition: collectible_details ? window.CollectibleFacts.conditions[collectible_details.ebay?.conditionId] || null : coin_details ? window.CoinEbay?.CONDITION_ENUMS[coin_details.ebay?.conditionId] || null : watch_details ? watch_details.condition || null : "NEW",
       ebay_aspects,
       price_per_weight,
       ...window.addItemMaterialCosts?.fields(),

@@ -13,6 +13,7 @@
     if (wizard.pricing && !$('item-keep-prices').checked) wizard.pricing.autoMinimum = true;
     const watch=Object.fromEntries(['name','brand','model','department'].map(key=>[key,wizard.watchDetails[key] || '']));
     const coin=Object.fromEntries(['name','country','denomination','metal','fineness','fineMetalContent','composition','finish'].map(key=>[key,wizard.coinDetails[key] || '']));
+    const collectible=Object.fromEntries(['objectType','material','dimensionUnit'].map(key=>[key,wizard.collectibleDetails?.[key] || '']));
     // Grade, year, mint, modifications, conditions, unique IDs and photos belong to the individual item.
     coin.gradingStatus='ungraded';
     if(wizard.coinDetails.ebay?.categoryId)coin.ebay={categoryId:wizard.coinDetails.ebay.categoryId,categoryLabel:wizard.coinDetails.ebay.categoryLabel || '',photosConfirmed:false};
@@ -22,7 +23,7 @@
     main.ebaySyncEnabled=$('ebay-sync-enabled').checked;
     if(wizard.itemKind!=='coin')main.ebayCategoryId=text('ebay-category-id');
     const material=window.addItemAssistedModule.getSelectedMaterialPurity();
-    return {activeWorkflow:'assisted',wizard:{...wizard,step:'information',furthest:0,watchDetails:watch,coinDetails:coin,autoWatchTitle:'',autoCoinTitle:'',manualRetail:$('item-keep-prices').checked},mainFields:main,assistedFields:{...material,copyEdited:{title:false,description:false},lastAutoCopy:{title:'',description:''}},recentUploadedImages:[],saveSelectedUploadedImagePaths:[]};
+    return {activeWorkflow:'assisted',wizard:{...wizard,step:'information',furthest:0,watchDetails:watch,coinDetails:coin,collectibleDetails:collectible,autoCollectibleTitle:'',autoWatchTitle:'',autoCoinTitle:'',manualRetail:$('item-keep-prices').checked},mainFields:main,assistedFields:{...material,copyEdited:{title:false,description:false},lastAutoCopy:{title:'',description:''}},recentUploadedImages:[],saveSelectedUploadedImagePaths:[]};
   }
   async function checkBarcode() {
     clearTimeout(lookupTimer);

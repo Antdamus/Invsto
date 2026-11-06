@@ -165,3 +165,60 @@ test('double save requests upload one edited image',async()=>{
   await Promise.all([t.api.saveImageEditorCrop(t.elements),t.api.saveImageEditorCrop(t.elements)]);
   assert.equal(t.counters.uploads,1);assert.equal(t.counters.saves,1);
 });
+
+function uploadEncoder(encode) {
+  const calls = [], draws = [], canvases = [], window = {};
+  function canvas(width = 0, height = 0) {
+    const result = { width, height,
+      toBlob(callback, type, quality) {
+        const request = { canvas: this, width: this.width, height: this.height, type, quality };
+        calls.push(request);
+        callback(encode(request));
+      },
+      getContext: () => ({ drawImage: (...args) => draws.push(args) }),
+    };
+    canvases.push(result);
+    return result;
+  }
+  const source = readFileSync(new URL('../additem-assisted.js', import.meta.url), 'utf8')
+    .replace('  document.addEventListener("DOMContentLoaded", init);', '  window.encodeUpload = canvasToUploadBlob;');
+  vm.runInNewContext(source, { window, document: { createElement: () => canvas() } });
+  return { encode: window.encodeUpload, canvas, calls, draws, canvases };
+}
+
+test('PNG at the upload limit stays untouched; oversized PNG keeps full resolution when JPEG fits', async () => {
+  const limit = 8 * 1024 * 1024;
+  const png = { size: limit, type: 'image/png' };
+  const fitting = uploadEncoder(() => png);
+  assert.equal(await fitting.encode(fitting.canvas(4096, 4096)), png);
+  assert.equal(fitting.calls.length, 1);
+  const large = uploadEncoder(({ type, quality }) => ({ type, size: type === 'image/png' || quality > 0.95 ? limit + 1 : limit - 1 }));
+  const source = large.canvas(4096, 4096);
+  const result = await large.encode(source);
+  assert.equal(result.type, 'image/jpeg');
+  assert.ok(result.size <= limit);
+  assert.ok(large.calls.every(call => call.width === 4096 && call.height === 4096));
+  assert.equal(large.draws.length, 0);
+});
+
+test('very large exports resize proportionally from the original and release the temporary canvas', async () => {
+  const encoder = uploadEncoder(({ width, height, type }) => ({ type, size: width * height * 2 }));
+  const original = encoder.canvas(4096, 3072);
+  const result = await encoder.encode(original);
+  assert.ok(result.size <= 8 * 1024 * 1024);
+  assert.equal(result.type, 'image/jpeg');
+  assert.deepEqual([original.width, original.height], [4096, 3072]);
+  assert.ok(encoder.draws.length > 0);
+  for (const [source, , , width, height] of encoder.draws) {
+    assert.equal(source, original);
+    assert.ok(Math.abs(width / height - 4 / 3) < 0.002);
+  }
+  assert.deepEqual([encoder.canvases[1].width, encoder.canvases[1].height], [0, 0]);
+});
+
+test('encoder failure rejects without changing the source photo', async () => {
+  const encoder = uploadEncoder(() => null);
+  const original = encoder.canvas(2200, 2200);
+  await assert.rejects(encoder.encode(original), /Could not normalize/);
+  assert.deepEqual([original.width, original.height], [2200, 2200]);
+});

@@ -62,6 +62,7 @@
             <label><input type="radio" name="item-kind" value="jewelry" checked /> Jewelry</label>
             <label><input type="radio" name="item-kind" value="watch" /> Watch</label>
             <label><input type="radio" name="item-kind" value="coin" /> Coin</label>
+            <label><input type="radio" name="item-kind" value="collectible" /> Carved Gemstones</label>
           </fieldset>
           <div id="watch-fields" hidden>
             <label class="form-field" for="watch-name"><span class="form-label">Model / collection (optional)</span><input id="watch-name" class="add-input" placeholder="e.g. Datejust" maxlength="200" disabled /></label>
@@ -647,6 +648,7 @@
             </label>
 
             <div id="coin-ebay-add" class="form-field form-field-wide coin-ebay-editor" hidden></div>
+            <div id="collectible-ebay-add" class="form-field form-field-wide coin-ebay-editor" hidden></div>
             <div class="form-field form-field-wide ebay-readiness-summary" id="ebay-readiness-summary" aria-live="polite">
               eBay readiness will update as you complete the item.
             </div>
@@ -1087,12 +1089,14 @@
   <script src="additem-layout.js?v=20261105-label-quantity"></script>
   <script src="additem-pricing.js?v=20261011-intake-refinements"></script>
   <script src="inventory-item-facts.js?v=20261011-watch-card"></script>
-  <script src="additem-wizard.js?v=20261011-watch-card"></script>
-  <script src="additem.js?v=20261029-materials3"></script>
+  <script src="collectible-core.js?v=20261105-carvings"></script>
+  <script src="collectible-intake.js?v=20261105-carvings"></script>
+  <script src="additem-wizard.js?v=20261105-carvings"></script>
+  <script src="additem.js?v=20261105-carvings"></script>
   <script src="item-photo-editor.js?v=20261011-photo-studio2"></script>
-  <script src="material-costs-core.js?v=20261029-3"></script>
+  <script src="material-costs-core.js?v=20261105-carvings"></script>
   <script src="additem-material-costs.js?v=20261029-3"></script>
-  <script src="additem-assisted.js?v=20261029-materials3"></script>
-  <script src="additem-intake.js?v=20261105-label-preference"></script>
+  <script src="additem-assisted.js?v=20261105-carvings"></script>
+  <script src="additem-intake.js?v=20261105-carvings"></script>
 </body>
 </html>

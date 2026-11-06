@@ -40,6 +40,7 @@ function handler({ ai = false, lookup = research(), searchFails = false, copyFai
   };
   vm.createContext(context);
   vm.runInContext(readFileSync(new URL('../inventory-item-facts.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../collectible-core.js', import.meta.url), 'utf8'), context);
   vm.runInContext(stripTypeScriptTypes(source), context);
   return { invoke: (body,headers={}) => serveHandler(new Request("https://example.invalid", { method: "POST", headers, body: JSON.stringify(body) })), request: () => aiRequest, requests, clients, signCount: () => signCount };
 }
@@ -323,4 +324,18 @@ test("lookup failures and missing AI config return explicit limitations without 
   assert.match(result.generatedDescription, /Aftermarket diamond bezel/);
   assert.doesNotMatch(result.generatedDescription, /36 mm/);
   assert.equal((await api.invoke({ itemKind: "watch", watchDetails: { name: "Rolex" } })).status, 400);
+});
+
+
+test('carved gemstone copy accepts factual details without requiring a photo, weight or metal purity',async()=>{
+ const api=handler();const result=await(await api.invoke({itemKind:'collectible',collectibleDetails:{objectType:'Vase',material:'Jade',height:'24',dimensionUnit:'cm',conditionNotes:'Chipped rim'},material:'Silver',purity:'925',stoneType:'VVS simulated diamonds'})).json();
+ assert.equal(result.ok,true);assert.equal(result.generatedTitle,'Jade Vase');assert.match(result.generatedDescription,/Height: 24 cm/);assert.match(result.generatedDescription,/Chipped rim/);
+ assert.doesNotMatch(result.generatedDescription,/Silver|925|diamond|antique|jadeite|nephrite/i);assert.equal(api.signCount(),0);
+ const invalid=await api.invoke({itemKind:'collectible',collectibleDetails:{objectType:'Vase',material:'Jade',height:'-1'}});assert.equal(invalid.status,400);
+});
+test('carved gemstone AI receives its own fields and leaves unknown origin, treatment and age unspecified',async()=>{
+ const api=handler({ai:true,copy:{generatedTitle:'Jade Vase',generatedDescription:'Carved jade vase with a chipped rim.'}});
+ const result=await(await api.invoke({itemKind:'collectible',collectibleDetails:{objectType:'Vase',material:'Jade',conditionNotes:'Chipped rim',ebay:{categoryId:'private-selection'}},purity:'925',weight:null})).json();
+ assert.equal(result.ok,true);const prompt=api.request().input[1].content[0].text;assert.match(prompt,/Chipped rim/);assert.doesNotMatch(prompt,/925|private-selection|Watch brand/);
+ assert.match(api.request().input[0].content[0].text,/Never infer age/);
 });

@@ -17,6 +17,7 @@
   const CAPTURE_PHOTO_SETTLE_MS = 4500;
   const CAPTURE_FALLBACK_LOOKBACK_MS = 30000;
   const BACKGROUND_PROCESSING_MAX_SOURCE_SIDE = 1600;
+  const IMAGE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
   const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
   const DEFAULT_RECENT_PHOTO_RELOAD_LIMIT = 5;
@@ -623,7 +624,7 @@
   function addItemDraftHasContent(payload) {
     if (!payload || typeof payload !== "object") return false;
     if (Array.isArray(payload.recentUploadedImages) && payload.recentUploadedImages.length > 0) return true;
-    if (["watch", "coin"].includes(payload.wizard?.itemKind)) return true;
+    if (["watch", "coin", "collectible"].includes(payload.wizard?.itemKind)) return true;
 
     const assisted = payload.assistedFields || {};
     const main = payload.mainFields || {};
@@ -2249,18 +2250,21 @@
     const watchDetails = privateWatch ? window.InventoryItemFacts.publicWatchDetails(privateWatch, asTrimmedString(elements.stoneTypeInput?.value)) : null;
     const publicText = value => privateWatch ? window.InventoryItemFacts.redactWatchSerial(value, privateWatch) : asTrimmedString(value);
     const coinDetails = window.addItemWizard?.getCoinDetails() || null;
+    const collectibleDraft = window.addItemWizard?.getCollectibleDetails();
+    const collectibleDetails = collectibleDraft ? window.CollectibleFacts.normalize(collectibleDraft) : null;
 
     return {
       bucket: asTrimmedString(selectedImage?.storageBucket) || INVENTORY_UPLOAD_BUCKET,
       imagePath: state.aiSelectedUploadedImagePath,
-      itemKind: watchDetails ? "watch" : coinDetails ? "coin" : "jewelry",
+      itemKind: watchDetails ? "watch" : coinDetails ? "coin" : collectibleDetails ? "collectible" : "jewelry",
+      collectibleDetails,
       coinDetails,
       watchDetails,
-      material: coinDetails ? coinDetails.metal : watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
-      purity: coinDetails ? coinDetails.fineness : watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
+      material: collectibleDetails ? collectibleDetails.material : coinDetails ? coinDetails.metal : watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
+      purity: collectibleDetails ? "" : coinDetails ? coinDetails.fineness : watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
       weight: resolveCurrentWeight(elements),
-      stoneType: coinDetails ? "" : asTrimmedString(elements.stoneTypeInput?.value),
-      length: coinDetails || watchDetails ? "" : asTrimmedString(elements.lengthInput?.value),
+      stoneType: coinDetails || collectibleDetails ? "" : asTrimmedString(elements.stoneTypeInput?.value),
+      length: coinDetails || watchDetails || collectibleDetails ? "" : asTrimmedString(elements.lengthInput?.value),
       notes: publicText(elements.notesInput?.value),
       category: getCurrentCategory(elements),
       qrType: asTrimmedString(elements.qrTypeSelect?.value),
@@ -2357,6 +2361,42 @@
     });
   }
 
+  // Upload canvases already have an opaque background. Keep PNG when it fits;
+  // otherwise try high-quality JPEG at the same resolution before resizing.
+  async function canvasToUploadBlob(canvas, type = "image/png", quality) {
+    let blob = await canvasToBlob(canvas, type, quality);
+    if (blob.size <= IMAGE_UPLOAD_MAX_BYTES) return blob;
+
+    for (const jpegQuality of [0.98, 0.95, 0.92, 0.88]) {
+      if (type === "image/jpeg" && jpegQuality >= quality) continue;
+      blob = await canvasToBlob(canvas, "image/jpeg", jpegQuality);
+      if (blob.size <= IMAGE_UPLOAD_MAX_BYTES) return blob;
+    }
+
+    const resized = document.createElement("canvas");
+    let width = canvas.width, height = canvas.height;
+    try {
+      while (width > 1 || height > 1) {
+        const scale = Math.min(0.85, Math.sqrt(IMAGE_UPLOAD_MAX_BYTES / blob.size) * 0.95);
+        width = Math.max(1, Math.floor(width * scale));
+        height = Math.max(1, Math.floor(height * scale));
+        resized.width = width;
+        resized.height = height;
+        const context = resized.getContext("2d");
+        if (!context) throw new Error("Browser image upload preparation is not available.");
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        // Always resample the full export, never a previously resized version.
+        context.drawImage(canvas, 0, 0, width, height);
+        blob = await canvasToBlob(resized, "image/jpeg", 0.92);
+        if (blob.size <= IMAGE_UPLOAD_MAX_BYTES) return blob;
+      }
+      throw new Error("Could not prepare this photo for upload. Your original photo and edits are kept. Please try again.");
+    } finally {
+      resized.width = resized.height = 0;
+    }
+  }
+
   async function createCompressedImageBlobFromFile(file) {
     const sourceUrl = URL.createObjectURL(file);
 
@@ -2383,7 +2423,7 @@
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-      return await canvasToBlob(canvas, "image/jpeg", 0.94);
+      return await canvasToUploadBlob(canvas, "image/jpeg", 0.94);
     } finally {
       URL.revokeObjectURL(sourceUrl);
     }
@@ -2724,7 +2764,7 @@
         context.drawImage(cutoutImage, 0, 0, width, height);
       }
 
-      return await canvasToBlob(canvas, "image/png", 0.95);
+      return await canvasToUploadBlob(canvas);
     } finally {
       URL.revokeObjectURL(cutoutUrl);
     }
@@ -2835,7 +2875,7 @@
           storageBucket: data.bucket,
           sourceType: `processed-${background}-background`,
           sortOrder: -1,
-          mimeType: data.mimeType || "image/png",
+          mimeType: data.mimeType || processedImagePayload.processedMimeType,
         },
         0
       );
@@ -3013,10 +3053,7 @@
       await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
       const outputCanvas = photoEditor.exportCanvas();
 
-      const croppedBlob = await canvasToBlob(outputCanvas, "image/png", 0.95);
-      if (croppedBlob.size > 8 * 1024 * 1024) {
-        throw new Error('This edited photo exceeds the 8 MB upload limit. Your original and edits are kept. Try a smaller source photo.');
-      }
+      const croppedBlob = await canvasToUploadBlob(outputCanvas);
       const dataUrl = await readBlobAsDataUrl(croppedBlob);
       const processedImageBase64 = dataUrl.split(",")[1] || "";
 
@@ -3052,7 +3089,7 @@
           storageBucket: data.bucket,
           sourceType: "edited-crop",
           sortOrder: -2,
-          mimeType: data.mimeType || "image/png",
+          mimeType: data.mimeType || croppedBlob.type,
         },
         0
       );
@@ -3211,12 +3248,14 @@
   function updateCopyMode(elements) {
     const watch = window.addItemWizard?.isWatch();
     const coin = window.addItemWizard?.isCoin();
+    const collectible = window.addItemWizard?.isCollectible();
     const panel = document.getElementById("item-ai-copy");
     if (panel) {
-      panel.hidden = state.activeWorkflow !== "assisted" && !watch && !coin;
-      panel.querySelector("summary").textContent = coin ? "Generate from coin details" : watch ? "Generate from watch reference" : "Generate from selected photo";
+      panel.hidden = state.activeWorkflow !== "assisted" && !watch && !coin && !collectible;
+      panel.querySelector("summary").textContent = collectible ? "Generate from collectible details" : coin ? "Generate from coin details" : watch ? "Generate from watch reference" : "Generate from selected photo";
     }
-    document.getElementById("assisted-copy-help").textContent = coin
+    document.getElementById("assisted-copy-help").textContent = collectible ? "Draft a description from the material, carving, measurements and condition you entered. A photo is optional."
+      : coin
       ? "Draft a title and description from your coin's year, metal, condition and grading details. Photos are optional. This uses the details you enter; it does not authenticate or grade the coin."
       : watch
       ? "Look up the brand and reference from Information to draft your listing. A photo is optional. Your materials and modifications take priority; review the sources and copy before applying."
@@ -3300,7 +3339,7 @@
       addLengthOption(elements, payload.length);
     }
 
-    if (!payload.imagePath && payload.itemKind !== "coin" && !(payload.itemKind === "watch" && payload.watchDetails?.model)) {
+    if (!payload.imagePath && !["coin", "collectible"].includes(payload.itemKind) && !(payload.itemKind === "watch" && payload.watchDetails?.model)) {
       setInlineStatus(elements.generateStatus, payload.itemKind === "watch"
         ? "Enter a reference number in Information, or select a photo, before generating copy."
         : "Select an AI image before generating copy.", "is-error");
@@ -3312,6 +3351,9 @@
       return;
     }
 
+    if (payload.itemKind === 'collectible' && window.CollectibleFacts.validate(payload.collectibleDetails).length) {
+      setInlineStatus(elements.generateStatus, window.CollectibleFacts.validate(payload.collectibleDetails).join(' '), 'is-error'); return;
+    }
     if (payload.itemKind === "coin" && !payload.coinDetails?.name) {
       setInlineStatus(elements.generateStatus, "Enter the coin name / series in Information before generating copy.", "is-error");
       return;
@@ -3349,7 +3391,8 @@
     setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", true);
     setInlineStatus(
       elements.generateStatus,
-      payload.itemKind === "coin" ? "Drafting coin copy from your entered details and optional photo..."
+      payload.itemKind === "collectible" ? "Drafting from your collectible details and optional photo..."
+        : payload.itemKind === "coin" ? "Drafting coin copy from your entered details and optional photo..."
         : payload.itemKind === "watch" && payload.watchDetails?.model
         ? "Looking up the reference and drafting your description with your modifications. This may take about a minute..."
         : "Generating inventory copy from your item details and selected photo...",
@@ -3721,11 +3764,12 @@
       "watch-braceletFit",
       "watch-serial",
       ...Array.from(document.querySelectorAll("#coin-fields input, #coin-fields select, #coin-fields textarea"), (input) => input.id),
+      ...Array.from(document.querySelectorAll("#collectible-fields input, #collectible-fields select, #collectible-fields textarea"), (input) => input.id),
     ].forEach((id) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
       input?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
-      if (id !== 'watch-serial' && (id.startsWith("watch-") || id.startsWith("coin-"))) ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
+      if (id !== 'watch-serial' && (id.startsWith("watch-") || id.startsWith("coin-") || id.startsWith("collectible-"))) ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
         markGeneratedCopyNeedsRefresh(elements, "Item details changed. Generate again to use the updated information.");
         renderWatchReference();
       }));
@@ -3751,7 +3795,7 @@
     autoCopyTimer=setTimeout(()=>{
       if(state.isGeneratingCopy || elements.localImageUploadInput.disabled || document.getElementById('add-item-form').dataset.saving==='true' || document.getElementById('add-item-form').dataset.savedItemId)return;
       const p=collectAssistedWorkflowGenerationInputs(elements), fingerprint=generationFingerprint(elements);
-      const ready=p.itemKind==='coin'?!!p.coinDetails?.name:p.itemKind==='watch'?!!p.watchDetails?.name && !!(p.watchDetails?.model || p.imagePath):!!p.imagePath && !!p.material && !!p.purity && Number.isFinite(p.weight) && p.weight>0;
+      const ready=p.itemKind==='collectible'?!window.CollectibleFacts.validate(p.collectibleDetails).length:p.itemKind==='coin'?!!p.coinDetails?.name:p.itemKind==='watch'?!!p.watchDetails?.name && !!(p.watchDetails?.model || p.imagePath):!!p.imagePath && !!p.material && !!p.purity && Number.isFinite(p.weight) && p.weight>0;
       if(ready && fingerprint!==autoCopyAttempt)void handleGenerateCopy(elements,{automatic:true});
     },1200);
   }

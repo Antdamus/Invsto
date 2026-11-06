@@ -95,6 +95,7 @@ const STOCK_WORKER_ITEM_SELECT = [
   "pricing_status",
   "watch_details",
   "coin_details",
+  "collectible_details",
   "barcode",
   "qr_code",
   "photo_url",
@@ -253,6 +254,7 @@ function inferEbayCategoryOption(item) {
 }
 
 function getEffectiveEbayCategoryOption(item) {
+  if (item?.collectible_details) return item.collectible_details.ebay?.categoryId ? {id:item.collectible_details.ebay.categoryId,label:item.collectible_details.ebay.categoryLabel || 'Collectible'} : null;
   if (item?.coin_details) return item.ebay_category_id ? { id: item.ebay_category_id, label: item.coin_details.ebay?.categoryLabel || `Coins > ${item.ebay_category_id}` } : null;
   return getEbayCategoryOptionById(item?.ebay_category_id) || inferEbayCategoryOption(item);
 }
