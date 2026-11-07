@@ -19,4 +19,6 @@ The public page is a read-only representative review. It has no shopping/cart or
 
 Implementation: `inventory-daily-catalogue.*`, `inventory_daily_catalogues` table and its three RPCs, and `storefront-catalog?daily_catalogue=TOKEN`. Public links use `?share=TOKEN` so index anchors preserve access; the page sets `no-referrer` and `noindex,nofollow`. Only inventory staff can prepare/publish. Existing customer catalogue APIs and workflows are unchanged.
 
+Discounted representative snapshots may retain an explicit `original_retail_price` per item alongside the sale `retail_price`. The public endpoint allows only a finite numeric original above the positive sale price. The shared index and item cards show the original crossed out with the sale price; cards also show the percentage reduction. The same markup is printed. Original prices come from the source report snapshot, never inferred by multiplying a sale price or taken from internal cost/minimum-price fields. Existing reports without an original price keep their ordinary retail display.
+
 Checks: `node --test tests/daily-catalogue.test.mjs tests/daily-catalogue-ui.test.mjs tests/inventory-catalogues.test.mjs tests/catalogue-requests.test.mjs`.

@@ -97,12 +97,19 @@ test('Rare Finds has a fixed start, spans days, excludes older edits, and publis
  }finally{await db.exec('rollback');}
 });
 test('public review endpoint allowlists retail fields and rejects purchasing/invalid tokens',async()=>{
- let handler;const calls=[];
- const client={rpc:async(name)=>{calls.push(name);return{data:{title:'New',recipient:'Manny',source_date:'2026-11-05',prepared_at:'2026-11-05T16:00:00Z',company:'eBay',cost:200,items:[{id:uid,name:'Ring',description:'Silver',category:'Rings',retail_price:250,reference:'OG123',material:'silver',purity_basis_points:9250,weight:2.5,photos:['photo.jpg','https://project.example/storage/v1/object/sign/private/secret.jpg'],minimum_sale_price:20,private:'SECRET'}]}}},storage:{from:bucket=>({createSignedUrls:async paths=>{assert.equal(bucket,'photos');assert.deepEqual([...paths],['photo.jpg']);return{data:paths.map(path=>({path,signedUrl:'https://photos.example/'+path}))};}})}};
+ let handler;const calls=[];let originalPrice=500;
+ const client={rpc:async(name)=>{calls.push(name);return{data:{title:'New',recipient:'Manny',source_date:'2026-11-05',prepared_at:'2026-11-05T16:00:00Z',company:'eBay',cost:200,items:[{id:uid,name:'Ring',description:'Silver',category:'Rings',retail_price:250,original_retail_price:originalPrice,reference:'OG123',material:'silver',purity_basis_points:9250,weight:2.5,photos:['photo.jpg','https://project.example/storage/v1/object/sign/private/secret.jpg'],minimum_sale_price:20,private:'SECRET'}]}}},storage:{from:bucket=>({createSignedUrls:async paths=>{assert.equal(bucket,'photos');assert.deepEqual([...paths],['photo.jpg']);return{data:paths.map(path=>({path,signedUrl:'https://photos.example/'+path}))};}})}};
  const source=await read('supabase/functions/storefront-catalog/index.ts');
  vm.runInNewContext(stripTypeScriptTypes(source.replace(/^import .*;\r?\n/gm,'')),{URL,Response,Map,Set,createClient:()=>client,Deno:{env:{get:()=> 'https://project.example'},serve:fn=>handler=fn}});
  const response=await handler(new Request('https://edge.example/?daily_catalogue='+uid));const data=await response.json();
  assert.equal(response.status,200);assert.equal(calls[0],'shared_inventory_daily_catalogue');assert.deepEqual(data.items[0].images,['https://photos.example/photo.jpg']);assert.equal(data.recipient,'Manny');assert.equal(data.items[0].retail_price,250);assert.ok(!JSON.stringify(data).includes('SECRET'));assert.ok(!JSON.stringify(data).includes('cost'));assert.ok(!JSON.stringify(data).includes('minimum_sale_price'));
+ assert.equal(data.items[0].original_retail_price,500);
+ for(const invalid of [undefined,0,-1,250,100,'500',Infinity,NaN,{cost:900}]){
+  originalPrice=invalid;const result=await(await handler(new Request('https://edge.example/?daily_catalogue='+uid))).json();
+  assert.ok(!Object.hasOwn(result.items[0],'original_retail_price'));
+ }
+ originalPrice=500;const customer=await(await handler(new Request('https://edge.example/?catalogue='+uid))).json();
+ assert.ok(!Object.hasOwn(customer.items[0],'original_retail_price'));
  assert.equal((await handler(new Request('https://edge.example/?daily_catalogue='+uid,{method:'POST'}))).status,405);
  assert.equal((await handler(new Request('https://edge.example/?daily_catalogue=bad'))).status,404);
 });

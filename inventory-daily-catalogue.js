@@ -12,6 +12,15 @@
  let client,record=null,data=null,busy=false,booted=false,signedAt=0;
  function message(text,error=false){$('message').textContent=text;$('message').className=error?'error':'';}
  function missing(items){return items.filter(i=>!(Number(i.retail_price)>0)||!i.images?.length);}
+ function originalPrice(item){
+  const original=item.original_retail_price,current=Number(item.retail_price);
+  return typeof original==='number'&&Number.isFinite(original)&&current>0&&original>current?original:null;
+ }
+ function priceMarkup(item,compact=false){
+  const current=Number(item.retail_price),original=originalPrice(item);
+  if(original===null)return `<strong>${current>0?C.money(current):'Price pending'}</strong>`;
+  return `<span class="catalogue-price${compact?' catalogue-price--compact':''}"><del aria-label="Original price ${C.money(original)}">${C.money(original)}</del><strong aria-label="Sale price ${C.money(current)}">${C.money(current)}</strong>${compact?'':`<span class="discount-badge">${Math.round((1-current/original)*100)}% off</span>`}</span>`;
+ }
  function lock(value){busy=value;for(const el of document.querySelectorAll('#staff-panel button,#staff-panel input'))el.disabled=value;$('print-report').disabled=value;updateActions();}
  function updateActions(){
   if(!$('staff-panel'))return;
@@ -34,19 +43,22 @@
   $('prepared-at').textContent=`Prepared ${timeLabel(data.prepared_at)}`;
   $('style-count').textContent=items.length;$('type-count').textContent=groups.length;
   $('price-range').textContent=prices.length?(Math.min(...prices)===Math.max(...prices)?C.money(prices[0]):`${C.money(Math.min(...prices))} – ${C.money(Math.max(...prices))}`):'Pricing in progress';
+  const discounted=items.some(i=>originalPrice(i)!==null);
+  if($('price-range-label'))$('price-range-label').textContent=discounted?'SALE RANGE · USD':'RETAIL RANGE · USD';
+  if($('retail-caption'))$('retail-caption').textContent=discounted?'Original prices are crossed out. Sale prices are per item in USD. Availability is subject to confirmation.':'Prices shown are retail prices per item in USD. Availability is subject to confirmation.';
   const hero=items.find(i=>i.images?.length);$('hero-image').innerHTML=hero?`<button class="hero-zoom" data-photo="${C.escape(hero.id)}" aria-label="Expand featured photo of ${C.escape(hero.name)}"><img src="${C.escape(C.safeImage(hero.images[0]))}" alt="${C.escape(hero.name)}"><span>View & zoom ${C.expandIcon()}</span></button>`:'';
   $('hero-image').hidden=!hero;
   const incomplete=missing(items);$('readiness').hidden=Boolean(token)||!incomplete.length;
   $('readiness').innerHTML=`<strong>${incomplete.length} ${incomplete.length===1?'item needs':'items need'} attention before publishing</strong><p>All additions are included below. Finish their photos or retail prices in Stock, then gather again.</p>`+incomplete.map(i=>`<a href="#piece-${C.escape(i.id)}">${C.escape(i.name)} · ${[!(Number(i.retail_price)>0)&&'Retail price needed',!i.images?.length&&'Photo needed'].filter(Boolean).join(' · ')}</a>`).join('');
   $('category-index').innerHTML=groups.map((g,n)=>`<a href="#category-${n}">${C.escape(g)}<b>${items.filter(i=>(i.category||'Other')===g).length}</b></a>`).join('');
-  $('item-index').innerHTML=items.length?`<ol class="index-list">${items.map((i,n)=>`<li><span class="index-number">${String(n+1).padStart(2,'0')}</span><a href="#piece-${C.escape(i.id)}">${C.escape(i.name)}</a><strong>${i.retail_price>0?C.money(i.retail_price):'Price pending'}</strong></li>`).join('')}</ol>`:named?'<p>No new item styles have been created since this collection started. Gather latest items after the workers add inventory.</p>':'<p>No new item styles were added on this date.</p>';
+  $('item-index').innerHTML=items.length?`<ol class="index-list">${items.map((i,n)=>`<li><span class="index-number">${String(n+1).padStart(2,'0')}</span><a href="#piece-${C.escape(i.id)}">${C.escape(i.name)}</a>${priceMarkup(i,true)}</li>`).join('')}</ol>`:named?'<p>No new item styles have been created since this collection started. Gather latest items after the workers add inventory.</p>':'<p>No new item styles were added on this date.</p>';
   $('collection').innerHTML=groups.map((g,n)=>`<section class="category-section" id="category-${n}"><header class="category-heading"><div><p class="eyebrow">THE SELECTION / ${String(n+1).padStart(2,'0')}</p><h2>${C.escape(g)}</h2></div><a href="#index">Back to index ↑</a></header><div class="review-grid">${items.filter(i=>(i.category||'Other')===g).map(i=>piece(i,items.indexOf(i)+1)).join('')}</div></section>`).join('');
   updateActions();
  }
  function piece(i,n){
   const images=(i.images||[]).map(C.safeImage).filter(Boolean);
   const facts=[i.purity_basis_points?C.purityLabel(String(i.purity_basis_points),i.material):i.material&&String(i.material).replace(/^./,c=>c.toUpperCase()),Number(i.weight)>0&&`${Number(i.weight)} g`].filter(Boolean);
-  return `<article class="review-piece" id="piece-${C.escape(i.id)}">${images.length?`<button class="piece-photo" data-photo="${C.escape(i.id)}" aria-label="Expand photo of ${C.escape(i.name)}"><img src="${C.escape(images[0])}" loading="lazy" alt="${C.escape(i.name)}"><span>View & zoom ${C.expandIcon()}</span></button>`:'<div class="empty-photo">Photo coming soon</div>'}<div class="piece-copy"><div class="piece-topline"><span>${String(n).padStart(2,'0')} / ${C.escape(i.reference||i.category)}</span><a href="#index">Index ↑</a></div><h3>${C.escape(i.name)}</h3><div class="piece-facts">${facts.map(f=>`<span>${C.escape(f)}</span>`).join('')}</div>${i.description?`<p class="piece-description">${C.escape(i.description)}</p>`:''}${images.length>1?`<div class="photo-strip">${images.map((src,index)=>`<button data-photo="${C.escape(i.id)}" data-index="${index}" aria-label="View photo ${index+1} of ${C.escape(i.name)}"><img src="${C.escape(src)}" loading="lazy" alt="${C.escape(i.name)} · photo ${index+1}"></button>`).join('')}</div>`:''}<div class="piece-price"><small>RETAIL / USD</small><strong>${i.retail_price>0?C.money(i.retail_price):'Price pending'}</strong></div></div></article>`;
+  return `<article class="review-piece" id="piece-${C.escape(i.id)}">${images.length?`<button class="piece-photo" data-photo="${C.escape(i.id)}" aria-label="Expand photo of ${C.escape(i.name)}"><img src="${C.escape(images[0])}" loading="lazy" alt="${C.escape(i.name)}"><span>View & zoom ${C.expandIcon()}</span></button>`:'<div class="empty-photo">Photo coming soon</div>'}<div class="piece-copy"><div class="piece-topline"><span>${String(n).padStart(2,'0')} / ${C.escape(i.reference||i.category)}</span><a href="#index">Index ↑</a></div><h3>${C.escape(i.name)}</h3><div class="piece-facts">${facts.map(f=>`<span>${C.escape(f)}</span>`).join('')}</div>${i.description?`<p class="piece-description">${C.escape(i.description)}</p>`:''}${images.length>1?`<div class="photo-strip">${images.map((src,index)=>`<button data-photo="${C.escape(i.id)}" data-index="${index}" aria-label="View photo ${index+1} of ${C.escape(i.name)}"><img src="${C.escape(src)}" loading="lazy" alt="${C.escape(i.name)} · photo ${index+1}"></button>`).join('')}</div>`:''}<div class="piece-price"><small>${originalPrice(i)!==null?'SALE':'RETAIL'} / USD</small>${priceMarkup(i)}</div></div></article>`;
  }
  async function rpc(name,args){const{data,error}=await client.rpc(name,args);if(error)throw new Error(error.message);return Array.isArray(data)?data[0]:data;}
  async function signDraft(draft){

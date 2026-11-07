@@ -5,11 +5,12 @@ import vm from 'node:vm';
 const read=p=>readFile(new URL('../'+p,import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const saved={id:'draft-id',share_token:'share-id',source_date:'2026-11-05',recipient:'Manny',revision:1,published:null,draft:{recipient:'Manny',source_date:'2026-11-05',prepared_at:'2026-11-05T14:00:00Z',items:[{id:'one',name:'Silver <Pendant>',category:'Pendants',retail_price:420,reference:'OG1',photos:['one.jpg']}]}};
-async function harness({publicView=false,incomplete=false,branded=false,published=false,collection=false}={}){
+async function harness({publicView=false,incomplete=false,branded=false,published=false,collection=false,originalPrice}={}){
  const elements=new Map(),handlers=new Map(),calls=[],storage=new Map(),history=[],scripts=[];
  const staffIds=new Set(['staff-panel','gather','today','source-date','publish','unpublish','copy-link','draft-actions','share-panel','back-catalogues']);
  const el=id=>{if(branded&&staffIds.has(id))return null;if(!elements.has(id))elements.set(id,{id,hidden:false,disabled:false,value:'',textContent:'',innerHTML:'',addEventListener:(type,fn)=>handlers.set(id+':'+type,fn)});return elements.get(id);};
  const row=structuredClone(saved);if(collection){row.catalogue_key='rare-finds';row.source_start_at='2026-11-05T18:33:00Z';Object.assign(row.draft,{title:'Rare Finds',source_start_at:row.source_start_at,catalogue_key:'rare-finds'});}if(incomplete)row.draft.items[0].retail_price=null;if(published)row.published=structuredClone(row.draft);
+ if(originalPrice!==undefined)row.draft.items[0].original_retail_price=originalPrice;
  const queries=[];const query={select:()=>query,eq:(key,value)=>{queries.push({key,value});return query;},order:()=>query,limit:async()=>({data:[row]})};
  const client={auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},from:()=>query,storage:{from:()=>({createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:'https://photos.example/'+path}))})})},rpc:async(name,args)=>{calls.push({name,args});return{data:structuredClone(row)}}};
  const document={body:{dataset:{catalogueAudience:branded?'public':'staff'}},readyState:'complete',getElementById:el,querySelectorAll:()=>[],addEventListener:()=>{},createElement:()=>({}),head:{append:s=>{scripts.push(s.src);queueMicrotask(()=>s.onload());}}};
@@ -28,6 +29,26 @@ test('incomplete items remain visible and cannot be published; titles escaped in
 test('shared review has retail prices, safe anchors, no staff panel or authentication script',async()=>{
  const h=await harness({publicView:true});assert.equal(h.el('recipient').textContent,'Prepared for Manny · eBay');assert.match(h.el('collection').innerHTML,/\$420\.00/);assert.match(h.el('collection').innerHTML,/href="#index"/);assert.equal(h.scripts.length,0);assert.equal(h.calls.length,0);
  const html=await read('inventory-daily-catalogue.html');assert.match(html,/<section id="staff-panel"[^>]*hidden/);assert.match(html,/name="referrer" content="no-referrer"/);
+});
+
+test('discounted reports show original and sale prices in both index and printable item cards',async()=>{
+ const h=await harness({publicView:true,branded:true,originalPrice:840});
+ for(const id of ['item-index','collection']){
+  assert.match(h.el(id).innerHTML,/<del aria-label="Original price \$840\.00">\$840\.00<\/del>/);
+  assert.match(h.el(id).innerHTML,/<strong aria-label="Sale price \$420\.00">\$420\.00<\/strong>/);
+ }
+ assert.match(h.el('collection').innerHTML,/50% off/);assert.match(h.el('collection').innerHTML,/SALE \/ USD/);
+ assert.equal(h.el('price-range-label').textContent,'SALE RANGE · USD');
+ assert.match(h.el('retail-caption').textContent,/Original prices are crossed out/);
+});
+
+test('ordinary reports and invalid reference prices do not claim a discount',async()=>{
+ for(const originalPrice of [undefined,420,200,0,-1,'840',Infinity,NaN,'<img onerror=alert(1)>']){
+  const h=await harness({publicView:true,branded:true,originalPrice});
+  assert.doesNotMatch(h.el('item-index').innerHTML,/<del|Sale price/);
+  assert.doesNotMatch(h.el('collection').innerHTML,/<del|discount-badge|SALE \/ USD|onerror/);
+  assert.equal(h.el('price-range-label').textContent,'RETAIL RANGE · USD');
+ }
 });
 
 test('published links always use the branded website regardless of the staff page origin',async()=>{

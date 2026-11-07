@@ -62,6 +62,9 @@ async function sharedCatalogue(client: any, token: string, projectUrl: string, d
       id: item.id, name: item.name, description: item.description,
       retail_price: item.retail_price, category: item.category,
       ...(daily ? {reference:item.reference,material:item.material,purity_basis_points:item.purity_basis_points,weight:item.weight} : {}),
+      ...(daily && typeof item.original_retail_price === "number" && Number.isFinite(item.original_retail_price)
+        && Number(item.retail_price) > 0 && item.original_retail_price > Number(item.retail_price)
+        ? {original_retail_price:item.original_retail_price} : {}),
       images: (item.photos || []).map((p: string) => signed.get(keys.get(p) || "") || external.get(p)).filter(Boolean),
     })),
     expires_in: 300,
@@ -188,7 +191,7 @@ Deno.serve(async (req) => {
         const allowed = allowedByItem.get(id);
         return allowed && allowed.has(first) ? first : null;
       })
-      .filter(Boolean)
+      .filter((key): key is string => Boolean(key))
   ) as string[];
 
   const signedMap = new Map<string, string>();
