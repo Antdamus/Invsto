@@ -31,6 +31,7 @@ before(async()=>{
  grant update on time_entries to authenticated;grant insert,update,delete on shift_adjustments to authenticated;
  `);
  await db.exec(await readFile(new URL('../supabase/migrations/20261011170000_audited_open_shift_corrections.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261107010000_audited_break_corrections.sql',import.meta.url),'utf8'));
 });
 after(()=>db?.close());
 beforeEach(async()=>{
@@ -131,3 +132,45 @@ test('location timeout is not mislabeled as denied permission',()=>{
  assert.match(geoError(1),/blocked/);assert.match(geoError(3),/too long/);assert.doesNotMatch(geoError(3),/blocked/);
 });
 
+
+const originalBreak=[{id:id(20),started_at:at('20:37'),ended_at:null}];
+async function breakCorrection({expected=originalBreak, breaks=[{...originalBreak[0],ended_at:at('21:07')}], end=at('22:52')}={}){
+ return db.query('select * from admin_correct_shift_with_breaks($1,$2,$3,$4,$5,$6,$7,$8)',[id(10),at('16:19'),at('23:00'),at('16:19'),end,'Correct pickup-day break and clock-out per supervisor',JSON.stringify(expected),JSON.stringify(breaks)]);
+}
+async function breakFixture(){
+ await db.exec(`update time_entries set clock_out='${at('23:00')}'; insert into time_breaks values('${id(20)}','${id(10)}','${at('20:37')}',null); insert into shift_approvals values('${id(10)}','approved')`);
+}
+test('corrects unclosed break and earlier clock-out atomically with full audit and refreshed totals',async()=>{
+ await breakFixture();await breakCorrection();
+ const audit=(await db.query('select * from shift_adjustments')).rows[0];
+ assert.deepEqual(audit.fields_changed,['clock_out','breaks']);assert.equal(audit.old_value.breaks[0].ended_at,null);
+ assert.equal(Date.parse(audit.new_value.breaks[0].ended_at),Date.parse(at('21:07')));
+ assert.equal((await db.query('select * from shift_approvals')).rows.length,0);
+ assert.equal((await db.query('select * from test_refresh')).rows.length,2);
+ assert.equal(audit.new_value.photo_in_path,'original-in.jpg');
+});
+test('break-only correction saves and no-op does not duplicate audit',async()=>{
+ await breakFixture();await breakCorrection({end:at('23:00')});
+ assert.deepEqual((await db.query('select fields_changed from shift_adjustments')).rows[0].fields_changed,['breaks']);
+ const breaks=[{...originalBreak[0],ended_at:at('21:07')}];
+ await breakCorrection({expected:breaks,breaks,end:at('23:00')});
+ assert.equal((await db.query('select * from shift_adjustments')).rows.length,1);
+});
+test('stale breaks, foreign IDs, deletion, duplicate IDs, invalid ranges, overlap and payroll lock reject without writes',async()=>{
+ await breakFixture();
+ await assert.rejects(breakCorrection({expected:[]}),/changed after/);
+ for(const breaks of [[],[{...originalBreak[0],id:id(99)}],[originalBreak[0],originalBreak[0]]]) await assert.rejects(breakCorrection({breaks}),/existing breaks/);
+ for(const ended_at of [null,at('20:00'),at('23:30'),'2099-01-01T00:00:00Z']) await assert.rejects(breakCorrection({breaks:[{...originalBreak[0],ended_at}]}),/Each break/);
+ await db.exec(`insert into test_locked values('${at('16:00')}','${at('23:59')}')`);
+ await assert.rejects(breakCorrection(),/locked/);
+ await db.exec('truncate test_locked');
+ await db.exec(`insert into time_breaks values('${id(21)}','${id(10)}','${at('21:00')}','${at('22:00')}')`);
+ const second={id:id(21),started_at:at('21:00'),ended_at:at('22:00')};
+ await assert.rejects(breakCorrection({expected:[...originalBreak,second],breaks:[{...originalBreak[0],ended_at:at('21:07')},second]}),/overlap/);
+ assert.equal((await db.query('select * from shift_adjustments')).rows.length,0);
+ assert.equal((await db.query('select ended_at from time_breaks where id=$1',[id(20)])).rows[0].ended_at,null);
+});
+test('break correction requires active admin',async()=>{
+ await breakFixture();await db.query("select set_config('test.user',$1,false)",[id(2)]);
+ await assert.rejects(breakCorrection(),/active administrator/);
+});

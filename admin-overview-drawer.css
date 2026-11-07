@@ -1407,3 +1407,7 @@ body.time-correction-open{overflow:hidden;}
 #editModal .form-row:has(#editOutField.hidden){grid-template-columns:1fr;}
 .live-status{display:flex;flex-direction:column;align-items:flex-start;gap:7px;}
 .live-status .corrected{color:#c9dfcd;border-color:#638063;background:#29422f;}
+
+.correction-break{min-width:0;margin:16px 0;padding:12px 16px;border:1px solid #3d473f;border-radius:14px;}
+.correction-break legend{color:#edd28b;font-weight:600;padding:0 6px;}
+.correction-break p{color:#bac5bb;font-size:12px;line-height:1.5;margin-bottom:0;}

@@ -7,7 +7,7 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
-  <link rel="stylesheet" href="admin-overview-drawer.css?v=20261018-delete-shift" />
+  <link rel="stylesheet" href="admin-overview-drawer.css?v=20261107-break-corrections" />
   <link rel="stylesheet" href="admin-weekly-hours.css?v=20261101-breaks" />
   <link rel="stylesheet" href="admin-schedule.css?v=20260901-schedule-time-selects" />
   <link rel="stylesheet" href="admin-payroll.css" />
@@ -1160,13 +1160,14 @@
         </label>
       </div>
 
+      <div id="editBreaks"></div>
       <div class="correction-preview" aria-live="polite"><span>Corrected shift duration</span><strong id="editDuration">—</strong><span id="editDifference"></span></div>
 
       <label class="reason">
         <span>Reason (required)</span>
         <textarea id="editReason" rows="3" maxlength="2000" required placeholder="Example: Arrived at 9:45 AM; forgot to clock in. Arrival confirmed by supervisor."></textarea>
       </label>
-      <p class="correction-audit-note">Your name, the date, reason, and before/after times are saved in the audit trail. Original photos, location evidence, and breaks are preserved. Finished shifts return to review.</p>
+      <p class="correction-audit-note">Your name, the date, reason, and before/after times are saved in the audit trail. Original photos and location evidence are preserved. Break changes are saved with their before/after times. Finished shifts return to review.</p>
 
       <div id="editError" class="error hidden" role="alert"></div>
     </section>
@@ -1549,7 +1550,7 @@
   <script src="admin-overview.js?v=20261101-weekly-hours"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>
-  <script src="admin.js?v=20261101-weekly-hours"></script>
+  <script src="admin.js?v=20261107-break-corrections"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

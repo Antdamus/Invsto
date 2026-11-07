@@ -1210,7 +1210,11 @@ function renderAuditList(container, audits, shiftId){
     const diffs=[];
     if(fields.includes('clock_in')) diffs.push(`<div>Clock-in · Before <code>${escapeHtml(fmtLocal(oldIn))}</code> → After <code>${escapeHtml(fmtLocal(newIn))}</code></div>`);
     if(fields.includes('clock_out')) diffs.push(`<div>Clock-out · Before <code>${escapeHtml(oldOut ? fmtLocal(oldOut) : 'Open')}</code> → After <code>${escapeHtml(newOut ? fmtLocal(newOut) : 'Open')}</code></div>`);
-    const canRevert = !!(oldIn && oldOut && (fields.includes('clock_in') || fields.includes('clock_out')));
+    if(fields.includes('breaks')) for(const b of a.new_value?.breaks||[]){
+      const old=(a.old_value?.breaks||[]).find(o=>o.id===b.id);
+      if(old && (old.started_at!==b.started_at || old.ended_at!==b.ended_at)) diffs.push(`<div>Break · Before <code>${escapeHtml(fmtLocal(old.started_at))} – ${escapeHtml(old.ended_at ? fmtLocal(old.ended_at) : 'Open')}</code> → After <code>${escapeHtml(fmtLocal(b.started_at))} – ${escapeHtml(b.ended_at ? fmtLocal(b.ended_at) : 'Open')}</code></div>`);
+    }
+    const canRevert = !fields.includes('breaks') && !!(oldIn && oldOut && (fields.includes('clock_in') || fields.includes('clock_out')));
     const actionLabel = fields.find(f => String(f || '').startsWith('manual_')) || 'time_edit';
     return `
       <div class="ai" data-adjustment-id="${escapeHtml(a.id)}">
@@ -1340,7 +1344,9 @@ async function openShiftCorrection(entryId, displayName){
     await ensureStoresCache();
     const {data, error} = await supabaseClient.from('time_entries').select('id,employee_id,store_id,clock_in,clock_out').eq('id',entryId).single();
     if (error) throw error;
-    openEditModal({...data, display_name:displayName});
+    const {data:breaks,error:breakError}=await supabaseClient.from('time_breaks').select('id,started_at,ended_at').eq('time_entry_id',entryId).order('started_at');
+    if(breakError) throw breakError;
+    openEditModal({...data, breaks:breaks||[], display_name:displayName});
   } catch(err){ showToast(err?.message || 'Could not load this shift.', 'err'); }
 }
 function openEditModal(shift){
@@ -1355,6 +1361,7 @@ function openEditModal(shift){
   qs('editOut').disabled=!shift.clock_out;
   qs('editOut').required=!!shift.clock_out;
   show(qs('editOutField'),!!shift.clock_out); show(qs('editOpenNotice'),!shift.clock_out);
+  qs('editBreaks').innerHTML=shift.breaks.length ? shift.breaks.map((b,i)=>`<fieldset class="correction-break"><legend>Break ${i+1}</legend><div class="form-row"><label><span>Break start</span><input id="editBreakStart${i}" type="datetime-local" required value="${TimeCorrection.localValue(b.started_at,editTimeZone)}" /></label><label><span>Break end</span><input id="editBreakEnd${i}" type="datetime-local" ${shift.clock_out ? 'required' : ''} value="${TimeCorrection.localValue(b.ended_at,editTimeZone)}" /></label></div><p>Recorded: ${escapeHtml(formatCorrectionTime(b.started_at))} → ${b.ended_at ? escapeHtml(formatCorrectionTime(b.ended_at)) : 'Still on break'}</p></fieldset>`).join('') : '<p>No breaks recorded for this shift.</p>';
   qs('editReason').value=''; setEditError(''); updateEditDuration();
   qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden');
   qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden');
@@ -1371,22 +1378,40 @@ function closeEditModal(){
   qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden');
   editReturnFocus?.focus();
 }
+function correctionISO(value,original){
+  return original && TimeCorrection.localValue(original,editTimeZone)===value ? original : TimeCorrection.toISO(value,editTimeZone,original);
+}
 function correctionValues(){
   return {
-    start:TimeCorrection.toISO(qs('editIn').value,editTimeZone,editingShift.clock_in),
-    end:editingShift.clock_out ? TimeCorrection.toISO(qs('editOut').value,editTimeZone,editingShift.clock_out) : null
+    start:correctionISO(qs('editIn').value,editingShift.clock_in),
+    end:editingShift.clock_out ? correctionISO(qs('editOut').value,editingShift.clock_out) : null,
+    breaks:editingShift.breaks.map((b,i)=>({id:b.id,
+      started_at:correctionISO(qs(`editBreakStart${i}`).value,b.started_at),
+      ended_at:qs(`editBreakEnd${i}`).value ? correctionISO(qs(`editBreakEnd${i}`).value,b.ended_at) : null}))
   };
+}
+function breakTimesChanged(next,previous){
+  return next.some((b,i)=>['started_at','ended_at'].some(k=>(b[k] ? Date.parse(b[k]) : null)!==(previous[i][k] ? Date.parse(previous[i][k]) : null)));
+}
+function validateCorrectionBreaks(breaks,start,end){
+  const sorted=[...breaks].sort((a,b)=>Date.parse(a.started_at)-Date.parse(b.started_at));
+  sorted.forEach((b,i)=>{
+    const from=Date.parse(b.started_at),to=b.ended_at ? Date.parse(b.ended_at) : null;
+    if(from<Date.parse(start) || from>Date.now() || (to!==null && (to<=from || to>Date.now())) || (end && (to===null || to>Date.parse(end)))) throw new Error('Each break must end after it starts and stay within the shift, without future times.');
+    if(i && (!sorted[i-1].ended_at || Date.parse(sorted[i-1].ended_at)>from)) throw new Error('Breaks cannot overlap.');
+  });
 }
 function updateEditDuration(){
   if(!editingShift) return;
   try {
-    const {start,end}=correctionValues();
+    const {start,end,breaks}=correctionValues();
+    validateCorrectionBreaks(breaks,start,end);
     const endMs=end ? Date.parse(end) : Date.now();
     const diff=endMs-Date.parse(start);
     const before=(editingShift.clock_out ? Date.parse(editingShift.clock_out) : endMs)-Date.parse(editingShift.clock_in);
     qs('editDuration').textContent=diff>0 ? `${fmtDurationHM(diff)}${end ? '' : ' so far'}` : 'Check the times';
     const delta=Math.round((diff-before)/60000);
-    qs('editDifference').textContent=delta ? `${delta>0 ? '+' : '−'}${fmtDurationHM(Math.abs(delta)*60000)} compared with the recorded shift` : 'No time change';
+    qs('editDifference').textContent=delta ? `${delta>0 ? '+' : '−'}${fmtDurationHM(Math.abs(delta)*60000)} compared with the recorded shift` : (breakTimesChanged(breaks,editingShift.breaks) ? 'Break times changed' : 'No time change');
   } catch(err){ qs('editDuration').textContent='Check the times'; qs('editDifference').textContent=err.message; }
 }
 function setEditError(msg){ const el=qs('editError'); el.textContent=msg||''; show(el,!!msg); }
@@ -1395,20 +1420,22 @@ async function saveEdit(){
   const shift={...editingShift};
   const reason=qs('editReason').value.trim();
   let values;
-  try { values=correctionValues(); } catch(err){ return setEditError(err.message); }
+  try { values=correctionValues(); validateCorrectionBreaks(values.breaks,values.start,values.end); } catch(err){ return setEditError(err.message); }
   const {start,end}=values;
   if(Date.parse(start)>Date.now() || (end && Date.parse(end)>Date.now())) return setEditError('Worked times cannot be in the future.');
   if(end && Date.parse(end)<=Date.parse(start)) return setEditError('Clock-out must be after clock-in.');
   if(reason.length<3) { setEditError('Please explain why this time is being corrected.'); qs('editReason').focus(); return; }
-  if(Date.parse(start)===Date.parse(shift.clock_in) && (!end || Date.parse(end)===Date.parse(shift.clock_out))) return setEditError('Change a time before saving a correction.');
+  if(!breakTimesChanged(values.breaks,shift.breaks) && Date.parse(start)===Date.parse(shift.clock_in) && (!end || Date.parse(end)===Date.parse(shift.clock_out))) return setEditError('Change a time before saving a correction.');
   setEditError(''); saving=true;
   ['editSaveBtn','editCloseBtn','editCancelBtn','editIn','editOut','editReason'].forEach(id=>qs(id).disabled=true);
+  qs('editBreaks').querySelectorAll('input').forEach(el=>el.disabled=true);
   qs('editSaveBtn').textContent='Saving…';
   let saved=false;
   try {
-    const {error}=await supabaseClient.rpc('admin_correct_shift_time', {
+    const {error}=await supabaseClient.rpc('admin_correct_shift_with_breaks', {
       _time_entry_id:shift.id, _expected_clock_in:shift.clock_in, _expected_clock_out:shift.clock_out,
-      _new_clock_in:start, _new_clock_out:end, _reason:reason
+      _new_clock_in:start, _new_clock_out:end, _reason:reason,
+      _expected_breaks:shift.breaks, _new_breaks:values.breaks
     });
     if(error) throw error;
     saved=true; auditCache.delete(shift.id);
@@ -1416,6 +1443,7 @@ async function saveEdit(){
   finally {
     saving=false;
     ['editSaveBtn','editCloseBtn','editCancelBtn','editIn','editReason'].forEach(id=>qs(id).disabled=false);
+    qs('editBreaks').querySelectorAll('input').forEach(el=>el.disabled=false);
     qs('editOut').disabled=!shift.clock_out; qs('editSaveBtn').textContent='Save correction';
   }
   if(!saved) return;
@@ -1435,6 +1463,7 @@ function wireEditModal(){
   qs('editModalBackdrop').addEventListener('click',closeEditModal);
   qs('editIn').addEventListener('input',updateEditDuration);
   qs('editOut').addEventListener('input',updateEditDuration);
+  qs('editBreaks').addEventListener('input',updateEditDuration);
   qs('editSaveBtn').addEventListener('click',saveEdit);
   document.addEventListener('keydown',e=>{
     if(qs('editModal').classList.contains('hidden')) return;
