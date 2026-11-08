@@ -7,6 +7,8 @@
  const day=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric',year:'numeric'});
  const stamp=s=>s?new Date(s).toLocaleString('en-US',{timeZone:zone,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Not recorded';
  const localDay=s=>new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(s));
+ const showDate=s=>(s.scheduled_start||s.starts_at)?localDay(s.scheduled_start||s.starts_at):null;
+ const showDateLabel=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'long',day:'numeric',year:'numeric'});
  const hours=ms=>{const m=Math.round(Math.max(0,ms)/60000);return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m';};
  const airtime=seconds=>seconds==null?'Not recorded':Math.floor(seconds/3600)+'h '+String(Math.floor(seconds%3600/60)).padStart(2,'0')+'m '+String(seconds%60).padStart(2,'0')+'s';
  const sum=(a,k)=>a.reduce((n,r)=>n+Math.round(Number(r[k]||0)*100),0)/100;
@@ -36,8 +38,10 @@
   const inPeriod=shows.filter(s=>s.inPeriod),timed=inPeriod.filter(s=>s.airtime_seconds!=null);
   return {data,week,period,rows,shows,inPeriod,timed,airtime:sum(timed,'airtime_seconds')};
  }
- function table(headers,rows,cls=''){
-  return '<div class="wpr-table-wrap"><table class="'+cls+'"><thead><tr>'+headers.map(h=>'<th scope="col">'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(cells=>'<tr>'+cells.map((c,i)=>'<'+(i?'td':'th scope="row"')+'>'+c+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</tbody></table></div>';
+ function table(headers,rows,cls='',caption=''){
+  return '<div class="wpr-table-wrap"><table class="'+cls+'">'+(caption?'<caption>'+caption+'</caption>':'')+
+   (cls==='wpr-shows'?'<colgroup><col style="width:27%"><col style="width:17%"><col style="width:14%"><col span="5" style="width:8.4%"></colgroup>':'')+
+   '<thead><tr>'+headers.map(h=>'<th scope="col">'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(cells=>'<tr>'+cells.map((c,i)=>'<'+(i?'td':'th scope="row"')+'>'+c+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</tbody></table></div>';
  }
  const saleCells=a=>['booked','cancelled','refunded','held','net'].map(k=>money(sum(a,k)));
  const saleHeaders=['Original sales','Canceled','Refunded','Under review','Net sales'];
@@ -52,18 +56,25 @@
   const sellerNames=[...new Set([...rows.map(r=>r.seller),...m.inPeriod.map(s=>s.seller)])];
   const sellers=sellerNames.map(name=>{const a=rows.filter(r=>r.seller===name),shows=m.inPeriod.filter(s=>s.seller===name),timed=shows.filter(s=>s.airtime_seconds!=null);return {name,a,shows,timed};}).sort((a,b)=>sum(b.a,'net')-sum(a.a,'net'));
   const daily=(m.data.days||[]).filter(d=>!m.week||d.week===m.week).map(d=>{const a=rows.filter(r=>r.day===d.day);return [day(d.day),String(a.length),...saleCells(a)];});
-  const showRows=shows.map(s=>{const a=rows.filter(r=>r.show===s.event_id);return [
+  const showRow=s=>{const a=rows.filter(r=>r.show===s.event_id);return [
    '<a target="_blank" rel="noopener" href="https://www.ebay.com/ebaylive/events/'+encodeURIComponent(s.event_id)+'?playback=true">'+esc(s.title||'Untitled show')+'</a><small>'+esc(s.seller)+(s.inPeriod?'':s.starts_at?' · Started outside selected dates':' · Start not recorded')+'</small>',
    esc(stamp(s.scheduled_start||s.starts_at))+(s.scheduled_start&&Date.parse(s.scheduled_start)!==Date.parse(s.starts_at)?'<small>Previously recorded: '+esc(stamp(s.starts_at))+'</small>':''),
-   esc(airtime(s.airtime_seconds))+(s.airtime_provisional?'<small>Processing</small>':'')+'<small>'+ (s.airtime_checked_at?'Checked '+esc(stamp(s.airtime_checked_at)):'')+'</small>',...saleCells(a)];});
-  for(const [key,a] of groups(rows.filter(r=>!r.show),r=>r.show_source))showRows.push([key==='multiple'?'Multiple shows — review':'Show not linked','—','—',...saleCells(a)]);
+   esc(airtime(s.airtime_seconds))+(s.airtime_provisional?'<small>Processing</small>':'')+'<small>'+ (s.airtime_checked_at?'Checked '+esc(stamp(s.airtime_checked_at)):'')+'</small>',...saleCells(a)];};
+  const showHeaders=['Show / seller','Scheduled start · Eastern','Airtime',...saleHeaders];
+  let showTables=groups(shows,s=>showDate(s)||'unknown').sort(([a],[b])=>a.localeCompare(b)).map(([date,list])=>{
+   const ordered=[...list].sort((a,b)=>Date.parse(a.scheduled_start||a.starts_at)-Date.parse(b.scheduled_start||b.starts_at));
+   const caption='<strong>'+esc(date==='unknown'?'Show date not recorded':showDateLabel(date))+'</strong><span>'+list.length+' '+(list.length===1?'show':'shows')+' · Eastern time</span>';
+   return '<div class="wpr-show-day" data-show-day="'+date+'">'+table(showHeaders,ordered.map(showRow),'wpr-shows',caption)+'</div>';
+  }).join('');
+  const unlinked=groups(rows.filter(r=>!r.show),r=>r.show_source).map(([key,a])=>[key==='multiple'?'Multiple shows — review':'Show not linked','—','—',...saleCells(a)]);
+  if(unlinked.length)showTables+='<div class="wpr-show-day wpr-show-unlinked">'+table(showHeaders,unlinked,'wpr-shows','<strong>Sales without one linked show</strong><span>Show date not assigned</span>')+'</div>';
   const known=rows.filter(r=>r.show_source==='captured').length,estimated=rows.filter(r=>r.show_source==='time_window').length;
   return '<article class="wpr-paper"><header class="wpr-masthead"><div><span>OG JEWELERS · OPERATIONS</span><h1>Sales, shows & streamer hours</h1><p>'+day(period.from)+' – '+day(period.through)+'</p></div><div class="wpr-stamp">Eastern time<br>Snapshot '+esc(stamp(m.data.as_of))+'</div></header>'+
    '<div class="wpr-kpis">'+[['Net item sales',money(sum(rows,'net'))],['Orders',rows.length],['Reported airtime',airtime(m.airtime)],['Average show length',m.timed.length?airtime(Math.round(m.airtime/m.timed.length)):'Not recorded']].map(([a,b])=>'<div><small>'+a+'</small><strong>'+esc(b)+'</strong></div>').join('')+'</div>'+
    '<p class="wpr-lede">Net sales are merchandise sales after cancellations, refunds and amounts under review, before fees. These sales reconcile to the selected weekly report.</p>'+
    '<section><h2>01 · Sales produced by seller</h2>'+table(['Seller',...saleHeaders,'Shows','Reported airtime'],sellers.map(s=>[esc(s.name),...saleCells(s.a),s.timed.length+' / '+s.shows.length+' timed',airtime(sum(s.timed,'airtime_seconds'))]))+'</section>'+
    '<section><h2>02 · Sales by purchase day</h2>'+table(['Purchase date','Orders',...saleHeaders],daily)+'</section>'+
-   '<section><h2>03 · Show schedule & performance</h2><p>'+m.timed.length+' of '+m.inPeriod.length+' shows have recorded airtime. '+(m.timed.length?'Average recorded show length: '+airtime(Math.round(m.airtime/m.timed.length))+'. ':'')+'Each show is counted once in airtime totals, on its recorded start date.</p>'+table(['Show / seller','Scheduled start · Eastern','Airtime',...saleHeaders],showRows,'wpr-shows')+
+   '<section><h2>03 · Show schedule & performance</h2><p>'+m.timed.length+' of '+m.inPeriod.length+' shows have recorded airtime. '+(m.timed.length?'Average recorded show length: '+airtime(Math.round(m.airtime/m.timed.length))+'. ':'')+'Shows are grouped by their scheduled start date in Eastern time. Each show is counted once in airtime totals, on its recorded start date.</p>'+showTables+
    '<p class="wpr-note">Scheduled times are not verified actual go-live times. Airtime comes from eBay Live Studio Insights; processing values may change. An end time is not inferred from a scheduled start. Sales are grouped by purchase date; a show crossing midnight can span multiple days. Airtime totals include only shows starting within these dates; missing durations are excluded.</p></section>'+
    '<section id="wpr-streamer-hours"><h2>04 · Streaming hours by streamer</h2>'+table(['Streamer','Shows','Shows timed','Total streaming hours','Average show length','Longest show'],sellers.map(s=>[esc(s.name),String(s.shows.length),s.timed.length+' / '+s.shows.length,s.timed.length?airtime(sum(s.timed,'airtime_seconds')):'Not recorded',s.timed.length?airtime(Math.round(sum(s.timed,'airtime_seconds')/s.timed.length)):'Not recorded',s.timed.length?airtime(Math.max(...s.timed.map(s=>s.airtime_seconds))):'Not recorded']))+'<p class="wpr-note">Streaming hours are the full reported airtime of distinct shows starting in these dates. Each show counts once. Shows with no duration are excluded from totals and averages; processing durations are provisional. A show with multiple sellers stays in a review group rather than crediting its full airtime to more than one person.</p></section>'+
    '<section><h2>05 · Coverage & attribution</h2><p>'+known+' orders have confirmed show links; '+estimated+' are estimated from show time; '+(rows.length-known-estimated)+' are not linked to one show. Estimated links may include off-show purchases.</p><p>Saved report assignments take priority, followed by recorded sellers. Otherwise, shows starting from 6 PM through 7:59 AM Eastern are assigned to Otello. From 8 AM through 5:59 PM, Saturday and Sunday shows default to Manuella; Monday through Friday shows default to Sydney. The show’s Eastern start date determines the day. A show with multiple attributed sellers remains in a review group for airtime. This report does not change commission assignments.</p></section>'+
