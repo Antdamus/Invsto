@@ -11,4 +11,7 @@ test('observed catalog import separates unavailable metrics from zero and exclud
  const winter=prepareRows([{...event,cells:[event.cells[0],'11/2/25 10:30pm EST',...event.cells.slice(2)]}],[{...observed,metrics:[{name:'Length of stream',value:'03:21:03'},{name:'TOTAL SALES',value:'$0.00'},{name:'PAID ITEMS',value:'0'}]}])[0];
  assert.equal(winter.starts_at,'2025-11-02T22:30:00-05:00');assert.equal(winter.insights.sales_status,'ready');assert.equal(winter.insights.studio_gross_including_tax_shipping,0);
  assert.throws(()=>prepareRows([event],[]),/Missing Insights/);assert.ok(!importSql(rows).includes('seller_override='));
+ for(const [value,expected] of [['06m 08s',368],['00m 00s',0],['Data unavailable',null],['06m 60s',null]]){
+  const r=prepareRows([event],[{...observed,metrics:[...observed.metrics,{name:'AVG VIEWING TIME',value}]}])[0];assert.equal(r.insights.average_viewing_seconds,expected);
+ }
 });

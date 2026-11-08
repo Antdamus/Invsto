@@ -86,3 +86,19 @@ test('commercial evidence reconciles money without exposing buyers or inventing 
  assert.ok(!JSON.stringify(c).toLowerCase().includes('alice'));assert.ok(!JSON.stringify(c).includes('c1'));
  await db.exec('set role authenticated');await assert.rejects(db.query("select streamer_commercial_details('{}','2026-08-01','2026-08-04')"),/permission denied/);await db.exec('reset role');
 });
+
+
+test('saved audience viewing time backfill retains zero, rejects missing values and preserves financial fields',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('audience-time','Audience','2026-10-01T22:00-04:00',3600,'{"metrics":[{"name":"AVG VIEWING TIME","value":"06m 08s"}],"total_viewers":1000}'),
+ ('audience-zero','Audience zero','2026-10-02T22:00-04:00',3600,'{"metrics":[{"name":"AVG VIEWING TIME","value":"00m 00s"}]}'),
+ ('audience-missing','Audience missing','2026-10-03T22:00-04:00',3600,'{"metrics":[{"name":"AVG VIEWING TIME","value":"Data unavailable"}]}');`);
+ const before=(await db.query("select get_streamer_performance_history('2026-10-01','2026-10-04') r")).rows[0].r;
+ await db.exec(await readFile(new URL('../supabase/migrations/20261108090000_show_audience_watch_time.sql',import.meta.url),'utf8'));
+ const after=(await db.query("select get_streamer_performance_history('2026-10-01','2026-10-04') r")).rows[0].r;
+ assert.equal(after.shows.find(s=>s.event_id==='audience-time').insights.average_viewing_seconds,368);
+ assert.equal(after.shows.find(s=>s.event_id==='audience-zero').insights.average_viewing_seconds,0);
+ assert.equal(after.shows.find(s=>s.event_id==='audience-missing').insights.average_viewing_seconds,undefined);
+ assert.deepEqual(after.shows.map(({insights,...s})=>s),before.shows.map(({insights,...s})=>s));
+ assert.ok(after.shows.every(s=>s.insights.metrics===undefined));
+});

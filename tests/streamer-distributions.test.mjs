@@ -9,6 +9,47 @@ const period={from:'2026-11-02',through:'2026-11-08'},filters={seller:'Otello',f
 const show=(id,net,start='2026-10-04T22:15-04:00',extra={})=>({event_id:id,title:'Rolex watch show',seller:'Otello',seller_source:'time_rule',scheduled_start:start,orders:1,linked_lines:1,net,airtime_seconds:18000,insights:{sales_status:'ready',paid_items:1},commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:0,net,orders:1}]},...extra});
 const history=shows=>({from:'2025-08-07',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows});
 const model=shows=>A.build(history(shows),period,filters);
+test('selling nights group 6 PM through next-day 5:59 AM, across month and DST boundaries',()=>{
+ const dates=['2026-10-05T17:59-04:00','2026-10-05T18:00-04:00','2026-10-06T02:00-04:00','2026-10-06T05:59-04:00','2026-10-06T06:00-04:00','2026-11-01T01:30-04:00','2026-11-01T01:30-05:00'];
+ const shows=dates.map((d,i)=>show(String(i),100,d)),m=A.build(history(shows),period,{...filters,dayMode:'night'}),d=D.build(m);
+ assert.equal(m.rows.length,5);assert.deepEqual(Array.from(d.starts),[18,1,2,5]);assert.equal(d.daily.length,2);
+ assert.equal(d.daily[0].day,'2026-10-05');assert.equal(d.daily[0].shows.length,3);assert.equal(d.daily[0].net,300);assert.equal(d.daily[0].airtime,54000);
+ assert.equal(d.daily[1].day,'2026-10-31');assert.equal(d.daily[1].shows.length,2);assert.equal(m.rows.find(s=>s.event_id==='5').weekday,5);
+ const mon=A.build(history(shows),period,{...filters,dayMode:'night',weekday:'0'});assert.equal(mon.rows.length,3);assert.match(D.render(mon),/Monday → Tuesday/);
+ const boundary=A.build(history([show('previous-night',100,'2026-11-02T02:00-05:00'),show('current-night',100,'2026-11-02T18:00-05:00')]),period,{...filters,dayMode:'night'});
+ assert.equal(boundary.rows.length,1);assert.equal(boundary.rows[0].day,'2026-11-01');assert.equal(boundary.selected,1);
+});
+test('traffic metrics preserve missing and zero values, conversion and non-currency labels',()=>{
+ const m=model([show('viewed',100,undefined,{insights:{status:'ready',sales_status:'ready',paid_items:1,total_viewers:1000,peak_viewers:40,purchasers:20,average_viewing_seconds:368,new_followers:0}}),show('missing',100)]);
+ const a=D.build(m,{distMetric:'audience:total_viewers'});assert.equal(a.rows.length,1);assert.equal(a.stats.median,1000);
+ assert.equal(D.build(m,{distMetric:'audience:new_followers'}).stats.median,0);assert.equal(D.build(m,{distMetric:'audience:conversion'}).stats.median,2);
+ const html=D.render(m,{distMetric:'audience:total_viewers'});assert.match(html,/Median <b>1,000/);assert.doesNotMatch(html,/Median <b>\$1,000/);assert.match(html,/Peak concurrent/);
+ const details=D.render(m,{distShow:'viewed'});assert.match(details,/6m 8s/);assert.match(details,/hourly viewer curve is unavailable/);
+});
+test('per-show elapsed hours retain zero intervals, partial exposure and adjustments at original purchase time',()=>{
+ const s=show('overnight',420,'2026-11-01T01:30-04:00',{booked:600,cancelled:100,refunded:50,held:30,airtime_seconds:9000,orders:3,commercial:{version:1,orders:3,precise_orders:3,halves:[{bin:0,orders:1,booked:300,net:200},{bin:1,orders:1,booked:100,net:100},{bin:4,orders:1,booked:200,net:120}]}});
+ const h=D.elapsedHours(s);assert.equal(h.available,true);
+ assert.deepEqual(Array.from(h.rows,r=>[r.index,r.exposure,r.orders,r.booked,r.net,r.rate,r.complete]),[[0,3600,2,400,300,300,true],[1,3600,0,0,0,0,true],[2,1800,1,200,120,240,false]]);
+ assert.equal(h.outsideNet,0);assert.equal(D.finance(s).reconciled,true);
+ assert.equal(D.finance({...s,net:421}).reconciled,false);assert.equal(D.finance({...s,refunded:null}).complete,false);
+ assert.equal(D.elapsedHours({...s,airtime_provisional:true}).available,false);
+ assert.equal(D.elapsedHours({...s,commercial:{...s.commercial,precise_orders:2}}).available,false);
+ assert.equal(D.elapsedHours({...s,net:450}).outsideNet,30);
+ const html=D.render(model([s]),{distShow:'overnight'});assert.match(html,/Original sales − canceled − refunded − under review/);assert.match(html,/2–3h · partial/);assert.match(html,/2h 30m 00s/);
+ const csv=D.csvRows(model([s]),{});assert.ok(csv.some(r=>r[0]==='Elapsed hour'&&r[3]==='2–3'&&r[4]===1800&&r[9]===240));
+});
+test('elapsed-hour distributions use complete eligible intervals and exclude missing timestamp evidence',()=>{
+ const a=show('a',500),m=model([a,show('partial',200,undefined,{airtime_seconds:5400}),show('missing',300,undefined,{commercial:null})]);
+ const first=D.build(m,{distMetric:'elapsed:0'}),second=D.build(m,{distMetric:'elapsed:1'});
+ assert.equal(first.rows.length,2);assert.equal(first.stats.median,350);assert.equal(second.rows.length,1);assert.equal(second.stats.median,0);assert.equal(second.excluded,2);
+});
+test('monthly start-hour matrix retains missing months and honors Sunday and month-position scope',()=>{
+ const shows=[show('aug',100,'2026-08-02T22:00-04:00'),show('oct',300,'2026-10-04T22:00-04:00'),show('early',500,'2026-10-04T19:00-04:00'),show('monday',10000,'2026-10-05T22:00-04:00'),show('later',900,'2026-10-25T22:00-04:00')];
+ const m=A.build(history(shows),period,{...filters,weekday:'6'}),d=D.build(m,{distMonth:'2026-10',distStart:'22',distOccurrence:'1'});
+ assert.deepEqual(Array.from(d.monthGroups,g=>g.month),['2026-08','2026-09','2026-10']);assert.equal(d.monthGroups[1].cells[0].stats.n,0);
+ assert.equal(d.monthGroups[2].cells.find(c=>c.hour===22).stats.median,300);assert.equal(d.rows.length,1);assert.equal(d.monthGroups[0].rows.length,1);
+ assert.match(D.render(m,{distOccurrence:'1'}),/data-sde-month="2026-08"/);
+});
 test('skewed data retains zeros and extremes, with auditable medians, quartiles and counts',()=>{
  const m=model([0,100,200,300,10000].map((n,i)=>show(String(i),n))),d=D.build(m);
  assert.equal(d.stats.median,200);assert.equal(d.stats.mean,2120);assert.equal(d.stats.q1,100);assert.equal(d.stats.q3,300);

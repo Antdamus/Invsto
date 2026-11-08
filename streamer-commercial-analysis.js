@@ -21,6 +21,13 @@
  const seconds=s=>Number(s.airtime_seconds||0);
  const halfAmount=(s,b,key='net')=>sum((s.commercial?.halves||[]).filter(r=>Number(r.bin)===b),key);
  const interval=(s,from,to,key='net')=>sum((s.commercial?.halves||[]).filter(r=>r.bin>=from&&r.bin<to),key);
+ function showDay(s,mode){
+  if(mode!=='night')return {...s,calendar_day:s.day,day_mode:'calendar'};
+  const hour=etHour(s.scheduled_start||s.starts_at);if(hour>=6&&hour<18)return null;
+  const date=new Date(s.day+'T12:00Z');if(hour<6)date.setUTCDate(date.getUTCDate()-1);
+  const day=date.toISOString().slice(0,10),dateNumber=Number(day.slice(8));
+  return {...s,calendar_day:s.day,day_mode:'night',day,month:day.slice(0,7),weekday:(date.getUTCDay()+6)%7,phase:dateNumber<=10?0:dateNumber<=20?1:2};
+ }
  function exposure(s,h){
   let value=0;const start=Date.parse(s.scheduled_start||s.starts_at),end=start+seconds(s)*1000;
   // Walk UTC hour boundaries so overnight and DST transitions retain elapsed time.
@@ -36,13 +43,15 @@
   const seller=names.includes(options.seller)?options.seller:names[0]||'';
   const format=options.format??(seller==='Otello'?'Watch-focused title':'all');
   const weekday=options.weekday??(seller==='Otello'?'6':'all');
-  let rows=base.past.filter(s=>s.seller===seller&&(format==='all'||s.format===format)&&(weekday==='all'||s.weekday===Number(weekday)));
+  const dayMode=options.dayMode==='night'?'night':'calendar';
+  const usable=base.usable.map(s=>showDay(s,dayMode)).filter(Boolean);
+  let rows=usable.filter(s=>s.day<period.from&&s.seller===seller&&(format==='all'||s.format===format)&&(weekday==='all'||s.weekday===Number(weekday)));
   const titles=[...new Set(rows.map(s=>s.title))].sort();
   const series=titles.includes(options.series)?options.series:'all';
   if(series!=='all')rows=rows.filter(s=>s.title===series);
   const minHours=[3,5,8].includes(Number(options.minHours))?Number(options.minHours):5;
   const enriched=rows.filter(valid),timed=enriched.filter(s=>seconds(s)>=900&&!s.airtime_provisional&&Number(s.commercial.precise_orders??0)===Number(s.orders));
-  const cohort=timed.filter(s=>seconds(s)>=minHours*3600),starts=group(cohort,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>a-b);
+  const cohort=timed.filter(s=>seconds(s)>=minHours*3600),starts=group(cohort,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>dayMode==='night'?(a+6)%24-(b+6)%24:a-b);
   const clock=Array.from({length:24},(_,h)=>{
    const entries=timed.map(s=>({s,hours:exposure(s,h)})).filter(r=>r.hours>=1-1e-9);
    return {hour:h,n:entries.length,net:median(entries.map(({s,hours})=>sum((s.commercial.clocks||[]).filter(c=>c.hour===h),'net')/hours))};
@@ -56,7 +65,7 @@
   const retention=[['Under 30 days',0,30],['30–59 days',30,60],['60–89 days',60,90],['90–179 days',90,180],['180–364 days',180,365],['365+ days',365,Infinity]].map(([name,low,high])=>{
    const a=rows.filter(s=>age(s)>=low&&age(s)<high),booked=sum(a,'booked'),net=sum(a,'net');return {name,n:a.length,booked,cancelled:sum(a,'cancelled'),refunded:sum(a,'refunded'),held:sum(a,'held'),net,retained:ratio(net,booked)};
   }).filter(r=>r.n);
-  const buckets=group(rows,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>a-b);
+  const buckets=group(rows,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>dayMode==='night'?(a+6)%24-(b+6)%24:a-b);
   const audience=buckets.map(([start,a])=>{const complete=a.filter(s=>s.insights?.sales_status==='ready'&&Number.isFinite(s.insights?.total_viewers)&&Number.isFinite(s.insights?.purchasers));return {start,n:complete.length,total:a.length,viewers:median(complete.map(s=>s.insights.total_viewers)),buyers:median(complete.map(s=>s.insights.purchasers)),conversion:median(complete.map(s=>ratio(s.insights.purchasers,s.insights.total_viewers))),returning:median(complete.map(s=>Number.isFinite(s.insights.returning_viewers_percent)?s.insights.returning_viewers_percent/100:null)),followers:median(complete.map(s=>s.insights.new_followers))};});
   const concentration=buckets.map(([start,a])=>{const orders=a.filter(valid).filter(s=>s.net>0),buyers=orders.filter(s=>s.commercial.missing_buyer_orders===0&&s.commercial.largest_buyer_net!=null),rates=orders.filter(s=>s.rate!=null);return {start,n:orders.length,buyerN:buyers.length,largestOrder:median(orders.map(s=>ratio(s.commercial.largest_order_net,s.net))),largestBuyer:median(buyers.map(s=>ratio(s.commercial.largest_buyer_net,s.net))),topThree:median(orders.map(s=>ratio(s.commercial.top_three_orders_net,s.net))),rate:median(rates.map(s=>s.rate)),withoutOrder:median(rates.map(s=>(s.net-s.commercial.largest_order_net)/(seconds(s)/3600))),withoutBuyer:median(buyers.filter(s=>s.rate!=null).map(s=>(s.net-s.commercial.largest_buyer_net)/(seconds(s)/3600)))};});
   const calendar=key=>group(rows,key).map(([name,a])=>({name,n:a.length,months:new Set(a.map(s=>s.month)).size,net:median(a.map(s=>s.net)),rate:median(a.map(s=>s.rate)),starts:group(a,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>a-b).map(([h,r])=>hour(h)+': '+r.length).join(' · ')}));
@@ -70,16 +79,17 @@
    }
    matched.push({start,n:a.length,groups:lifts.length,targets,controls,lift:lifts.length>=3?median(lifts):null});
   }
-  return {history,period,names,seller,format,weekday,series,titles,minHours,rows,enriched,timed,cohort,starts,clock,brands,prices,retention,audience,concentration,sunday,seasons:calendar(s=>season(s.month)),matched,
+  return {history,period,names,seller,format,weekday,dayMode,series,titles,minHours,rows,enriched,timed,cohort,starts,clock,brands,prices,retention,audience,concentration,sunday,seasons:calendar(s=>season(s.month)),matched,
    halves:timing(cohort,1,minHours*2),hours:timing(timed,2,Math.min(14,Math.floor(Math.max(0,...timed.map(seconds))/3600))),
-   selected:base.current.filter(s=>s.seller===seller).length,missingDetails:rows.length-enriched.length,identifiedLines:sum(merchandise.filter(r=>r.evidence!=='Not identified'),'lines'),lines:sum(merchandise,'lines')};
+   selected:usable.filter(s=>s.day>=period.from&&s.day<=period.through&&s.seller===seller).length,missingDetails:rows.length-enriched.length,identifiedLines:sum(merchandise.filter(r=>r.evidence!=='Not identified'),'lines'),lines:sum(merchandise,'lines')};
  }
  function select(label,key,value,values){return '<label>'+label+'<select data-sca-filter="'+key+'" aria-label="'+label+'">'+values.map(([v,t])=>'<option value="'+esc(v)+'"'+(String(v)===String(value)?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></label>';}
  function render(history,period,options){
   const m=build(history,period,options);
   const controls='<div class="sca-controls">'+select('Analysis streamer','seller',m.seller,m.names.map(n=>[n,n]))+select('Show group','format',m.format,[['all','All show titles'],['Watch-focused title','Watch-focused titles'],['Other jewelry title','Other jewelry titles'],['Trading cards','Trading cards']])+select('Start weekday','weekday',m.weekday,[['all','All weekdays'],...weekdays.map((w,i)=>[String(i),w])])+select('Show series','series',m.series,[['all','All matching titles'],...m.titles.map(t=>[t,t])])+select('Timing comparison length','minHours',m.minHours,[[3,'First 3 hours'],[5,'First 5 hours'],[8,'First 8 hours']])+'</div>';
-  const scope=esc(m.seller)+' · '+esc(m.format==='all'?'All show titles':m.format)+' · '+esc(m.weekday==='all'?'All weekdays':weekdays[Number(m.weekday)])+' · '+esc(m.series==='all'?'All matching titles':m.series);
-  const head='<h2>07 · What drives show results</h2>'+controls+'<p class="sca-scope"><strong>'+scope+'</strong><br>Prior shows only, before '+esc(period.from)+'. '+countLabel(m.rows.length)+'; '+countLabel(m.timed.length)+' with complete timestamp coverage and finalized airtime.</p>';
+  const scope=esc(m.seller)+' · '+esc(m.format==='all'?'All show titles':m.format)+' · '+esc(m.weekday==='all'?'All weekdays':weekdays[Number(m.weekday)])+' · '+esc(m.series==='all'?'All matching titles':m.series)+' · '+(m.dayMode==='night'?'Selling nights · 6 PM–6 AM':'Calendar start dates');
+  const mode=select('Show day grouping','dayMode',m.dayMode,[['calendar','Calendar start date'],['night','Selling night · 6 PM–6 AM']]);
+  const head='<h2>07 · What drives show results</h2>'+controls.replace('</div>','<div class="sca-day-mode">'+mode+'</div></div>')+'<p class="sca-scope"><strong>'+scope+'</strong><br>Prior shows only, before '+esc(period.from)+'. '+countLabel(m.rows.length)+'; '+countLabel(m.timed.length)+' with complete timestamp coverage and finalized airtime.</p><p class="wpr-note">'+(m.dayMode==='night'?'Selling nights use Eastern start times from 6 PM inclusive to 6 AM exclusive the following morning. Tuesday at 2 AM belongs to Monday night. Weekday, month and month-position filters use the evening date. Daytime starts are excluded; each qualifying show keeps all of its sales and airtime, even after 6 AM. Actual scheduled timestamps stay visible. This mode applies to Show insights; earlier report sections retain calendar dates.':'Calendar mode assigns every show to its Eastern start date, including all overnight sales.')+'</p>';
   if(!m.rows.length)return head+'<p class="wpr-warning">No usable prior shows match these filters. Choose another show group, weekday or streamer.</p>';
   const max=Math.max(1,...m.halves.map(h=>h.net||0));
   let heat='';
@@ -95,12 +105,12 @@
   const audience=block('Audience and buyer conversion','Finalized eBay Studio metrics from the same shows within each start-hour group. Conversion is purchasers divided by viewers per show, then the median; missing values remain unavailable. Viewers across shows are not unique people. Returning viewers are not the same as repeat buyers.',table(['Start hour','Shows with metrics','Median viewers','Median buyers','Buyer conversion','Returning viewers','New followers'],m.audience.map(r=>[hour(r.start),r.n+' / '+r.total,num(r.viewers),num(r.buyers),pct(r.conversion),pct(r.returning),num(r.followers)])));
   const concentration=block('Dependence on large purchases','Per-show median shares of current net sales. The sensitivity columns remove each show’s largest order or largest known buyer and recompute sales per hour. Buyer results require complete buyer identification. An order can contain several items.',table(['Start hour','Shows / buyer-complete','Largest order share','Top 3 orders share','Largest buyer share','Net / hour','Without largest order','Without largest buyer'],m.concentration.map(r=>[hour(r.start),r.n+' / '+r.buyerN,pct(r.largestOrder),pct(r.topThree),pct(r.largestBuyer),money(r.rate),money(r.withoutOrder),money(r.withoutBuyer)])));
   const calendarRows=a=>a.map(r=>[esc(r.name),String(r.n),String(r.months),money(r.net),money(r.rate),esc(r.starts)]);
-  const calendar=block('Season and Sunday position','Descriptive comparisons within the selected streamer and show filters. Season groups use calendar winter (Dec–Feb), spring, summer and fall. A show crossing midnight belongs to its Eastern start date. Sunday position means first, second, third, fourth or fifth Sunday of that month.',table(['Season','Shows','Months','Median net / show','Median net / hour','Start-hour samples'],calendarRows(m.seasons))+table(['Sunday position','Shows','Months','Median net / show','Median net / hour','Start-hour samples'],calendarRows(m.sunday.map(r=>({...r,name:r.name==='Other weekdays'?r.name:['','First Sunday','Second Sunday','Third Sunday','Fourth Sunday','Fifth Sunday'][Number(r.name)]})))));
+  const calendar=block('Season and Sunday position','Descriptive comparisons within the selected streamer and show filters. Season groups use winter (Dec–Feb), spring, summer and fall. Dates follow the selected calendar / selling-night mode. Sunday position means first, second, third, fourth or fifth Sunday of that grouping month.',table(['Season','Shows','Months','Median net / show','Median net / hour','Start-hour samples'],calendarRows(m.seasons))+table(['Sunday position','Shows','Months','Median net / show','Median net / hour','Start-hour samples'],calendarRows(m.sunday.map(r=>({...r,name:r.name==='Other weekdays'?r.name:['','First Sunday','Second Sunday','Third Sunday','Fourth Sunday','Fifth Sunday'][Number(r.name)]})))));
   const adjusted=block('Calendar-matched timing evidence','Matching requires the same calendar month and year, weekday, Sunday position (or month phase on other days), and exact show title. Each comparison needs two shows per start group and at least three repeated groups. One Sunday per month usually leaves no within-month comparison at the same Sunday position. A missing result is not a zero effect.',table(['Start hour','Shows','Comparable groups','Matched shows / controls','Median hourly difference'],m.matched.map(r=>[hour(r.start),String(r.n),String(r.groups),r.targets+' / '+r.controls,r.lift==null?'Insufficient evidence':pct(r.lift)]))+'<p class="wpr-note">These controls do not remove differences in inventory, promotions or audience. Use a balanced prospective test across Sunday positions; a year-round optimum has not been established.</p>');
   return head+'<p class="wpr-note">'+sum(m.rows,'estimated_orders')+' of '+sum(m.rows,'orders')+' order-to-show links are estimated. '+m.rows.filter(s=>s.seller_source==='time_rule').length+' host assignments are estimated. '+m.missingDetails+' shows lack detailed evidence. '+sum(m.enriched,s=>s.commercial.before_start_orders||0)+' orders precede the listed start; '+sum(m.enriched,s=>s.commercial.after_duration_orders||0)+' fall beyond the duration. Both are excluded from timing tables.</p>'+(window.StreamerDistributions?window.StreamerDistributions.render(m,options):'')+rhythm+mix+retention+duration+clock+audience+concentration+calendar+adjusted;
  }
  function csvRows(history,period,options){
-  const m=build(history,period,options),r=[[],['What drives show results','Streamer',m.seller,'Show group',m.format,'Weekday',m.weekday,'Series',m.series],['Prior baseline ends before',period.from,'Snapshot',history.as_of,'Usable shows',m.rows.length,'Timing cohort hours',m.minHours],['Timing method','Scheduled starts; estimated links possible; only complete intervals; current net before fees and costs'],[],['Elapsed 30-minute block','Common cohort shows','Median net sales','Median orders']];
+  const m=build(history,period,options),r=[[],['What drives show results','Streamer',m.seller,'Show group',m.format,'Weekday',m.weekday,'Series',m.series,'Day grouping',m.dayMode],['Prior baseline ends before',period.from,'Snapshot',history.as_of,'Usable shows',m.rows.length,'Timing cohort hours',m.minHours],['Timing method','Scheduled starts; estimated links possible; only complete intervals; current net before fees and costs'],[],['Elapsed 30-minute block','Common cohort shows','Median net sales','Median orders']];
   for(const x of m.halves)r.push([x.index*30+'–'+(x.index+1)*30+' minutes',x.n,x.net,x.orders]);
   r.push([],['Start hour Eastern','Elapsed minutes','Common cohort shows','Median net sales']);
   for(const [h,a] of m.starts)for(let b=0;b<m.minHours*2;b++)r.push([hour(h),b*30,a.length,median(a.map(s=>halfAmount(s,b)))]);
@@ -116,5 +126,5 @@
   if(window.StreamerDistributions)r.push(...window.StreamerDistributions.csvRows(m,options));
   return r;
  }
- window.StreamerCommercialAnalysis={build,render,csvRows,timing,exposure,season};
+ window.StreamerCommercialAnalysis={build,render,csvRows,timing,exposure,season,showDay};
 })();

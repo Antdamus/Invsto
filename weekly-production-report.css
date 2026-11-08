@@ -97,9 +97,41 @@
 .sde-records{margin:10px 0 20px;border:1px solid #cfdbd2;padding:12px;border-radius:5px}
 .sde-records summary{cursor:pointer;font-weight:600;scroll-margin-top:110px}
 .sde-records[open] summary{margin-bottom:10px}
+.sde-days{margin:22px 0;padding:12px;border:1px solid #cfdbd2;border-radius:5px}
+.sde-days summary{font-weight:bold;cursor:pointer}
+.sde-days th:first-child{white-space:normal;min-width:210px}
+.sde-weekday-focus{display:flex;flex-wrap:wrap;gap:7px;margin:18px 0}
+.sde-weekday-focus button,.sde-shows button{border:1px solid #b1c5b6;background:#f6f9f5;border-radius:5px;padding:8px 12px}
+.sde-weekday-focus button[aria-pressed=true]{background:#214c36;color:#fff;border-color:#214c36}
+.sde-finance{display:grid;gap:4px;font-size:11px;margin:10px 0;font-variant-numeric:tabular-nums}
+.sde-finance>span{display:flex!important;justify-content:space-between;gap:10px}
+.sde-finance>span:last-child{border-top:1px solid #b6c9b9;padding-top:5px;font-weight:bold}
+.sde-show-detail{padding:16px 20px;border:1px solid #b59a53;background:#fffdf5;border-radius:6px;margin:14px 0;scroll-margin-top:100px}
+.sde-show-detail:focus{outline:2px solid #b59a53;outline-offset:2px}
+.sde-show-detail>.sde-finance{grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;font-size:12px;margin:16px 0}
+.sde-show-detail>.sde-finance>span{display:block!important}
+.sde-show-detail>.sde-finance b{display:block;font-size:17px;margin-top:5px}
+.sde-show-detail>.sde-finance>span:last-child{border-top:0;padding-top:0;color:#214c36}
+.sde-tooltip table{width:100%;border-collapse:collapse;font-size:10px;text-align:right}
+.sde-tooltip th,.sde-tooltip td{padding:5px 3px;border-bottom:1px solid #dedfce}
+.sde-tooltip th:first-child{text-align:left}
+.sde-tooltip .sde-finance{max-width:340px}
+.sde-audience{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;font-size:11px;margin:12px 0;padding-top:10px;border-top:1px solid #cfdbd2}
+.sde-audience b{display:block!important}
+.sde-show-detail>.sde-audience{grid-template-columns:repeat(3,minmax(0,1fr));font-size:12px}
+.sde-show-detail>.sde-audience b{font-size:17px}
+.sde-shows button{margin-top:9px;font-size:11px}
+.wpr-paper .sde-hourly{font-variant-numeric:tabular-nums}
+.sde-monthly{margin:28px 0}
+.sde-month-table{table-layout:fixed}
+.sde-month-table button{display:block;width:100%;border:0;padding:9px 5px;background:rgba(53,109,82,var(--shade));border-radius:4px}
+.sde-month-table button:hover,.sde-month-table button:focus-visible{outline:2px solid #947127}
+.sde-month-table button small{display:block}
+.sde-month-table td{text-align:center;min-width:90px}
 .wpr-paper .sde-shows th:first-child{width:32%;min-width:200px}
 .wpr-paper .sde-shows td{white-space:normal}
 @media(max-width:700px){.sde-controls{grid-template-columns:1fr}.sde-small-multiples{grid-template-columns:1fr 1fr}.sde-card{padding:8px}.sde-card button{font-size:11px}.sde-records{padding:8px}.sde-records summary{scroll-margin-top:240px}.sde-stats{gap:10px 16px}.sde-stats span{min-width:40%}}
+@media(max-width:700px){.sde-show-detail{padding:12px;scroll-margin-top:240px}.sde-show-detail>.sde-finance{grid-template-columns:repeat(2,minmax(0,1fr))}.sde-show-detail>.sde-finance b{font-size:15px}.sde-month-table{min-width:560px}}
 @media print{
  body.wpr-printing .sde-tooltip{display:none!important}
  body.wpr-printing .sde-chart-panel{break-inside:avoid;margin:16px 0}
@@ -115,7 +147,13 @@
  body.wpr-printing .sde-card button{font-size:10px;padding:4px}
  body.wpr-printing .sde-card p{font-size:9px}
  body.wpr-printing .sde-selection button{display:none}
+ body.wpr-printing .sde-weekday-focus,body.wpr-printing .sde-shows button{display:none}
+ body.wpr-printing .sde-show-detail{break-inside:avoid}
+ body.wpr-printing .sde-month-table{min-width:0}
+ body.wpr-printing .sde-month-table button{color:#193b29;font-size:10px;padding:5px}
  body.wpr-printing .sde-records:not([open]){display:none}
+ body.wpr-printing .sde-days:not([open]){display:none}
+ body.wpr-printing .sde-days{border:0;padding:0}
  body.wpr-printing .sde-records{border:0;padding:0}
  body.wpr-printing .sde-shows{table-layout:fixed}
  body.wpr-printing .sde-shows th:first-child{min-width:0;width:32%}

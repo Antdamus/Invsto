@@ -143,7 +143,7 @@
     content.querySelector('[data-sca-filter="'+key+'"]').focus({preventScroll:true});
    });
    const distributionAction=e=>{
-    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start]');
+    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start],[data-sde-weekday]');
     if(!button||m.history?.status!=='ready')return;
     if(e.type==='keydown'&&(button.tagName.toLowerCase()==='button'||!['Enter',' '].includes(e.key)))return;
     e.preventDefault();
@@ -151,8 +151,10 @@
     if(button.hasAttribute('data-sde-bin'))options.distBin=button.dataset.sdeBin;
     if(button.hasAttribute('data-sde-show'))options.distShow=button.dataset.sdeShow;
     if(button.hasAttribute('data-sde-start'))options.distStart=button.dataset.sdeStart;
+    if(button.hasAttribute('data-sde-month'))options.distMonth=button.dataset.sdeMonth;
+    if(button.hasAttribute('data-sde-weekday')){options.weekday=button.dataset.sdeWeekday;options.distStart='all';options.distMonth='all';}
     m.analysisOptions=options;content.querySelector('#wpr-commercial').innerHTML=commercial(m);
-    const target=content.querySelector(button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-records summary');
+    const target=content.querySelector(button.hasAttribute('data-sde-weekday')?'[data-sde-weekday="'+options.weekday+'"]':button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-show-detail, .sde-records summary');
     target?.focus({preventScroll:true});target?.scrollIntoView({block:'center'});
    };
    content.addEventListener('click',distributionAction);content.addEventListener('keydown',distributionAction);

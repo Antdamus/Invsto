@@ -21,9 +21,11 @@ export function prepareRows(events,observations){
   const duration=get('Length of stream');
   const seconds=duration&&/^\d+:\d{2}:\d{2}$/.test(duration)?duration.split(':').reduce((n,v)=>n*60+Number(v),0):null;
   const paid=number(get('PAID ITEMS')),gross=number(get('TOTAL SALES'));
+  const viewing=get('AVG VIEWING TIME')?.match(/^(\d+)m ([0-5]\d)s$/);
   const insights={category:cells[3],status:seconds==null?'unavailable':'ready',
    sales_status:gross==null?'unavailable':'ready',source_url:event.href,checked_at:observed.checked_at,
    paid_items:paid,total_viewers:number(get('Total viewers')),peak_viewers:number(get('PEAK CONCURRENT VIEWERS')),
+   average_viewing_seconds:viewing?Number(viewing[1])*60+Number(viewing[2]):null,
    studio_gross_including_tax_shipping:gross,studio_in_stream_sales:number(get('In-stream sales')),
    studio_average_sales_price:number(get('AVG SALES PRICE')),studio_in_stream_average_sales_price:number(get('In-stream avg sales price')),
    new_followers:number(get('NEW FOLLOWERS')),returning_viewers_percent:number(get('RETURNING VIEWERS')),
