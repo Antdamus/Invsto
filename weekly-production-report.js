@@ -99,10 +99,34 @@
   if(window.StreamerPerformance)rows.push(...window.StreamerPerformance.csvRows(m.history,m.period));
   return '\ufeff'+rows.map(row=>row.map(v=>{let s=String(v??'');if(typeof v!=='number'&&/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}).join(',')).join('\r\n');
  }
+ async function fetchHistory(client,period,months,isCurrent=()=>true){
+  const end=new Date(period.through+'T12:00Z');end.setUTCDate(end.getUTCDate()+1);
+  const until=end.toISOString().slice(0,10),recent=new Date(period.through.slice(0,7)+'-01T12:00Z');recent.setUTCMonth(recent.getUTCMonth()-2);
+  let target=null;
+  if(months!=='all'){const start=new Date(period.through.slice(0,7)+'-01T12:00Z');start.setUTCMonth(start.getUTCMonth()-Number(months)+1);target=start.toISOString().slice(0,10);}
+  const chunks=[];
+  const read=async(from,to)=>{
+   const {data,error}=await client.rpc('get_streamer_performance_history',{_from:from,_until:to});
+   if(error)throw error;if(!data||!Array.isArray(data.shows))throw Error('Historical records were not returned.');
+   chunks.push(data);return data;
+  };
+  let boundary=recent.toISOString().slice(0,10);
+  const first=await read(boundary,until);if(!isCurrent())return null;
+  if(target===null){const earliest=Date.parse(first.coverage?.first_show);target=Number.isFinite(earliest)?localDay(earliest):boundary;if(target>boundary)target=boundary;}
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(target)||target<'2000-01-01')throw Error('Historical start date could not be verified.');
+  while(boundary>target){
+   const previous=new Date(boundary+'T12:00Z');previous.setUTCDate(1);previous.setUTCMonth(previous.getUTCMonth()-3);
+   const from=previous.toISOString().slice(0,10)<target?target:previous.toISOString().slice(0,10);
+   await read(from,boundary);if(!isCurrent())return null;boundary=from;
+  }
+  const coverage={...first.coverage};for(const key of ['orders','unlinked_orders','unlinked_net'])coverage[key]=sum(chunks.map(c=>c.coverage||{}),key);
+  return {...first,from:boundary,until,as_of:chunks.map(c=>c.as_of).sort().at(-1),coverage,
+   shows:[...new Map(chunks.flatMap(c=>c.shows).map(s=>[s.event_id,s])).values()]};
+ }
  function open(data,week,client,focusHours=false){
   let m;try{m=model(JSON.parse(JSON.stringify(data)),week);}catch(e){window.alert(e.message);return;}
   const modal=document.createElement('dialog');modal.className='wpr-dialog';modal.setAttribute('aria-label','Production report');
-  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="3">3 months</option><option value="6" selected>6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
+  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="all" selected>All available</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
   const content=modal.querySelector('.wpr-content'),print=modal.querySelector('[data-wpr-print]'),download=modal.querySelector('[data-wpr-csv]');
   const draw=()=>{content.innerHTML=render(m);if(focusHours)content.querySelector('#wpr-streamer-hours').scrollIntoView({block:'start'});};
   const stopPrint=()=>document.body.classList.remove('wpr-printing');
@@ -115,14 +139,12 @@
   if(window.StreamerPerformance){
    const select=modal.querySelector('[data-spa-months]');let request=0;
    const load=async()=>{
-    const token=++request,start=new Date(m.period.through.slice(0,7)+'-01T12:00Z');start.setUTCMonth(start.getUTCMonth()-Number(select.value)+1);
-    const end=new Date(m.period.through+'T12:00Z');end.setUTCDate(end.getUTCDate()+1);
+    const token=++request;
     m.history={status:'loading'};print.disabled=true;download.disabled=true;
     const update=()=>{if(modal.isConnected)content.querySelector('#wpr-history').innerHTML=window.StreamerPerformance.render(m.history,m.period);};update();
     try{
      if(!client)throw Error('Refresh the dashboard to connect to historical reports.');
-     const {data,error}=await client.rpc('get_streamer_performance_history',{_from:start.toISOString().slice(0,10),_until:end.toISOString().slice(0,10)});
-     if(error)throw error;if(!data||!Array.isArray(data.shows))throw Error('Historical records were not returned.');
+     const data=await fetchHistory(client,m.period,select.value,()=>token===request&&modal.isConnected);
      if(token!==request||!modal.isConnected)return;m.history={status:'ready',data};
     }catch(e){if(token!==request||!modal.isConnected)return;m.history={status:'error',message:e.message||'Please try again.'};}
     if(token===request&&modal.isConnected){print.disabled=false;download.disabled=false;update();}
@@ -131,5 +153,5 @@
    content.addEventListener('click',e=>{if(e.target.closest('[data-spa-retry]'))load();});load();
   }
  }
- window.WeeklyProductionReport={open,model,render,csv,timingLabel,airtime,hours};
+ window.WeeklyProductionReport={open,model,render,csv,timingLabel,airtime,hours,fetchHistory};
 })();

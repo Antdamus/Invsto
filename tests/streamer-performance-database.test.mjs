@@ -20,15 +20,26 @@ before(async()=>{
  with orders as(select market,order_number,purchased,booked,cancelled,refunded,0 held,booked net from sale_rows)
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${admin}';`);
- for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
 });
 after(()=>db?.close());
 test('history endpoint enforces admin access and bounded input',async()=>{
  await assert.rejects(db.query("select get_streamer_performance_history('2026-01-01','2027-02-01')"),/370 days/);
- await assert.rejects(db.query("select get_streamer_performance_history(null,null)"),/370 days/);
+ await assert.rejects(db.query("select get_streamer_performance_history(null,null)"),/valid history end date/);
  await db.exec("set test.actor='';set role authenticated");
  await assert.rejects(db.query("select get_streamer_performance_history('2026-06-01','2026-07-01')"),/Active admin/);
+ await assert.rejects(db.query("select get_streamer_performance_history(null,'2026-07-01')"),/Active admin/);
  await db.exec(`reset role;set test.actor='${admin}'`);
+});
+test('all available history includes older shows beyond twelve months and respects the report end',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('firstshow','First show','2025-08-07T23:00-04:00',3600,'{"paid_items":0}'),
+ ('future','Later show','2028-01-01T23:00-05:00',3600,'{"paid_items":0}');`);
+ const r=(await db.query("select get_streamer_performance_history(null,'2026-11-09') r")).rows[0].r;
+ assert.equal(r.from,'2025-08-07');assert.equal(r.until,'2026-11-09');
+ assert.ok(r.shows.some(s=>s.event_id==='firstshow'));assert.ok(!r.shows.some(s=>s.event_id==='future'));
+ const empty=(await db.query("select get_streamer_performance_history(null,'2024-01-01') r")).rows[0].r;
+ assert.equal(empty.shows.length,0);assert.equal(empty.from,'2023-12-31');
 });
 test('historical hosts, overnight money, reversals and unlinked coverage remain explicit',async()=>{
  await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,seller_override,airtime_seconds,insights) values
@@ -43,4 +54,8 @@ test('historical hosts, overnight money, reversals and unlinked coverage remain 
  assert.equal(r.shows.find(s=>s.event_id==='earlyday').seller,'Historical seller unassigned');
  assert.equal(r.shows.find(s=>s.event_id==='earlysaved').seller,'Sydney');
  const night=r.shows.find(s=>s.event_id==='overnight');assert.equal(night.seller,'Otello');assert.equal(night.net,70);assert.equal(night.held,50);assert.equal(night.orders,2);assert.equal(night.linked_lines,2);assert.equal(r.coverage.unlinked_orders,1);assert.equal(r.coverage.unlinked_net,30);
+ const next=(await db.query("select get_streamer_performance_history('2026-07-01','2026-07-02') r")).rows[0].r;
+ const whole=(await db.query("select get_streamer_performance_history('2026-06-01','2026-07-02') r")).rows[0].r;
+ assert.equal(r.coverage.orders+next.coverage.orders,whole.coverage.orders);
+ assert.equal(next.shows.length,0);assert.equal(whole.shows.find(s=>s.event_id==='overnight').net,night.net);
 });

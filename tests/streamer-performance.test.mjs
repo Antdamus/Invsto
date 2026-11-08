@@ -35,3 +35,9 @@ test('rendering escapes names and exports exclusions and provenance',()=>{
  const html=analysis.render(state,period);assert.ok(!html.includes('<img'));assert.match(html,/&lt;img/);assert.match(html,/No reliable|More completed/);
  const rows=analysis.csvRows(state,period);assert.ok(rows.some(r=>r.includes('Insights still processing')));assert.match(analysis.render({status:'error',message:'<bad>'},period),/Retry historical analysis/);
 });
+test('source analytics export preserves missing values and stays separate from net sales',()=>{
+ const state={status:'ready',data:history([show('x','2026-10-05T14:00Z',100,{insights:{paid_items:1,studio_gross_including_tax_shipping:120,studio_average_sales_price:120,total_viewers:0,peak_viewers:null,source_url:'https://www.ebay.com/ebaylive/host/events/example?tab=insights'}})])};
+ const rows=analysis.csvRows(state,period),header=rows.find(r=>r[0]==='Historical show'),row=rows.find(r=>r[1]==='x');
+ assert.equal(row[header.indexOf('Net merchandise sales')],100);assert.equal(row[header.indexOf('Studio sales including tax and shipping')],120);
+ assert.equal(row[header.indexOf('Total viewers')],0);assert.equal(row[header.indexOf('Peak viewers')],null);
+});
