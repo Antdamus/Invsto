@@ -11,7 +11,9 @@
  body.wpr-printing .wpr-table-wrap{overflow:visible!important}
  body.wpr-printing .wpr-paper{font-size:10px;print-color-adjust:exact;-webkit-print-color-adjust:exact}
  body.wpr-printing .wpr-paper table{font-size:9px;min-width:0!important}
- body.wpr-printing .wpr-paper th,body.wpr-printing .wpr-paper td{padding:6px 5px;min-width:0}
+ body.wpr-printing .wpr-paper th,body.wpr-printing .wpr-paper td{padding:4px 5px;min-width:0}
+ body.wpr-printing .wpr-paper small{font-size:9px}
+ body.wpr-printing .wpr-paper .wpr-note{font-size:10px}
  body.wpr-printing .wpr-paper tr{break-inside:avoid}
  body.wpr-printing .wpr-paper h2{margin-top:20px;font-size:15px}
  body.wpr-printing .wpr-kpis strong{font-size:20px}
