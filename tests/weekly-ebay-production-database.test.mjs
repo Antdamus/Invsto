@@ -27,6 +27,7 @@ before(async()=>{
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${uid(1)}';`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261108030000_weekly_ebay_production.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261108050000_weekly_weekend_streamer.sql',import.meta.url),'utf8'));
 });
 after(async()=>db?.close());
 test('Eastern hour rule handles both boundaries, DST and unknown purchase time without losing money',async()=>{
@@ -61,6 +62,20 @@ test('simultaneous shows and verified end boundaries stay unmatched',async()=>{
  const r=await production([await order('overlap','2026-11-03T10:15:00'),await order('after-end','2026-11-03T11:00:00')]);
  assert.ok(r.orders.every(r=>r.show===null&&r.show_source==='unmatched'));
 });
+test('weekend daytime defaults to Manuella at both boundaries, with show start and explicit sellers taking priority',async()=>{
+ const rows=[];
+ for(const [id,time] of [['sat-before','2026-11-07T07:59:00'],['sat-start','2026-11-07T08:00:00'],['sat-end','2026-11-07T17:59:00'],['sat-night','2026-11-07T18:00:00'],['sun-day','2026-11-08T12:00:00'],['mon-day','2026-11-09T12:00:00']])rows.push(await order(id,time));
+ const names=Object.fromEntries((await production(rows)).orders.map(r=>[r.order,r.seller]));
+ assert.deepEqual(names,{'sat-before':'Otello','sat-start':'Manuella','sat-end':'Manuella','sat-night':'Otello','sun-day':'Manuella','mon-day':'Sydney'});
+ await db.exec("insert into weekly_ebay_show_catalog(event_id,title,starts_at) values('weekend1','Saturday afternoon','2026-11-07T22:30Z')");
+ const later=await order('sat-after-six','2026-11-07T18:45:00');
+ let r=(await production([later])).orders[0];assert.equal(r.show,'weekend1');assert.equal(r.seller,'Manuella');
+ await db.query('update ebay_order_lines set assigned_seller_employee_id=$1 where id=$2',[uid(3),'sat-after-six']);
+ r=(await production([later])).orders[0];assert.equal(r.seller,'Sydney');assert.equal(r.seller_source,'recorded');
+ await query('select set_weekly_ebay_show_seller($1,$2,null)',['weekend1',uid(2)]);
+ r=(await production([later])).orders[0];assert.equal(r.seller,'Otello');assert.equal(r.seller_source,'override');
+ for(const key of Object.keys(amounts))assert.equal(r[key],amounts[key]);
+});
 test('admin report override is audited, revision protected, and leaves orders and capture sellers intact',async()=>{
  const save=(seller,stamp=null)=>query('select set_weekly_ebay_show_seller($1,$2,$3) r',['day00002',seller,stamp]);
  const before=(await query('select * from ebay_orders where id=$1',['estimate']))[0];
@@ -69,7 +84,7 @@ test('admin report override is audited, revision protected, and leaves orders an
  assert.equal(r.orders[0].seller,'Otello');assert.equal(r.orders[0].seller_source,'override');
  assert.deepEqual((await query('select * from ebay_orders where id=$1',['estimate']))[0],before);
  await assert.rejects(save(uid(3)),/changed/);await save(null,saved.updated_at);
- assert.equal((await query('select count(*) n from weekly_ebay_show_assignment_audit'))[0].n,2);
+ assert.equal((await query("select count(*) n from weekly_ebay_show_assignment_audit where event_id='day00002'"))[0].n,2);
  await db.exec("set test.actor=''");await assert.rejects(save(uid(3)),/admin access/);
  await db.exec(`set test.actor='${uid(1)}';set role authenticated`);
  await assert.rejects(production([]),/permission denied/);await assert.rejects(query('select * from weekly_ebay_show_catalog'),/permission denied/);

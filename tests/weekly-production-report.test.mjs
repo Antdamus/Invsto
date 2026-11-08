@@ -5,6 +5,16 @@ import vm from 'node:vm';
 const context={window:{},Intl,Date};
 vm.runInNewContext(await readFile(new URL('../weekly-production-report.js',import.meta.url),'utf8'),context);
 const report=context.window.WeeklyProductionReport;
+
+test('zero-sale shows use weekend daytime fallback in Eastern time and preserve saved sellers',()=>{
+ const week='2026-11-02',starts=['2026-11-07T12:59Z','2026-11-07T13:00Z','2026-11-07T22:59Z','2026-11-07T23:00Z','2026-11-08T15:00Z','2026-11-06T15:00Z'];
+ const timing=starts.map((starts_at,i)=>({event_id:String(i),starts_at,airtime_seconds:3600}));
+ timing.push({event_id:'saved',starts_at:'2026-11-08T16:00Z',seller_name:'Sydney',airtime_seconds:1800});
+ const m=report.model({days:[{day:week,week},{day:'2026-11-08',week}],orders:[],timing},week);
+ const names=Object.fromEntries(m.shows.map(s=>[s.event_id,s.seller]));
+ assert.deepEqual(names,{'0':'Otello','1':'Manuella','2':'Manuella','3':'Otello','4':'Manuella','5':'Sydney',saved:'Sydney'});
+ assert.equal(m.airtime,23400);
+});
 test('show airtime counts each show once, keeps zero-sales shows and excludes prior-week airtime',()=>{
  const week='2026-11-02',order=(id,show,seller='Otello')=>({order:id,week,day:week,show,seller,net:100,booked:100,show_source:'captured'});
  const data={as_of:'2026-11-08T18:00Z',days:[{day:week,week},{day:'2026-11-03',week}],orders:[order('1','night'),order('2','night'),order('3','prior')],timing:[
