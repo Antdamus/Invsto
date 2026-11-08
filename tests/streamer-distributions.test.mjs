@@ -9,6 +9,28 @@ const period={from:'2026-11-02',through:'2026-11-08'},filters={seller:'Otello',f
 const show=(id,net,start='2026-10-04T22:15-04:00',extra={})=>({event_id:id,title:'Rolex watch show',seller:'Otello',seller_source:'time_rule',scheduled_start:start,orders:1,linked_lines:1,net,airtime_seconds:18000,insights:{sales_status:'ready',paid_items:1},commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:0,net,orders:1}]},...extra});
 const history=shows=>({from:'2025-08-07',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows});
 const model=shows=>A.build(history(shows),period,filters);
+
+test('push labels preserve unknowns and dual labels across charts, filters, shared bins and CSV',()=>{
+ const rows=[show('manual',50,undefined,{push:{manual:true,automatic:true,note:'<script>no</script>',manual_source:'recorded'}}),show('rule',1000,'2026-10-04T23:00-04:00',{push:{manual:false,automatic:null,manual_source:'date_rule'}}),show('unknown',500,'2026-10-04T20:00-04:00')],m=model(rows);
+ assert.equal(D.pushSymbols(rows[0]),'★◆');assert.equal(D.pushSymbols(rows[1]),'☆');assert.equal(D.pushSymbols(rows[2]),'');
+ assert.equal(D.build(m,{distPush:'manual_yes'}).rows.length,1);assert.equal(D.build(m,{distPush:'automatic_yes'}).rows[0].event_id,'manual');
+ assert.equal(D.build(m,{distPush:'manual_no'}).rows[0].event_id,'rule');assert.equal(D.build(m,{distPush:'unknown'}).rows[0].event_id,'unknown');
+ const shared=D.build(m,{distScale:'shared'});assert.ok(shared.groups.every(g=>JSON.stringify(g.bounds)===JSON.stringify(shared.bounds)&&g.maxCount===shared.maxCount));
+ const html=D.render(m,{distShow:'manual',distScale:'shared'});
+ assert.match(html,/Same bins across start times · On/);assert.match(D.render(m,{distView:'calendar'}),/★◆/);assert.match(html,/eBay automatic push/);assert.match(html,/&lt;script&gt;no&lt;\/script&gt;/);assert.ok(!html.includes('<script>no</script>'));
+ assert.match(html,/data-wpr-push="manual"/);assert.match(html,/sde-push-chart-mark/);
+ const csv=D.csvRows(m,{distShow:'manual'}),head=csv.find(r=>r[0]==='Event ID'),row=csv.find(r=>r[0]==='manual');
+ assert.equal(row[head.indexOf('Manual push')],'Yes');assert.equal(row[head.indexOf('eBay automatic push')],'Yes');assert.equal(row[head.indexOf('Push note')],'<script>no</script>');
+});
+
+test('calendar view shows the push cutoff and shares calendar and money axes across start times',()=>{
+ const m=model([show('july',100,'2026-07-01T20:00-04:00'),show('september',20000,'2026-09-01T22:00-04:00')]);
+ const html=D.render(m,{distView:'calendar'});
+ assert.match(html,/X axis: calendar date/);assert.match(html,/Y axis: net sales per show/);assert.match(html,/Aug 25 · no manual push/);
+ assert.equal((html.match(/class="sde-push-cutoff"/g)||[]).length,3);assert.match(html,/sde-calendar-multiples/);assert.ok(!html.includes('class="sde-hist"'));
+ assert.match(html,/data-sde-tooltip="sde-tip-show-july"/);assert.match(html,/id="sde-tip-show-july"/);
+ assert.match(D.render(model([show('later',100)]),{distView:'calendar'}),/outside displayed dates/);
+});
 test('selling nights group 6 PM through next-day 5:59 AM, across month and DST boundaries',()=>{
  const dates=['2026-10-05T17:59-04:00','2026-10-05T18:00-04:00','2026-10-06T02:00-04:00','2026-10-06T05:59-04:00','2026-10-06T06:00-04:00','2026-11-01T01:30-04:00','2026-11-01T01:30-05:00'];
  const shows=dates.map((d,i)=>show(String(i),100,d)),m=A.build(history(shows),period,{...filters,dayMode:'night'}),d=D.build(m);

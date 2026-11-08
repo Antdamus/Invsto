@@ -25,9 +25,37 @@ before(async()=>{
  with orders as(select market,order_number,purchased,booked,cancelled,refunded,0 held,booked net from sale_rows)
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${admin}';`);
- for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
 });
 after(()=>db?.close());
+test('push labels honor the Eastern cutoff, explicit exceptions, audit and concurrent edits',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('push-before','Before cutoff','2026-08-25T03:59Z',3600,'{"paid_items":0}'),
+ ('push-after','At cutoff','2026-08-25T04:00Z',3600,'{"paid_items":0}'),
+ ('push-future','Future default','2028-01-01T20:00Z',3600,'{"paid_items":0}');`);
+ const initial=(await db.query("select get_streamer_performance_history('2026-08-24','2026-08-26') r")).rows[0].r;
+ const before=initial.shows.find(s=>s.event_id==='push-before'),after=initial.shows.find(s=>s.event_id==='push-after');
+ assert.equal(before.push.manual,null);assert.equal(after.push.manual,false);assert.equal(after.push.manual_source,'date_rule');assert.equal(after.push.automatic,null);
+ const future=(await db.query("select ebay_show_push_labels(push_labels,starts_at,push_updated_at) p from weekly_ebay_show_catalog where event_id='push-future'")).rows[0].p;
+ assert.equal(future.manual,false);
+ const saved=(await db.query(`select set_weekly_ebay_show_push_labels('push-after','{"manual":true,"automatic":true,"note":"Both pushes confirmed"}',null) p`)).rows[0].p;
+ assert.equal(saved.manual,true);assert.equal(saved.automatic,true);assert.equal(saved.manual_source,'recorded');assert.ok(saved.updated_at);
+ await assert.rejects(db.query(`select set_weekly_ebay_show_push_labels('push-after','{}',null)`),/changed/);
+ for(const bad of ['{"manual":"yes"}','{"automatic":1}','{"other":true}','{"note":null}','[]'])await assert.rejects(db.query('select set_weekly_ebay_show_push_labels($1,$2,$3)',['push-after',bad,saved.updated_at]),/valid push/);
+ const unknown=(await db.query('select set_weekly_ebay_show_push_labels($1,$2,$3) p',['push-after','{"manual":null,"automatic":false}',saved.updated_at])).rows[0].p;
+ assert.equal(unknown.manual,null);assert.equal(unknown.automatic,false);
+ const reset=(await db.query('select set_weekly_ebay_show_push_labels($1,$2,$3) p',['push-after','{}',unknown.updated_at])).rows[0].p;
+ assert.equal(reset.manual,false);assert.equal(reset.manual_source,'date_rule');assert.equal(reset.automatic,null);
+ const updated=(await db.query("select get_streamer_performance_history('2026-08-24','2026-08-26') r")).rows[0].r;
+ assert.deepEqual(updated.shows.map(({push,...s})=>s),initial.shows.map(({push,...s})=>s));
+ assert.equal((await db.query("select weekly_ebay_show_timing('2026-08-25','2026-08-26') r")).rows[0].r.find(s=>s.event_id==='push-after').push.manual,false);
+ assert.equal((await db.query("select count(*)::int n from weekly_ebay_show_push_audit where event_id='push-after'")).rows[0].n,3);
+ await db.exec("set test.actor='';set role authenticated");
+ await assert.rejects(db.query("select set_weekly_ebay_show_push_labels('push-after','{}',null)"),/Active admin/);
+ await assert.rejects(db.query("select * from weekly_ebay_show_push_audit"),/permission denied/);
+ await assert.rejects(db.query("update weekly_ebay_show_catalog set push_labels='{}'"),/permission denied/);
+ await db.exec(`reset role;set test.actor='${admin}'`);
+});
 test('history endpoint enforces admin access and bounded input',async()=>{
  await assert.rejects(db.query("select get_streamer_performance_history('2026-01-01','2027-02-01')"),/370 days/);
  await assert.rejects(db.query("select get_streamer_performance_history(null,null)"),/valid history end date/);

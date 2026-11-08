@@ -12,6 +12,8 @@
  const hours=ms=>{const m=Math.round(Math.max(0,ms)/60000);return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m';};
  const airtime=seconds=>seconds==null?'Not recorded':Math.floor(seconds/3600)+'h '+String(Math.floor(seconds%3600/60)).padStart(2,'0')+'m '+String(seconds%60).padStart(2,'0')+'s';
  const sum=(a,k)=>a.reduce((n,r)=>n+Math.round(Number(r[k]||0)*100),0)/100;
+ const pushInfo=s=>window.StreamerDistributions?window.StreamerDistributions.pushBadges(s)+window.StreamerDistributions.pushEdit(s):'';
+ const pushValue=v=>v===true?'Yes':v===false?'No':'Not recorded';
  const groups=(rows,key)=>{const m=new Map();for(const r of rows){const k=key(r);if(!m.has(k))m.set(k,[]);m.get(k).push(r);}return [...m];};
  function range(data,week){
   const dates=(data.days||[]).filter(d=>!week||d.week===week).map(d=>d.day).sort();
@@ -58,7 +60,7 @@
   const sellers=sellerNames.map(name=>{const a=rows.filter(r=>r.seller===name),shows=m.inPeriod.filter(s=>s.seller===name),timed=shows.filter(s=>s.airtime_seconds!=null);return {name,a,shows,timed};}).sort((a,b)=>sum(b.a,'net')-sum(a.a,'net'));
   const daily=(m.data.days||[]).filter(d=>!m.week||d.week===m.week).map(d=>{const a=rows.filter(r=>r.day===d.day);return [day(d.day),String(a.length),...saleCells(a)];});
   const showRow=s=>{const a=rows.filter(r=>r.show===s.event_id);return [
-   '<a target="_blank" rel="noopener" href="https://www.ebay.com/ebaylive/events/'+encodeURIComponent(s.event_id)+'?playback=true">'+esc(s.title||'Untitled show')+'</a><small>'+esc(s.seller)+(s.inPeriod?'':s.starts_at?' · Started outside selected dates':' · Start not recorded')+'</small>',
+   '<a target="_blank" rel="noopener" href="https://www.ebay.com/ebaylive/events/'+encodeURIComponent(s.event_id)+'?playback=true">'+esc(s.title||'Untitled show')+'</a><small>'+esc(s.seller)+(s.inPeriod?'':s.starts_at?' · Started outside selected dates':' · Start not recorded')+'</small>'+pushInfo(s),
    esc(stamp(s.scheduled_start||s.starts_at))+(s.scheduled_start&&Date.parse(s.scheduled_start)!==Date.parse(s.starts_at)?'<small>Previously recorded: '+esc(stamp(s.starts_at))+'</small>':''),
    esc(airtime(s.airtime_seconds))+(s.airtime_provisional?'<small>Processing</small>':'')+'<small>'+ (s.airtime_checked_at?'Checked '+esc(stamp(s.airtime_checked_at)):'')+'</small>',...saleCells(a)];};
   const showHeaders=['Show / seller','Scheduled start · Eastern','Airtime',...saleHeaders];
@@ -88,8 +90,8 @@
   for(const [name,a] of groups(m.rows,r=>r.seller))rows.push([name,...['booked','cancelled','refunded','held','net'].map(k=>sum(a,k))]);
   rows.push([],['Sales by purchase day','Orders',...saleHeaders]);
   for(const d of m.data.days.filter(d=>!m.week||d.week===m.week)){const a=m.rows.filter(r=>r.day===d.day);rows.push([day(d.day),a.length,...['booked','cancelled','refunded','held','net'].map(k=>sum(a,k))]);}
-  rows.push([],['Show','Seller','Scheduled start Eastern','Previously recorded start Eastern','Airtime seconds','Timing checked','Processing','Starts in period',...saleHeaders]);
-  for(const s of m.shows){const a=m.rows.filter(r=>r.show===s.event_id);rows.push([s.title,s.seller,stamp(s.scheduled_start||s.starts_at),stamp(s.starts_at),s.airtime_seconds??'',s.airtime_checked_at||'',s.airtime_provisional?'Yes':'No',s.inPeriod?'Yes':'No',...['booked','cancelled','refunded','held','net'].map(k=>sum(a,k))]);}
+  rows.push([],['Show','Seller','Scheduled start Eastern','Previously recorded start Eastern','Airtime seconds','Timing checked','Processing','Starts in period',...saleHeaders,'Manual push','eBay automatic push','Push note']);
+  for(const s of m.shows){const a=m.rows.filter(r=>r.show===s.event_id);rows.push([s.title,s.seller,stamp(s.scheduled_start||s.starts_at),stamp(s.starts_at),s.airtime_seconds??'',s.airtime_checked_at||'',s.airtime_provisional?'Yes':'No',s.inPeriod?'Yes':'No',...['booked','cancelled','refunded','held','net'].map(k=>sum(a,k)),pushValue(s.push?.manual),pushValue(s.push?.automatic),s.push?.note||'']);}
   for(const [key,a] of groups(m.rows.filter(r=>!r.show),r=>r.show_source))rows.push([key,'','','','','','','',...['booked','cancelled','refunded','held','net'].map(k=>sum(a,k))]);
   rows.push([],['Streamer','Shows','Shows timed','Streaming hours','Average show seconds','Longest show seconds']);
   for(const [seller,shows] of groups(m.inPeriod,s=>s.seller)){
@@ -131,6 +133,34 @@
   const modal=document.createElement('dialog');modal.className='wpr-dialog';modal.setAttribute('aria-label','Production report');
   modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="all" selected>All available</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
   const content=modal.querySelector('.wpr-content'),print=modal.querySelector('[data-wpr-print]'),download=modal.querySelector('[data-wpr-csv]');
+  content.addEventListener('click',e=>{
+   const button=e.target.closest('[data-wpr-push]');if(!button)return;
+   const id=button.dataset.wprPush,show=m.history?.data?.shows.find(s=>s.event_id===id)||m.shows.find(s=>s.event_id===id);
+   if(!show)return;
+   const p=window.StreamerDistributions.pushState(show),editor=document.createElement('dialog');editor.className='wpr-push-dialog';editor.setAttribute('aria-label','Edit show push labels');
+   const values='<option value="unknown">Not recorded</option><option value="yes">Yes</option><option value="no">No</option>';
+   editor.innerHTML='<form><h2>Edit show push labels</h2><p><strong>'+esc(show.title)+'</strong><br>'+esc(stamp(show.scheduled_start||show.starts_at))+'</p><label>Manual push<select name="manual" aria-label="Manual push"><option value="rule">Use date rule</option>'+values+'</select></label><label>eBay automatic push<select name="automatic" aria-label="eBay automatic push">'+values+'</select></label><p class="wpr-note">Date rule: no manual push from August 25, 2026 onward, using the Eastern calendar start date. Earlier shows remain not recorded. Choose Yes or No for an exception. Automatic push is never inferred from this rule.</p><label>Notes<textarea name="note" maxlength="2000" rows="3"></textarea></label><p data-push-status role="status" aria-live="polite"></p><div><button type="button" data-push-close>Cancel</button><button type="submit">Save labels</button></div></form>';
+   const form=editor.querySelector('form'),manual=form.elements.manual,automatic=form.elements.automatic,note=form.elements.note,status=editor.querySelector('[data-push-status]'),save=editor.querySelector('[type="submit"]'),close=editor.querySelector('[data-push-close]');
+   const value=v=>v===true?'yes':v===false?'no':'unknown';manual.value=p.manual_source==='recorded'?value(p.manual):'rule';automatic.value=value(p.automatic);note.value=p.note;
+   let revision=p.updated_at,saving=false;
+   editor.addEventListener('cancel',e=>{if(saving)e.preventDefault();});close.onclick=()=>editor.close();
+   editor.addEventListener('close',()=>{editor.remove();content.querySelector('[data-wpr-push="'+CSS.escape(id)+'"]')?.focus({preventScroll:true});},{once:true});
+   form.onsubmit=async e=>{
+    e.preventDefault();if(saving)return;const labels={automatic:automatic.value==='unknown'?null:automatic.value==='yes',note:note.value.trim()};
+    if(manual.value!=='rule')labels.manual=manual.value==='unknown'?null:manual.value==='yes';
+    saving=true;save.disabled=true;close.disabled=true;manual.disabled=true;automatic.disabled=true;note.disabled=true;status.textContent='Saving labels…';
+    try{
+     if(!client)throw Error('Refresh the dashboard to connect before saving.');
+     const {data:push,error}=await client.rpc('set_weekly_ebay_show_push_labels',{_event_id:id,_labels:labels,_expected_updated_at:revision});
+     if(error)throw error;if(!push||!push.updated_at)throw Error('Saved labels could not be confirmed. Reopen the report to verify.');
+     revision=push.updated_at;
+     for(const list of [m.shows,m.inPeriod,m.data.shows,m.data.timing,m.history?.data?.shows])for(const s of list||[])if(s.event_id===id)s.push=push;
+     draw();status.textContent='Saved. The report and charts now use these labels.';close.textContent='Done';
+    }catch(error){status.textContent=error.message||'Labels could not be saved. Please try again.';}
+    finally{saving=false;save.disabled=false;close.disabled=false;manual.disabled=false;automatic.disabled=false;note.disabled=false;}
+   };
+   document.body.append(editor);editor.showModal();manual.focus();
+  });
   if(window.StreamerCommercialAnalysis){
    const jump=document.createElement('button');jump.type='button';jump.textContent='Show insights';jump.dataset.scaJump='';
    jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});modal.querySelector('.wpr-toolbar').insertBefore(jump,print);
@@ -143,7 +173,7 @@
     content.querySelector('[data-sca-filter="'+key+'"]').focus({preventScroll:true});
    });
    const distributionAction=e=>{
-    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start],[data-sde-weekday]');
+    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start],[data-sde-weekday],[data-sde-scale]');
     if(!button||m.history?.status!=='ready')return;
     if(e.type==='keydown'&&(button.tagName.toLowerCase()==='button'||!['Enter',' '].includes(e.key)))return;
     e.preventDefault();
@@ -152,9 +182,10 @@
     if(button.hasAttribute('data-sde-show'))options.distShow=button.dataset.sdeShow;
     if(button.hasAttribute('data-sde-start'))options.distStart=button.dataset.sdeStart;
     if(button.hasAttribute('data-sde-month'))options.distMonth=button.dataset.sdeMonth;
+    if(button.hasAttribute('data-sde-scale'))options.distScale=button.dataset.sdeScale;
     if(button.hasAttribute('data-sde-weekday')){options.weekday=button.dataset.sdeWeekday;options.distStart='all';options.distMonth='all';}
     m.analysisOptions=options;content.querySelector('#wpr-commercial').innerHTML=commercial(m);
-    const target=content.querySelector(button.hasAttribute('data-sde-weekday')?'[data-sde-weekday="'+options.weekday+'"]':button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-show-detail, .sde-records summary');
+    const target=content.querySelector(button.hasAttribute('data-sde-scale')?'[data-sde-scale]':button.hasAttribute('data-sde-weekday')?'[data-sde-weekday="'+options.weekday+'"]':button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-show-detail, .sde-records summary');
     target?.focus({preventScroll:true});target?.scrollIntoView({block:'center'});
    };
    content.addEventListener('click',distributionAction);content.addEventListener('keydown',distributionAction);

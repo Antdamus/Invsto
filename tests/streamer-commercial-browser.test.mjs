@@ -32,7 +32,8 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   await bar.click();assert.equal(await explorer.locator('.sde-records').getAttribute('open'),'');
   assert.equal(await explorer.locator('.sde-shows tbody tr').count(),1);assert.match(await explorer.locator('.sde-selection').innerText(),/Selected sales range/);
   await explorer.getByRole('button',{name:'Clear selection',exact:true}).click();
-  await explorer.locator('circle[data-sde-show]').click();assert.match(await explorer.locator('.sde-selection').innerText(),/Selected show/);
+  await explorer.getByLabel('Chart view',{exact:true}).selectOption('calendar');
+  await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) circle[data-sde-show]').click();assert.match(await explorer.locator('.sde-selection').innerText(),/Selected show/);
   assert.match(await explorer.locator('.sde-show-detail').innerText(),/Sales hour by hour/);assert.match(await explorer.locator('.sde-show-detail').innerText(),/Refunded/);
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('elapsed:1');assert.match(await explorer.locator('.sde-stats').first().innerText(),/Median \$0/);
   await explorer.locator('[data-sde-weekday="all"]').click();assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'all');
@@ -44,6 +45,7 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   assert.equal(await explorer.getByLabel('Part of month',{exact:true}).inputValue(),'all');
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('net');
   await explorer.locator('.sde-card button[data-sde-start]').click();assert.equal(await explorer.getByLabel('Start hour · Eastern',{exact:true}).inputValue(),'10');
+  await explorer.getByLabel('Chart view',{exact:true}).selectOption('histogram');
   const mini=explorer.locator('.sde-card [data-sde-bin]');await mini.focus();await tip.waitFor({state:'visible'});assert.match(await tip.innerText(),/Monday 1/);
   await page.keyboard.press('Enter');assert.match(await explorer.locator('.sde-selection').innerText(),/Selected sales range/);assert.equal(await explorer.locator('.sde-shows tbody tr').count(),1);
   assert.match(await panel.locator('.sca-scope').innerText(),/Sydney/);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
