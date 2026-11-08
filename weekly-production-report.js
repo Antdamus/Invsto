@@ -78,6 +78,7 @@
    '<p class="wpr-note">Scheduled times are not verified actual go-live times. Airtime comes from eBay Live Studio Insights; processing values may change. An end time is not inferred from a scheduled start. Sales are grouped by purchase date; a show crossing midnight can span multiple days. Airtime totals include only shows starting within these dates; missing durations are excluded.</p></section>'+
    '<section id="wpr-streamer-hours"><h2>04 · Streaming hours by streamer</h2>'+table(['Streamer','Shows','Shows timed','Total streaming hours','Average show length','Longest show'],sellers.map(s=>[esc(s.name),String(s.shows.length),s.timed.length+' / '+s.shows.length,s.timed.length?airtime(sum(s.timed,'airtime_seconds')):'Not recorded',s.timed.length?airtime(Math.round(sum(s.timed,'airtime_seconds')/s.timed.length)):'Not recorded',s.timed.length?airtime(Math.max(...s.timed.map(s=>s.airtime_seconds))):'Not recorded']))+'<p class="wpr-note">Streaming hours are the full reported airtime of distinct shows starting in these dates. Each show counts once. Shows with no duration are excluded from totals and averages; processing durations are provisional. A show with multiple sellers stays in a review group rather than crediting its full airtime to more than one person.</p></section>'+
    '<section><h2>05 · Coverage & attribution</h2><p>'+known+' orders have confirmed show links; '+estimated+' are estimated from show time; '+(rows.length-known-estimated)+' are not linked to one show. Estimated links may include off-show purchases.</p><p>Saved report assignments take priority, followed by recorded sellers. Otherwise, shows starting from 6 PM through 7:59 AM Eastern are assigned to Otello. From 8 AM through 5:59 PM, Saturday and Sunday shows default to Manuella; Monday through Friday shows default to Sydney. The show’s Eastern start date determines the day. A show with multiple attributed sellers remains in a review group for airtime. This report does not change commission assignments.</p></section>'+
+   (window.StreamerPerformance?'<section id="wpr-history">'+window.StreamerPerformance.render(m.history,period)+'</section>':'')+
    '<footer class="wpr-footer">Prepared from Invsto order history and saved eBay Live Studio evidence. All sales are USD. Streaming hours represent reported show airtime.</footer></article>';
  }
  function csv(m){
@@ -95,12 +96,13 @@
   }
   rows.push([],['Show timing','Scheduled start is not verified actual go-live. Airtime is reported by eBay Insights; processing values may change. Missing durations excluded. Each show counted once on recorded start date.'],[],['Order','Purchase date','Seller','Seller evidence','Show','Show evidence',...saleHeaders]);
   for(const r of m.rows)rows.push([r.order,r.day,r.seller,r.seller_source,r.show_title||'',r.show_source,...['booked','cancelled','refunded','held','net'].map(k=>r[k]||0)]);
+  if(window.StreamerPerformance)rows.push(...window.StreamerPerformance.csvRows(m.history,m.period));
   return '\ufeff'+rows.map(row=>row.map(v=>{let s=String(v??'');if(typeof v!=='number'&&/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}).join(',')).join('\r\n');
  }
  function open(data,week,client,focusHours=false){
   let m;try{m=model(JSON.parse(JSON.stringify(data)),week);}catch(e){window.alert(e.message);return;}
   const modal=document.createElement('dialog');modal.className='wpr-dialog';modal.setAttribute('aria-label','Production report');
-  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong><button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
+  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="3">3 months</option><option value="6" selected>6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
   const content=modal.querySelector('.wpr-content'),print=modal.querySelector('[data-wpr-print]'),download=modal.querySelector('[data-wpr-csv]');
   const draw=()=>{content.innerHTML=render(m);if(focusHours)content.querySelector('#wpr-streamer-hours').scrollIntoView({block:'start'});};
   const stopPrint=()=>document.body.classList.remove('wpr-printing');
@@ -110,6 +112,24 @@
   print.onclick=()=>{document.body.classList.add('wpr-printing');window.print();};
   download.onclick=()=>{const url=URL.createObjectURL(new Blob([csv(m)],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='production-'+m.period.from+'-to-'+m.period.through+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   document.body.append(modal);modal.showModal();draw();
+  if(window.StreamerPerformance){
+   const select=modal.querySelector('[data-spa-months]');let request=0;
+   const load=async()=>{
+    const token=++request,start=new Date(m.period.through.slice(0,7)+'-01T12:00Z');start.setUTCMonth(start.getUTCMonth()-Number(select.value)+1);
+    const end=new Date(m.period.through+'T12:00Z');end.setUTCDate(end.getUTCDate()+1);
+    m.history={status:'loading'};print.disabled=true;download.disabled=true;
+    const update=()=>{if(modal.isConnected)content.querySelector('#wpr-history').innerHTML=window.StreamerPerformance.render(m.history,m.period);};update();
+    try{
+     if(!client)throw Error('Refresh the dashboard to connect to historical reports.');
+     const {data,error}=await client.rpc('get_streamer_performance_history',{_from:start.toISOString().slice(0,10),_until:end.toISOString().slice(0,10)});
+     if(error)throw error;if(!data||!Array.isArray(data.shows))throw Error('Historical records were not returned.');
+     if(token!==request||!modal.isConnected)return;m.history={status:'ready',data};
+    }catch(e){if(token!==request||!modal.isConnected)return;m.history={status:'error',message:e.message||'Please try again.'};}
+    if(token===request&&modal.isConnected){print.disabled=false;download.disabled=false;update();}
+   };
+   select.onchange=load;modal.querySelector('[data-spa-jump]').onclick=()=>content.querySelector('#wpr-history').scrollIntoView({block:'start'});
+   content.addEventListener('click',e=>{if(e.target.closest('[data-spa-retry]'))load();});load();
+  }
  }
  window.WeeklyProductionReport={open,model,render,csv,timingLabel,airtime,hours};
 })();
