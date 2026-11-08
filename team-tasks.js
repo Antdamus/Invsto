@@ -5076,10 +5076,13 @@ async function submitTaskReply() {
 }
 
 function renderTaskActions(task = {}, resolved = false) {
-  if (resolved) return renderAdminHistoryActions(task);
+  const followupLink = task.metadata?.source === 'customer_followup' && task.metadata?.followup_id
+    ? '<a class="secondary-btn" href="customer-followups.html?id='+encodeURIComponent(task.metadata.followup_id)+'">Open customer follow-up</a>' : '';
+  if (resolved) return followupLink + renderAdminHistoryActions(task);
   if (isTaskViewAsWorkerMode()) return '';
   const key = escapeHtml(getUnifiedTaskKey(task));
   const buttons = [];
+  if (followupLink) buttons.push(followupLink);
   if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : ({return:'Open return',dispute:'Open dispute',request:'Open request'})[getTaskCustomerIssueKind(task)])+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
   if (task.metadata?.source === 'buyer_followup') {

@@ -6364,6 +6364,8 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 ${renderHistoryLineNoteEvents(line, group.events)}
               </div>
               <div class="history-line-actions">
+                <button type="button" class="secondary-btn" data-cf-kind="manual_return" data-cf-context="${escapeHtml(JSON.stringify({channel:'ebay',buyer:getOrderFromLine(line).buyer_username || '',lineId:line.id}))}">Add manual return</button>
+                <a class="secondary-btn" href="customer-followups.html?lineId=${encodeURIComponent(line.id)}">Follow-ups for this item</a>
                 ${!isEbayApiHistoryLine(line) ? `<button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>` : ""}
                 <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
                 ${canRevertOrders() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
