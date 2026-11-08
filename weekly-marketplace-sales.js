@@ -4,10 +4,10 @@
  const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
  const fmt=n=>usd.format(Number(n)||0);
  const etMonth=()=>new Intl.DateTimeFormat('fr-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);
- const etStamp=s=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(s));
+ const etStamp=s=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(s));
  function dayLabel(date,offset=0){
   const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+offset);
-  return d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'});
+  return d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'});
  }
  const sum=(rows,k)=>rows.reduce((s,r)=>s+Number(r[k]||0),0);
  function dateOffset(iso,days){const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}

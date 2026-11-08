@@ -1,8 +1,8 @@
 (() => {
  'use strict';
  const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}),money=n=>n==null?'Not confirmed':usd.format(n);
- const when=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
- const day=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'});
+ const when=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+ const day=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'});
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const paid=o=>['paid','partial','refunded'].includes(o.buyer),unpaid=o=>['unpaid','pending','failed'].includes(o.buyer);
  const funds={held:'On hold',available:'Available for payout',processing:'Processing',paid_out:'Paid out',initiated:'Payout started',mixed:'Mixed funds status',unknown:'Funds status unconfirmed'};
@@ -109,6 +109,8 @@
    host.oninput=e=>{if(e.target.matches('.wi-find')){host.itemState.page=0;list(host);}};
    host.onclick=e=>{const week=e.target.closest('[data-item-week]'),step=e.target.closest('[data-step]'),bridge=e.target.closest('[data-bridge]');
     const production=e.target.closest('[data-production-toggle]'),view=e.target.closest('[data-production-view]'),orders=e.target.closest('[data-production-orders]'),assign=e.target.closest('[data-production-assign]');
+    const report=e.target.closest('[data-production-report]'),hours=e.target.closest('[data-production-hours]');
+    if(report||hours){window.WeeklyProductionReport.open(host.itemState.production,(report||hours).getAttribute(report?'data-production-report':'data-production-hours'),host.itemState.client,Boolean(hours));return;}
     if(production){const w=production.dataset.productionToggle,open=production.getAttribute('aria-expanded')!=='true';production.setAttribute('aria-expanded',String(open));host.querySelector('#'+production.getAttribute('aria-controls')).hidden=!open;if(open)host.itemState.productionOpen.add(w);else host.itemState.productionOpen.delete(w);return;}
     if(view){const w=view.dataset.productionWeek;host.itemState.productionViews[w]=view.dataset.productionView;host.querySelector('#wi-production-'+(w||'month')+' td').innerHTML=window.WeeklyEbayProduction.render(host.itemState.production,w,view.dataset.productionView);return;}
     if(assign){window.WeeklyEbayProduction.assignment(host,assign.dataset.productionAssign,host.itemState.client,host.itemState.reload);return;}
@@ -122,7 +124,7 @@
   host.hidden=false;
   const s=host.itemState;s.client=client;s.reload=reload;s.production=data.ebay_production;s.orders=data.ebay_item_orders.map(withPayout).map(o=>({...o,holdInfo:window.OGEbayHoldDetails?.model(o.id,o.hold_detail||{},o.fund==='held'?true:o.fund==='mixed'?undefined:false)}));
   const rows=data.rows.filter(r=>r.market==='ebay'),weeks=rows.map(r=>r.week);
-  if(s.production){const days=[];for(const r of rows){for(let d=r.first_day;d<r.end_day&&(!data.cutoff||d<=data.cutoff.slice(0,10));){days.push({week:r.week,day:d});d=new Date(Date.parse(d+'T12:00:00Z')+86400000).toISOString().slice(0,10);}}s.production={...s.production,days};}
+  if(s.production){const days=[];for(const r of rows){for(let d=r.first_day;d<r.end_day&&(!data.cutoff||d<=data.cutoff.slice(0,10));){days.push({week:r.week,day:d});d=new Date(Date.parse(d+'T12:00:00Z')+86400000).toISOString().slice(0,10);}}s.production={...s.production,days,timing:data.ebay_show_timing||[],as_of:data.as_of};}
   const wk=host.querySelector('.wi-week'),before=wk.value;
   const label=r=>day(r.first_day)+' – '+day(new Date(Date.parse(r.end_day+'T12:00Z')-86400000).toISOString().slice(0,10));
   wk.innerHTML='<option value="">Whole month</option>'+[...rows].reverse().map(r=>'<option value="'+r.week+'">'+label(r)+'</option>').join('');

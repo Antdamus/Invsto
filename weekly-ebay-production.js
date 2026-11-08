@@ -3,7 +3,7 @@
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n||0);
  const day=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'});
- const stamp=s=>s?new Date(s).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'';
+ const stamp=s=>s?new Date(s).toLocaleString('en-US',{timeZone:'America/New_York',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'';
  const total=(rows,key)=>rows.reduce((n,r)=>n+Math.round(Number(r[key]||0)*100),0)/100;
  const group=(rows,key)=>{const groups=new Map();for(const r of rows){const k=key(r);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}return [...groups];};
  const showKey=r=>r.show||r.show_source;
@@ -23,9 +23,10 @@
   return '<small class="wp-evidence">'+esc(counts.join(' · '))+'<br>'+esc(seller.join(' · '))+'</small>';
  }
  function orderButton(week,kind,key,label,scope={}){return '<button type="button" class="wp-orders" data-production-orders="'+esc(kind)+'" data-production-key="'+esc(key)+'" data-production-week="'+week+'" data-production-day="'+esc(scope.day||'')+'" data-production-seller="'+esc(scope.seller||'')+'">'+esc(label)+'</button>';}
- function showCard(rows,week,scope){
+ function showCard(rows,week,scope,data){
   const r=rows[0],id=showKey(r),hasShow=Boolean(r.show),seller=[...new Set(rows.map(r=>r.seller))].join(' / ');
-  return '<article class="wp-show"><header><div><strong>'+esc(showTitle(r))+'</strong><small>'+esc(stamp(r.show_start))+(r.show_start?' · ':'')+esc(seller)+'</small></div>'+summary(rows)+'</header>'+amounts(rows)+evidence(rows)+
+  return '<article class="wp-show"><header><div><strong>'+esc(showTitle(r))+'</strong><small>'+esc(stamp(r.show_start))+(r.show_start?' · ':'')+esc(seller)+'</small></div>'+summary(rows)+'</header>'+
+   (hasShow&&window.WeeklyProductionReport?'<p class="wp-timing">'+esc(window.WeeklyProductionReport.timingLabel((data.timing||[]).find(s=>s.event_id===id)||data.shows?.find(s=>s.event_id===id)))+'</p>':'')+amounts(rows)+evidence(rows)+
    '<footer>'+orderButton(week,'show',id,'View '+rows.length+' '+(rows.length===1?'order':'orders'),scope)+
    (hasShow?'<a href="https://www.ebay.com/ebaylive/events/'+encodeURIComponent(id)+'?playback=true" target="_blank" rel="noopener">Open show ↗</a>'+
     '<button type="button" data-production-assign="'+esc(id)+'">Assign seller</button>':'')+'</footer></article>';
@@ -34,7 +35,7 @@
   if(!data)return '<p class="wp-empty">Daily and show details will appear after the report refreshes.</p>';
   const rows=data.orders.filter(r=>!week||r.week===week),known=rows.filter(r=>r.show_source==='captured'),estimated=rows.filter(r=>r.show_source==='time_window');
   const tabs='<div class="wp-tabs" role="group" aria-label="Breakdown view">'+[['seller','By seller'],['day','By day'],['show','By show']].map(([k,t])=>'<button type="button" data-production-view="'+k+'" data-production-week="'+week+'" aria-pressed="'+(view===k)+'">'+t+'</button>').join('')+'</div>';
-  const orderedShows=(a,scope={})=>group(a,showKey).sort((a,b)=>String(a[1][0].show_start||'~').localeCompare(String(b[1][0].show_start||'~'))).map(([,a])=>showCard(a,week,scope)).join('');
+  const orderedShows=(a,scope={})=>group(a,showKey).sort((a,b)=>String(a[1][0].show_start||'~').localeCompare(String(b[1][0].show_start||'~'))).map(([,a])=>showCard(a,week,scope,data)).join('');
   let body='';
   if(view==='show')body=orderedShows(rows);
   else if(view==='day'){
@@ -49,6 +50,7 @@
   }
   const notLinked=rows.length-known.length-estimated.length;
   return '<section class="wp-breakdown" aria-label="Sales by seller, day and show"><header><div><span class="wi-eyebrow">WHO PRODUCED THE SALES</span><h4>Sales by seller, day & show</h4></div>'+summary(rows)+'</header>'+
+   (window.WeeklyProductionReport?'<div class="wp-report-actions"><button type="button" data-production-report="'+week+'">Generate report</button><button type="button" data-production-hours="'+week+'">Streamer hours summary</button></div>':'')+
    '<p>Net item sales are after cancellations, refunds and amounts under review, before fees. These amounts add up to the weekly report.</p>'+tabs+
    '<p class="wp-coverage">'+known.length+' orders with confirmed show links · '+estimated.length+' estimated from show time'+(notLinked?' · '+notLinked+' not linked to one show':'')+'</p>'+
    '<div class="wp-groups">'+(body||'<p>No sales in this period.</p>')+'</div>'+
