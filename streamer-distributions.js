@@ -167,8 +167,9 @@
   const width=150,height=36;
   return points.map(p=>{
    const origin=Math.max(left,Math.min(right-width,p.x-width/2));let box=null;
-   for(let top=p.y-height-12;top>=27&&!box;top-=height+6){
-    for(const offset of [0,-156,156,-312,312,-468,468,-624,624]){
+   for(const offset of [0,-156,156,-312,312,-468,468,-624,624]){
+    if(box)break;
+    for(let top=p.y-height-12;top>=27;top-=6){
      const candidate={x:Math.max(left,Math.min(right-width,origin+offset)),y:top};
      if(placed.some(b=>candidate.x<b.x+width+4&&candidate.x+width+4>b.x&&candidate.y<b.y+height+4&&candidate.y+height+4>b.y))continue;
      if(points.some(dot=>dot.x>candidate.x-8&&dot.x<candidate.x+width+8&&dot.y>candidate.y-8&&dot.y<candidate.y+height+8))continue;

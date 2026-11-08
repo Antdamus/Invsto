@@ -115,3 +115,25 @@ test('adaptive card bars show their own dates and weekday counts and open the ma
   assert.match(await panel.locator('.sde-hist').innerText(),/10,000/);assert.match(await panel.locator('.sde-card-weekdays').allTextContents().then(a=>a.join(' ')),/Monday 1.*Sunday 1/);
  }finally{await browser.close();}
 });
+test('calendar audience labels stay above and near their own shows when neighboring values are close',async()=>{
+ const browser=await chromium.launch();try{
+  const page=await browser.newPage({viewport:{width:1440,height:950}});await page.setContent('<main class="wpr-paper"></main>');
+  await page.addStyleTag({path:fileURLToPath(new URL('../weekly-production-report.css',import.meta.url))});
+  for(const f of ['streamer-performance','streamer-distributions','streamer-commercial-analysis'])await page.addScriptTag({path:fileURLToPath(new URL('../'+f+'.js',import.meta.url))});
+  await page.evaluate(()=>{
+   const shows=[8854,12139,1400,17709,15334].map((net,i)=>({event_id:String(i),title:'Show '+i,seller:'Otello',scheduled_start:'2026-05-'+String(3+i*7).padStart(2,'0')+'T20:00-04:00',net,orders:1,linked_lines:1,airtime_seconds:18000,insights:{sales_status:'ready',total_viewers:1000+i,peak_viewers:100+i,paid_items:1}}));
+   const m=window.StreamerCommercialAnalysis.build({shows,from:'2026-05-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z'},{from:'2026-11-02',through:'2026-11-08'},{seller:'Otello',format:'all',weekday:'all'});
+   document.querySelector('main').innerHTML=window.StreamerDistributions.render(m,{distView:'calendar',distPointLabels:'on'});
+  });
+  const layout=await page.locator('.sde-timeline-scroll:not(.sde-calendar-card) svg').evaluate(svg=>Array.from(svg.querySelectorAll('.sde-point-label'),label=>{
+   const title=label.getAttribute('aria-label').split(' · ')[0],id=title.slice(5),dot=svg.querySelector('circle[data-sde-show="'+id+'"]'),box=label.querySelector('rect').getBBox();
+   return {id,x:box.x,y:box.y,width:box.width,height:box.height,dotX:Number(dot.getAttribute('cx')),dotY:Number(dot.getAttribute('cy'))};
+  }));
+  assert.equal(layout.length,5);
+  for(const a of layout){
+   assert.ok(Math.abs(a.x+a.width/2-a.dotX)<=a.width/2+.01,'label stays in its own date position: '+JSON.stringify(a));
+   assert.ok(a.y+a.height<a.dotY,'label is above its dot');
+   for(const b of layout.filter(b=>b.id!==a.id))assert.ok(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y,'labels do not overlap');
+  }
+ }finally{await browser.close();}
+});
