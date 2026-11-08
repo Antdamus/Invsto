@@ -37,6 +37,7 @@ before(async()=>{
  insert into tiktok_chat_conversations values('${id(402)}','888888888888','TikTok Buyer','Return this pendant');
  set test.actor='${id(1)}';grant usage on schema auth,public,storage to authenticated;grant select,insert on storage.objects to authenticated;`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261108010000_customer_followups.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261108020000_customer_followup_activity.sql',import.meta.url),'utf8'));
  await db.exec('set role authenticated');
 });
 after(async()=>db?.close());
@@ -107,4 +108,35 @@ test('non-staff and inactive accounts cannot read shared records or invoke mutat
  await db.exec(`set test.actor='${id(1)}';set test.staff='no'`);await assert.rejects(rpc('customer_followup_packet',[id(999)]),/Active staff/);
  await db.exec("set test.staff='yes';set test.chat='no'");await assert.rejects(create(1061,{conversation_id:id(301)}),/Messages access/);
  await db.exec("set test.chat='yes';set test.actor=''");await assert.rejects(create(1062),/Active staff/);
+});
+
+test('Update preserves status; Done requires an outcome, retries safely, and keeps the conversation in History',async()=>{
+ await db.exec(`set test.actor='${id(1)}'`);
+ const r=await create(1070,{kind:'call',line_id:null});
+ const activity=(revision,request,action,note,photos=[])=>rpc('record_customer_followup_activity',[r.id,revision,id(request),action,note,photos]);
+ const updated=await activity(1,1071,'update','Called and left a voicemail.');assert.equal(updated.status,'open');assert.equal(updated.revision,2);
+ await assert.rejects(activity(2,1072,'done','   '),/Write what happened/);
+ await assert.rejects(activity(1,1072,'done','Customer called back.'),/Someone updated/);
+ const done=await activity(2,1072,'done','Spoke with customer; complaint resolved.');assert.equal(done.status,'closed');assert.equal(done.revision,3);
+ assert.equal((await activity(2,1072,'done','Spoke with customer; complaint resolved.')).revision,3);
+ await assert.rejects(activity(3,1073,'done','Duplicate closure'),/already in History/);
+ await assert.rejects(activity(2,1072,'done','Changed response'),/already saved/);
+ const postscript=await activity(3,1074,'update','Customer confirmed receipt after our call.');assert.equal(postscript.status,'closed');
+ const p=await rpc('customer_followup_packet',[r.id]);assert.deepEqual(p.events.map(e=>e.action),['created','note_added','done','note_added']);
+ assert.equal(p.events[2].note,'Spoke with customer; complaint resolved.');assert.equal(p.events[2].created_by,id(1));assert.ok(p.events[2].created_at);
+ const reopened=await activity(4,1075,'reopen','Customer has another question.');assert.equal(reopened.status,'open');
+ assert.equal((await rpc('customer_followup_packet',[r.id])).events.at(-1).action,'reopened');
+ await assert.rejects(activity(5,1076,'delete','Anything'),/Choose Update/);
+ await db.exec("set test.actor=''");await assert.rejects(activity(5,1076,'update','Not allowed'),/Active staff/);
+ await db.exec(`set test.actor='${id(1)}'`);
+});
+
+test('Done does not silently finish someone else\'s assigned tasks or lose the outcome',async()=>{
+ const r=await create(1080);
+ const task=await rpc('create_customer_followup_task',[r.id,id(1081),{title:'Inspect return',instructions:'Check the clasp.',owner:id(2)}]);
+ await assert.rejects(rpc('record_customer_followup_activity',[r.id,2,id(1082),'done','Ready to close',[]]),/Finish or cancel/);
+ const p=await rpc('customer_followup_packet',[r.id]);assert.equal(p.record.status,'open');assert.equal(p.tasks[0].status,'assigned');assert.equal(p.tasks[0].id,task.id);assert.equal(p.events.some(e=>e.action==='done'),false);
+ const standalone=await create(1083);
+ const done=await rpc('record_customer_followup_activity',[standalone.id,1,id(1084),'done','Return inspected and follow-up resolved.',[]]);
+ assert.equal(done.return_stage,'resolved');assert.equal(done.status,'closed');assert.equal(done.ebay_order_line_id,id(101));
 });

@@ -10,7 +10,7 @@
  const orderTime=o=>{
   if(!o?.purchased_at)return 'Not provided';
   if(o.purchase_precision==='local')return o.purchased_at+' (saved order time)';
-  if(o.purchase_precision==='day'||/^\d{4}-\d{2}-\d{2}$/.test(o.purchased_at)){const d=new Date(o.purchased_at.slice(0,10)+'T12:00:00Z');return Number.isNaN(+d)?'Time not provided':new Intl.DateTimeFormat('en-US',{timeZone:'UTC',dateStyle:'medium'}).format(d)+' � time not provided';}
+  if(o.purchase_precision==='day'||/^\d{4}-\d{2}-\d{2}$/.test(o.purchased_at)){const d=new Date(o.purchased_at.slice(0,10)+'T12:00:00Z');return Number.isNaN(+d)?'Time not provided':new Intl.DateTimeFormat('en-US',{timeZone:'UTC',dateStyle:'medium'}).format(d)+' · time not provided';}
   return displayTime(o.purchased_at);
  };
  const timezone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -146,6 +146,37 @@
    try{details.photos=await upload(db);const result=checked(await db.rpc('update_customer_followup',{_id:record.id,_revision:record.revision,_request_id:request,_details:details}));saved(modal,result);}catch(err){modal.busy(false);modal.error(err.message);}
   });
  }
+ async function activity(record,action='update'){
+  if(dialog)return;
+  const {db,user}=await connection(),request=root.crypto.randomUUID();
+  const done=action==='done',reopen=action==='reopen';
+  const modal=makeDialog(done?'Mark done':reopen?'Reopen follow-up':'Add update',`
+   <p class="cf-activity-title">${escape(record.title)}</p>
+   <p class="cf-help">${done?'Write the outcome. This record and its full conversation will move to History.':reopen?'Explain the next step. The saved conversation will stay with this record when it returns to Active.':'Add a note to the team conversation. The record keeps its current status.'}</p>
+   <label>${done?'What happened?':reopen?'Reason for reopening':'Update / note'}<textarea name="note" rows="5" maxlength="10000" ${done||reopen?'required':''} placeholder="${done?'Explain how the call or return was resolved.':'What happened and what is the next step?'}"></textarea></label>
+   ${photoFields()}<p class="cf-help">Internal team conversation · each entry saves your name and the date.</p>
+   <div class="cf-activity-tasks"></div>`,done?'Done — move to History':reopen?'Reopen':'Save update');
+  if(!modal)return;const upload=photoPicker(modal,user,request);let saving=false;
+  modal.form.elements.note.focus();
+  modal.form.addEventListener('submit',async e=>{
+   e.preventDefault();if(saving||!modal.form.reportValidity())return;
+   const note=modal.form.elements.note.value.trim();
+   if((done||reopen)&&!note){modal.error('Write what happened before saving.');return;}
+   saving=true;modal.busy(true);modal.error('');
+   try{
+    const photos=await upload(db);
+    const result=checked(await db.rpc('record_customer_followup_activity',{_id:record.id,_revision:record.revision,_request_id:request,_action:action,_note:note,_photos:photos}));
+    saved(modal,result);
+   }catch(err){
+    modal.busy(false);modal.error(err.message||'Could not save. Your note is still here; retry to confirm the save.');
+    if(done&&/linked tasks/i.test(err.message||'')){
+     try{const packet=checked(await db.rpc('customer_followup_packet',{_id:record.id}));
+      if(modal.element.isConnected)modal.form.querySelector('.cf-activity-tasks').innerHTML='<p>Finish these tasks, then return to your saved draft:</p>'+packet.tasks.filter(t=>!['resolved','cancelled'].includes(t.status)).map(t=>`<p><a href="team-tasks.html?taskId=${encodeURIComponent(t.id)}" target="_blank" rel="noopener">${escape(t.title)} ↗</a> · ${escape(t.assigned_to_email||'Unassigned')} · ${escape(t.status.replaceAll('_',' '))}</p>`).join('');
+     }catch{}
+    }
+   }finally{saving=false;}
+  });
+ }
  document.addEventListener('click',e=>{const b=e.target.closest('[data-cf-kind]');if(!b||b.disabled)return;e.preventDefault();e.stopPropagation();let context={};try{context=JSON.parse(b.dataset.cfContext||'{}');}catch{}void open(b.dataset.cfKind,context);},true);
- root.OGCustomerFollowups={open,buttons,task,update,escape,labels,stages,displayTime,orderTime,checked};
+ root.OGCustomerFollowups={open,buttons,task,update,activity,escape,labels,stages,displayTime,orderTime,checked};
 })(window);

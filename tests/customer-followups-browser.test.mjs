@@ -27,6 +27,13 @@ async function open(t,width=1366){
     const d=args._details,r={...base,...d,id:'saved-'+records.length,kind:d.kind,contact:d.contact,order_snapshot:d.line_id?order:{},revision:1};records.push(r);events[r.id]=[{action:'created',note:d.note,photos:d.photos,created_at:base.created_at,created_by_email:'staff@example.test'}];return {data:r};
    }
    if(name==='update_customer_followup'){const r=records.find(r=>r.id===args._id);Object.assign(r,args._details,{revision:r.revision+1});events[r.id].push({action:'updated',note:args._details.note,photos:args._details.photos,created_at:base.created_at,created_by_email:'staff@example.test'});return {data:r};}
+   if(name==='record_customer_followup_activity'){
+    if(fixture.failActivity){fixture.failActivity=false;return {error:{message:'Could not save this update. Retry.'}};}
+    const r=records.find(r=>r.id===args._id);
+    if(args._action==='done'&&(tasks[r.id]||[]).some(t=>!['resolved','cancelled'].includes(t.status)))return {error:{message:'Finish or cancel the linked tasks before closing this record'}};
+    if(args._action==='done'){r.status='closed';if(r.kind==='manual_return')r.return_stage='resolved';}if(args._action==='reopen')r.status='open';r.revision++;
+    events[r.id].push({action:args._action==='update'?'note_added':args._action==='reopen'?'reopened':'done',note:args._note,photos:args._photos,created_at:base.created_at,created_by_email:'staff@example.test'});return {data:r};
+   }
    if(name==='create_customer_followup_task'){const d=args._details,t={id:'task-'+fixture.calls.length,title:d.title,status:'assigned',assigned_to_email:'otello@example.test',due_at:d.due_at};(tasks[args._id]??=[]).push(t);return {data:t};}
    return {error:{message:'Unknown RPC '+name}};
   };
@@ -52,7 +59,7 @@ test('standalone non-customer call, saved notes, multiple tasks, and separate re
  const p=await open(t);await p.getByRole('button',{name:'New call reminder'}).click();let d=p.getByRole('dialog');
  await d.getByLabel('Customer / contact name').fill('Repair supplier');await d.getByLabel('Phone',{exact:true}).fill('555-0199');await d.getByLabel('Title',{exact:true}).fill('Follow up about repair');await d.getByLabel('Message / notes').fill('Call supplier to confirm repair ETA.');await d.getByLabel('Assign a follow-up task').selectOption('');
  await d.getByRole('button',{name:'Save follow-up'}).click();await expect(d).not.toBeVisible();await expect(p.locator('#cf-detail')).toContainText('Repair supplier');
- await p.getByRole('button',{name:'Add note / photos or update'}).click();d=p.getByRole('dialog');await d.getByLabel('Note / call outcome').fill('Spoke with supplier. Ready Tuesday.');await d.getByRole('button',{name:'Save update'}).click();await expect(d).not.toBeVisible();await expect(p.locator('#cf-detail')).toContainText('Spoke with supplier. Ready Tuesday.');
+ await p.locator('#cf-detail').getByRole('button',{name:'Update',exact:true}).click();d=p.getByRole('dialog');await d.getByLabel('Update / note').fill('Spoke with supplier. Ready Tuesday.');await d.getByRole('button',{name:'Save update'}).click();await expect(d).not.toBeVisible();await expect(p.locator('#cf-detail')).toContainText('Spoke with supplier. Ready Tuesday.');
  await p.getByRole('button',{name:'Create task',exact:true}).click();d=p.getByRole('dialog');await d.getByLabel('Instructions').fill('Collect the repaired piece on Tuesday.');await d.getByLabel('Responsible person').selectOption('staff-2');await d.getByRole('button',{name:'Create task',exact:true}).click();await expect(d).not.toBeVisible();
  await p.getByRole('button',{name:'Generate calls report',exact:true}).click();await expect(p.locator('#cf-report-ready')).toContainText('2 records');await expect(p.locator('#cf-report')).toContainText('Spoke with supplier. Ready Tuesday.');await expect(p.locator('#cf-report')).not.toContainText('Return label provided by phone');
  let downloadPromise=p.waitForEvent('download');await p.getByRole('button',{name:'Download CSV'}).click();let download=await downloadPromise;assert.match(download.suggestedFilename(),/^customer-calls-/);
@@ -65,4 +72,41 @@ test('chat call retains conversation and message context, escapes customer text 
  const p=await open(t);await p.evaluate(()=>{fixture.failSave=true;OGCustomerFollowups.open('call',{channel:'ebay',buyer:'buyer.one',name:'<img src=x onerror=alert(1)>',conversationId:'chat-1',messageId:'message-1'});});
  const d=p.getByRole('dialog');await expect(d.getByLabel('Marketplace')).toBeDisabled();await d.getByLabel('Title',{exact:true}).fill('Call about complaint');await d.getByLabel('Message / notes').fill('Call back this afternoon.');await d.getByLabel('Assign a follow-up task').selectOption('');await d.getByRole('button',{name:'Save follow-up'}).click();await expect(d.locator('.cf-error')).toContainText('Temporary validation failure');await expect(d.getByLabel('Message / notes')).toHaveValue('Call back this afternoon.');await expect(d.getByLabel('Marketplace')).toBeDisabled();assert.equal(await d.locator('img').count(),0);
  await d.getByRole('button',{name:'Save follow-up'}).click();await expect(d).not.toBeVisible();const saved=await p.evaluate(()=>fixture.calls.filter(c=>c.name==='create_customer_followup').at(-1).args._details);assert.equal(saved.conversation_id,'chat-1');assert.equal(saved.message_id,'message-1');assert.equal(saved.line_id,null);
+});
+
+for(const [width,kind] of [[390,'call'],[1366,'manual_return']])test(`Update and Done ${width}px: save the outcome, browse History, report it and reopen`,async t=>{
+ const p=await open(t,width);
+ if(kind==='manual_return')await p.getByRole('button',{name:'Manual returns',exact:true}).click();
+ await p.locator('#cf-list').getByRole('button',{name:'Update',exact:true}).click();let d=p.getByRole('dialog');
+ await d.getByLabel('Update / note').fill('Called customer and agreed on the next step.');await d.getByRole('button',{name:'Save update',exact:true}).click();await expect(d).not.toBeVisible();
+ await expect(p.getByRole('button',{name:'Active',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(p.locator('.cf-conversation')).toContainText('Called customer and agreed on the next step.');
+ await p.locator('#cf-detail').getByRole('button',{name:'Done',exact:true}).click();d=p.getByRole('dialog');
+ await d.getByRole('button',{name:'Done — move to History',exact:true}).click();await expect(d).toBeVisible();
+ assert.equal(await p.evaluate(()=>fixture.calls.some(c=>c.name==='record_customer_followup_activity'&&c.args._action==='done')),false,'blank outcome must not save');
+ await d.getByLabel('What happened?',{exact:true}).fill('Spoke with customer. The issue is resolved and they are satisfied.');
+ await d.getByLabel('Add photos',{exact:true}).setInputFiles({name:'outcome.png',mimeType:'image/png',buffer:Buffer.from('photo fixture')});
+ await d.getByRole('button',{name:'Done — move to History',exact:true}).click();await expect(d).not.toBeVisible();
+ await expect(p.getByRole('button',{name:'History',exact:true})).toHaveAttribute('aria-pressed','true');await expect(p.locator('#cf-list')).toContainText('Done');
+ await expect(p.locator('.cf-conversation .is-done')).toContainText('Spoke with customer. The issue is resolved');await expect(p.locator('.cf-conversation')).toContainText('Called customer and agreed on the next step.');
+ await p.locator('#cf-detail').screenshot({path:`test-results/customer-followups/done-history-${width}.png`});
+ await p.getByRole('button',{name:kind==='call'?'Generate calls report':'Generate manual returns report',exact:true}).click();
+ await expect(p.locator('#cf-report')).toContainText('View: History');await expect(p.locator('#cf-report')).toContainText('Spoke with customer. The issue is resolved');
+ await p.locator('#cf-detail').getByRole('button',{name:'Update',exact:true}).click();d=p.getByRole('dialog');await d.getByLabel('Update / note').fill('Added the customer’s final confirmation.');await d.getByRole('button',{name:'Save update',exact:true}).click();await expect(d).not.toBeVisible();
+ await expect(p.getByRole('button',{name:'History',exact:true})).toHaveAttribute('aria-pressed','true');await expect(p.locator('#cf-detail')).toContainText('Added the customer’s final confirmation.');
+ await p.getByRole('button',{name:'Active',exact:true}).click();await expect(p.locator('#cf-list .cf-card')).toHaveCount(0);
+ await p.getByRole('button',{name:'History',exact:true}).click();await p.locator('#cf-list').getByRole('button',{name:'Open record',exact:true}).click();
+ await p.locator('#cf-detail').getByRole('button',{name:'Reopen',exact:true}).click();d=p.getByRole('dialog');await d.getByLabel('Reason for reopening').fill('Customer has a further question.');await d.getByRole('button',{name:'Reopen',exact:true}).click();await expect(d).not.toBeVisible();
+ await expect(p.getByRole('button',{name:'Active',exact:true})).toHaveAttribute('aria-pressed','true');await expect(p.locator('.cf-conversation')).toContainText('Customer has a further question.');await expect(p.locator('.cf-conversation')).toContainText('Spoke with customer. The issue is resolved');
+ assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});
+
+test('failed updates preserve the draft; unfinished task links keep Done honest',async t=>{
+ const p=await open(t);await p.locator('#cf-list').getByRole('button',{name:'Update',exact:true}).click();let d=p.getByRole('dialog');
+ await d.getByLabel('Update / note').fill('Waiting for the customer to call back.');await p.evaluate(()=>fixture.failActivity=true);await d.getByRole('button',{name:'Save update',exact:true}).click();await expect(d.locator('.cf-error')).toContainText('Could not save');await expect(d.getByLabel('Update / note')).toHaveValue('Waiting for the customer to call back.');
+ await d.getByRole('button',{name:'Save update',exact:true}).click();await expect(d).not.toBeVisible();
+ await p.evaluate(()=>fixture.tasks['call-1']=[{id:'pending-task',title:'Check return arrival',status:'assigned',assigned_to_email:'otello@example.test'}]);
+ await p.locator('#cf-detail').getByRole('button',{name:'Done',exact:true}).click();d=p.getByRole('dialog');await d.getByLabel('What happened?',{exact:true}).fill('Customer agreed; waiting on inspection.');await d.getByRole('button',{name:'Done — move to History',exact:true}).click();
+ await expect(d.locator('.cf-error')).toContainText('Finish or cancel');await expect(d.getByRole('link',{name:'Check return arrival ↗'})).toHaveAttribute('href','team-tasks.html?taskId=pending-task');await expect(d.getByLabel('What happened?',{exact:true})).toHaveValue('Customer agreed; waiting on inspection.');
+ assert.equal(await p.evaluate(()=>fixture.records.find(r=>r.id==='call-1').status),'open');
 });

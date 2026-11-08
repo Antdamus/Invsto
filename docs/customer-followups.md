@@ -10,6 +10,8 @@ A record can have multiple ordinary team tasks created through `create_task_requ
 
 The calls and manual-return report buttons produce separate reports using the current search/status/due filters. Print/save PDF includes the client and order details, activity, photos, and task summaries. CSV includes notes and record links and escapes spreadsheet formulas. Reports identify their filters and generation time. Saved contact details may be incomplete or masked by the marketplace; absent information is labelled as missing rather than inferred.
 
+Each card and record has **Update** and **Done** actions. Update appends a dated team conversation entry without changing the record's status. Done requires an outcome and moves the record to **History**, preserving every note, photo, task and customer/order detail. History supports additional updates and an audited **Reopen** action. Unfinished linked tasks must be completed first; a failed Done keeps the outcome draft and shows links to those tasks. Reports respect the selected Active/History view and include the final outcome.
+
 Verification:
 
 ```text
