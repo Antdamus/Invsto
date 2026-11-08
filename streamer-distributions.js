@@ -192,10 +192,12 @@
   const position=target=>{
    const box=target.getBoundingClientRect(),frame=modal.getBoundingClientRect(),margin=10;
    const minX=Math.max(margin,frame.left+margin),maxX=Math.min(innerWidth-margin,frame.right-margin);
-   tip.style.width=Math.max(120,Math.min(470,maxX-minX))+'px';
-   tip.style.maxHeight=Math.max(120,Math.min(420,innerHeight-40,frame.height-30))+'px';
-   const size=tip.getBoundingClientRect(),left=Math.min(maxX-size.width,Math.max(minX,box.left));
    const maxY=Math.min(innerHeight-margin,frame.bottom-margin),minY=Math.max(margin,frame.top+margin);
+   const roomAbove=Math.max(0,box.top-8-minY),roomBelow=Math.max(0,maxY-box.bottom-8);
+   tip.style.width=Math.max(120,Math.min(470,maxX-minX))+'px';
+   // Keep a large scrollable popup off its trigger, including shorter windows.
+   tip.style.maxHeight=Math.max(40,Math.min(420,Math.max(roomAbove,roomBelow)))+'px';
+   const size=tip.getBoundingClientRect(),left=Math.min(maxX-size.width,Math.max(minX,box.left));
    const top=box.bottom+8+size.height<=maxY?box.bottom+8:box.top-8-size.height>=minY?box.top-8-size.height:Math.max(minY,Math.min(box.top,maxY-size.height));
    tip.style.left=left+'px';tip.style.top=top+'px';
   };

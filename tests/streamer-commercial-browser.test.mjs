@@ -5,7 +5,7 @@ import {chromium} from '@playwright/test';
 import {fileURLToPath} from 'node:url';
 for(const width of [390,1440])test(`commercial report filters, evidence, CSV and print at ${width}px`,async()=>{
  const browser=await chromium.launch();try{
-  const page=await browser.newPage({viewport:{width,height:950}});
+  const page=await browser.newPage({viewport:{width,height:width===1440?675:950}});
   await page.setContent('<main>Dashboard</main>');
   await page.addStyleTag({path:fileURLToPath(new URL('../weekly-production-report.css',import.meta.url))});
   for(const f of ['streamer-performance','streamer-distributions','streamer-commercial-analysis','weekly-production-report'])await page.addScriptTag({path:fileURLToPath(new URL('../'+f+'.js',import.meta.url))});
@@ -26,12 +26,13 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   assert.match(await explorer.locator('.sde-stats').first().innerText(),/Median \$0/);
   const bar=explorer.locator('.sde-hist [data-sde-bin]:not([disabled])');
   await bar.hover();const tip=d.getByRole('tooltip');await tip.waitFor({state:'visible'});
+  const tb=await tip.boundingBox(),bb=await bar.boundingBox();assert.ok(tb.y+tb.height<=bb.y||tb.y>=bb.y+bb.height,'Hover panel must not cover its clickable bar');
   assert.match(await tip.innerText(),/Sunday 1/);assert.match(await tip.innerText(),/Canceled/);assert.match(await tip.innerText(),/Average net.hour/);assert.match(await tip.innerText(),/Sun, Oct 4, 2026, 10:00 PM/);
   await tip.hover();assert.equal(await tip.isVisible(),true);await page.keyboard.press('Escape');assert.equal(await tip.isVisible(),false);assert.equal(await d.isVisible(),true);
   await bar.click();assert.equal(await explorer.locator('.sde-records').getAttribute('open'),'');
   assert.equal(await explorer.locator('.sde-shows tbody tr').count(),1);assert.match(await explorer.locator('.sde-selection').innerText(),/Selected sales range/);
   await explorer.getByRole('button',{name:'Clear selection',exact:true}).click();
-  await explorer.locator('circle[data-sde-show]').focus();await page.keyboard.press('Enter');assert.match(await explorer.locator('.sde-selection').innerText(),/Selected show/);
+  await explorer.locator('circle[data-sde-show]').click();assert.match(await explorer.locator('.sde-selection').innerText(),/Selected show/);
   assert.match(await explorer.locator('.sde-show-detail').innerText(),/Sales hour by hour/);assert.match(await explorer.locator('.sde-show-detail').innerText(),/Refunded/);
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('elapsed:1');assert.match(await explorer.locator('.sde-stats').first().innerText(),/Median \$0/);
   await explorer.locator('[data-sde-weekday="all"]').click();assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'all');
