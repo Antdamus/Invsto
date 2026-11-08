@@ -25,9 +25,25 @@ before(async()=>{
  with orders as(select market,order_number,purchased,booked,cancelled,refunded,0 held,booked net from sale_rows)
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${admin}';`);
- for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql','20261108120000_streamer_start_date.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql','20261108120000_streamer_start_date.sql','20261108140000_verified_show_orders.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
 });
 after(()=>db?.close());
+test('exact sold-listing evidence resolves overlapping starts without changing order money or operational records',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('overlap-first','First show','2026-11-05T14:27-05:00',9374,'{"paid_items":1}'),
+ ('overlap-second','Second show','2026-11-05T15:35-05:00',2099,'{"paid_items":1}');
+ insert into ebay_orders(id,order_number,sale_date,raw_payload) values('overlap-order','overlap-order','2026-11-05T16:49-05:00','{"source":"ebay_fulfillment_api"}');
+ insert into ebay_order_lines(id,order_id,assigned_seller_employee_id) values('overlap-line','overlap-order','${admin}');
+ insert into sale_rows values('ebay','overlap-order','2026-11-05T16:49',890,0,0,false);`);
+ const before=(await db.query("select get_streamer_performance_history('2026-11-05','2026-11-06') r")).rows[0].r;
+ assert.equal(before.shows.find(s=>s.event_id==='overlap-second').net,890);
+ await db.exec(`insert into weekly_ebay_verified_show_orders values('overlap-order','overlap-first','https://www.ebay.com/ebaylive/host/events/overlap-first',now(),'{"source":"sold_listing"}');`);
+ const after=(await db.query("select get_streamer_performance_history('2026-11-05','2026-11-06') r")).rows[0].r;
+ assert.equal(after.shows.find(s=>s.event_id==='overlap-first').net,890);assert.equal(after.shows.find(s=>s.event_id==='overlap-first').confirmed_orders,1);
+ assert.equal(after.shows.find(s=>s.event_id==='overlap-second').net,0);assert.equal(after.coverage.orders,before.coverage.orders);
+ assert.equal((await db.query("select assigned_seller_employee_id from ebay_order_lines where id='overlap-line'")).rows[0].assigned_seller_employee_id,admin);
+ await db.exec('set role authenticated');await assert.rejects(db.query('select * from weekly_ebay_verified_show_orders'),/permission denied/);await db.exec('reset role');
+});
 test('September 23 and 6 AM boundaries use the owner confirmed streamer schedule',async()=>{
  await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
  ('cut-before','Before Sydney','2026-09-22T12:00-04:00',60,'{"paid_items":0}'),

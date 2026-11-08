@@ -12,12 +12,13 @@ test('same-weekday comparisons use distinct active dates and strictly prior show
  const monday=m.sellers[0].comparisons[0];assert.equal(monday.base,500);assert.equal(monday.now,750);assert.equal(monday.lift,.5);assert.equal(monday.previous,2);assert.equal(m.past.length,3);
  assert.equal(m.sellers[0].comparisons[1].base,null);
 });
-test('sales remain included with partial or provisional evidence; no-sales starts are omitted',()=>{
+test('sales remain included with partial or provisional evidence; zero-sales starts remain visible',()=>{
  const a=show('a','2026-10-05T14:00Z'),b=show('b','2026-10-05T18:00Z',500,{airtime_provisional:true});
  const m=analysis.model(history([a,b,show('partial','2026-10-12T14:00Z',100,{insights:{paid_items:30}}),show('today','2026-11-08T15:00Z'),show('unknown','2026-10-06T14:00Z',0,{orders:0,insights:null,airtime_seconds:null}),show('zero','2026-10-07T14:00Z',0,{orders:0,linked_lines:0,insights:{paid_items:0}}),show('dst','2026-11-02T04:30Z',200,{seller:'Otello'})]),period);
- assert.equal(m.excluded.length,2);assert.equal(m.sellers.find(s=>s.name==='Sydney').comparisons[0].previous,2);
+ assert.equal(m.excluded.length,0);assert.equal(m.sellers.find(s=>s.name==='Sydney').comparisons[0].previous,2);
  assert.equal(m.all.find(s=>s.event_id==='dst').day,'2026-11-01');assert.equal(m.all.find(s=>s.event_id==='dst').slot,22);
- assert.equal(m.past.find(s=>s.event_id==='zero'),undefined);
+ assert.equal(m.past.find(s=>s.event_id==='zero').net,0);
+ assert.equal(m.past.find(s=>s.event_id==='unknown').net,null);
  assert.ok(m.past.find(s=>s.event_id==='partial').warnings.some(s=>s.includes('Partial order coverage')));
  assert.equal(m.past.find(s=>s.event_id==='b').rate,null);
 });
