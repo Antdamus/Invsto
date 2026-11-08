@@ -51,6 +51,7 @@
   if(s.scheduled_start&&Date.parse(s.scheduled_start)!==Date.parse(s.starts_at))value+=' · Previously recorded start: '+stamp(s.starts_at);
   return value+' · Airtime: '+airtime(s.airtime_seconds)+(s.airtime_provisional?' (eBay still processing)':'');
  }
+ const commercial=m=>m.history?.status==='ready'?window.StreamerCommercialAnalysis.render(m.history.data,m.period,m.analysisOptions):'<h2>07 · What drives show results</h2><p>Detailed analyses are available after historical records load.</p>';
  function render(m){
   const {period,rows,shows}=m;
   const sellerNames=[...new Set([...rows.map(r=>r.seller),...m.inPeriod.map(s=>s.seller)])];
@@ -79,6 +80,7 @@
    '<section id="wpr-streamer-hours"><h2>04 · Streaming hours by streamer</h2>'+table(['Streamer','Shows','Shows timed','Total streaming hours','Average show length','Longest show'],sellers.map(s=>[esc(s.name),String(s.shows.length),s.timed.length+' / '+s.shows.length,s.timed.length?airtime(sum(s.timed,'airtime_seconds')):'Not recorded',s.timed.length?airtime(Math.round(sum(s.timed,'airtime_seconds')/s.timed.length)):'Not recorded',s.timed.length?airtime(Math.max(...s.timed.map(s=>s.airtime_seconds))):'Not recorded']))+'<p class="wpr-note">Streaming hours are the full reported airtime of distinct shows starting in these dates. Each show counts once. Shows with no duration are excluded from totals and averages; processing durations are provisional. A show with multiple sellers stays in a review group rather than crediting its full airtime to more than one person.</p></section>'+
    '<section><h2>05 · Coverage & attribution</h2><p>'+known+' orders have confirmed show links; '+estimated+' are estimated from show time; '+(rows.length-known-estimated)+' are not linked to one show. Estimated links may include off-show purchases.</p><p>Saved report assignments take priority, followed by recorded sellers. Otherwise, shows starting from 6 PM through 7:59 AM Eastern are assigned to Otello. From 8 AM through 5:59 PM, Saturday and Sunday shows default to Manuella; Monday through Friday shows default to Sydney. The show’s Eastern start date determines the day. A show with multiple attributed sellers remains in a review group for airtime. This report does not change commission assignments.</p></section>'+
    (window.StreamerPerformance?'<section id="wpr-history">'+window.StreamerPerformance.render(m.history,period)+'</section>':'')+
+   (window.StreamerCommercialAnalysis?'<section id="wpr-commercial">'+commercial(m)+'</section>':'')+
    '<footer class="wpr-footer">Prepared from Invsto order history and saved eBay Live Studio evidence. All sales are USD. Streaming hours represent reported show airtime.</footer></article>';
  }
  function csv(m){
@@ -97,6 +99,7 @@
   rows.push([],['Show timing','Scheduled start is not verified actual go-live. Airtime is reported by eBay Insights; processing values may change. Missing durations excluded. Each show counted once on recorded start date.'],[],['Order','Purchase date','Seller','Seller evidence','Show','Show evidence',...saleHeaders]);
   for(const r of m.rows)rows.push([r.order,r.day,r.seller,r.seller_source,r.show_title||'',r.show_source,...['booked','cancelled','refunded','held','net'].map(k=>r[k]||0)]);
   if(window.StreamerPerformance)rows.push(...window.StreamerPerformance.csvRows(m.history,m.period));
+  if(window.StreamerCommercialAnalysis&&m.history?.status==='ready')rows.push(...window.StreamerCommercialAnalysis.csvRows(m.history.data,m.period,m.analysisOptions));
   return '\ufeff'+rows.map(row=>row.map(v=>{let s=String(v??'');if(typeof v!=='number'&&/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}).join(',')).join('\r\n');
  }
  async function fetchHistory(client,period,months,isCurrent=()=>true){
@@ -128,6 +131,18 @@
   const modal=document.createElement('dialog');modal.className='wpr-dialog';modal.setAttribute('aria-label','Production report');
   modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="all" selected>All available</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
   const content=modal.querySelector('.wpr-content'),print=modal.querySelector('[data-wpr-print]'),download=modal.querySelector('[data-wpr-csv]');
+  if(window.StreamerCommercialAnalysis){
+   const jump=document.createElement('button');jump.type='button';jump.textContent='Show insights';jump.dataset.scaJump='';
+   jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});modal.querySelector('.wpr-toolbar').insertBefore(jump,print);
+   content.addEventListener('change',e=>{
+    const key=e.target.dataset.scaFilter;if(!key||m.history?.status!=='ready')return;
+    const options=Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]));
+    if(key==='seller'){options.format='all';options.weekday='all';options.series='all';}
+    if(key==='format'||key==='weekday')options.series='all';m.analysisOptions=options;
+    content.querySelector('#wpr-commercial').innerHTML=commercial(m);
+    content.querySelector('[data-sca-filter="'+key+'"]').focus({preventScroll:true});
+   });
+  }
   const draw=()=>{content.innerHTML=render(m);if(focusHours)content.querySelector('#wpr-streamer-hours').scrollIntoView({block:'start'});};
   const stopPrint=()=>document.body.classList.remove('wpr-printing');
   modal.addEventListener('close',()=>{stopPrint();window.removeEventListener('afterprint',stopPrint);modal.remove();});
@@ -141,7 +156,7 @@
    const load=async()=>{
     const token=++request;
     m.history={status:'loading'};print.disabled=true;download.disabled=true;
-    const update=()=>{if(modal.isConnected)content.querySelector('#wpr-history').innerHTML=window.StreamerPerformance.render(m.history,m.period);};update();
+    const update=()=>{if(modal.isConnected){content.querySelector('#wpr-history').innerHTML=window.StreamerPerformance.render(m.history,m.period);if(window.StreamerCommercialAnalysis)content.querySelector('#wpr-commercial').innerHTML=commercial(m);}};update();
     try{
      if(!client)throw Error('Refresh the dashboard to connect to historical reports.');
      const data=await fetchHistory(client,m.period,select.value,()=>token===request&&modal.isConnected);
