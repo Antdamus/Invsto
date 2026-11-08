@@ -90,7 +90,7 @@
    '</dl>'+(partial?'<p class="wi-eq-warning">Partial explanation. '+[b.missingReleased&&b.missingReleased+' orders missing released amounts',b.missingOther&&b.missingOther+' orders missing held or other credit amounts',b.missingParts&&b.missingParts+' orders without itemized sale-credit details',!b.completeAmounts&&'incomplete sales totals'].filter(Boolean).join('; ')+'.</p>':'')+'</section>';
  }
  const matches=(o,i,f)=>f==='all'||(f==='paid'?paid(o):f==='unpaid'?unpaid(o):f==='unknown'?!paid(o)&&!unpaid(o):['released','held','processing','outstanding','review'].includes(f)?matchesBalance(o,f):f==='sent'?payout(o).sent:f==='off'?payout(o).off:f==='unclear'?payout(o).unclear:f==='refund'?['partial','refunded'].includes(o.buyer):i.cancel);
- function update(host,data){
+ function update(host,data,client,reload){
   if(!Array.isArray(data?.ebay_item_orders)){host.hidden=true;host.replaceChildren();delete host.itemState;return;}
   const fresh=!host.itemState||host.itemState.month!==data.month;
   if(fresh){
@@ -98,24 +98,31 @@
     '<details class="wi-transfers wi-matches"><summary>Bank transfers matched to specific orders</summary><div class="wi-summary"></div></details>'+
     '<details class="wi-transfers wi-bank"><summary>Account transfers sent by eBay · by transfer date</summary><div></div></details>'+
     '<details class="wi-browser"><summary>Browse order lines and payments</summary><div class="ws-controls"><label>Purchase week <select class="wi-week"></select></label>'+
-    '<label>Show <select class="wi-filter">'+Object.entries(filters).map(([k,t])=>'<option value="'+k+'">'+t+'</option>').join('')+'</select></label>'+
+    '<label>Payment filter <select class="wi-filter">'+Object.entries(filters).map(([k,t])=>'<option value="'+k+'">'+t+'</option>').join('')+'</select></label>'+
     '<label>Hold reason <select class="wi-hold-reason"><option value="all">All orders</option></select></label>'+
     '<label>Estimated release date <select class="wi-release-date"><option value="all">All estimated dates</option></select></label>'+
     '<label>Find <input class="wi-find" type="search" placeholder="Order, item title, or username"></label></div>'+
     '<p class="wi-key">Each line shows the latest funds status of its order. Item sales kept reflects cancellations and merchandise refunds before fees. Original sale credits include buyer shipping and sale fees. When eBay provides only one credit for several lines, the amount appears once in the order footer.</p>'+
-    '<div class="wi-count" role="status"></div><div class="wi-orders"></div><div class="ws-controls wi-pages"><button type="button" data-step="-1">Previous</button><span></span><button type="button" data-step="1">Next</button></div></details>';
-   host.itemState={month:data.month,page:0};
-   host.onchange=e=>{if(e.target.matches('select')){if(e.target.matches('.wi-hold-reason'))host.querySelector('.wi-release-date').value='all';host.itemState.page=0;list(host);}};
+    '<div class="wi-production-filter" hidden></div><div class="wi-count" role="status"></div><div class="wi-orders"></div><div class="ws-controls wi-pages"><button type="button" data-step="-1">Previous</button><span></span><button type="button" data-step="1">Next</button></div></details>';
+   host.itemState={month:data.month,page:0,productionOpen:new Set(),productionViews:{}};
+   host.onchange=e=>{if(e.target.matches('select')){if(e.target.matches('.wi-hold-reason'))host.querySelector('.wi-release-date').value='all';if(e.target.matches('.wi-week'))host.itemState.productionFilter=null;host.itemState.page=0;list(host);}};
    host.oninput=e=>{if(e.target.matches('.wi-find')){host.itemState.page=0;list(host);}};
    host.onclick=e=>{const week=e.target.closest('[data-item-week]'),step=e.target.closest('[data-step]'),bridge=e.target.closest('[data-bridge]');
+    const production=e.target.closest('[data-production-toggle]'),view=e.target.closest('[data-production-view]'),orders=e.target.closest('[data-production-orders]'),assign=e.target.closest('[data-production-assign]');
+    if(production){const w=production.dataset.productionToggle,open=production.getAttribute('aria-expanded')!=='true';production.setAttribute('aria-expanded',String(open));host.querySelector('#'+production.getAttribute('aria-controls')).hidden=!open;if(open)host.itemState.productionOpen.add(w);else host.itemState.productionOpen.delete(w);return;}
+    if(view){const w=view.dataset.productionWeek;host.itemState.productionViews[w]=view.dataset.productionView;host.querySelector('#wi-production-'+(w||'month')+' td').innerHTML=window.WeeklyEbayProduction.render(host.itemState.production,w,view.dataset.productionView);return;}
+    if(assign){window.WeeklyEbayProduction.assignment(host,assign.dataset.productionAssign,host.itemState.client,host.itemState.reload);return;}
+    if(e.target.closest('[data-production-clear]')){host.itemState.productionFilter=null;list(host);return;}
+    if(orders){host.itemState.productionFilter={week:orders.dataset.productionWeek,kind:orders.dataset.productionOrders,key:orders.dataset.productionKey,day:orders.dataset.productionDay,seller:orders.dataset.productionSeller};host.querySelector('.wi-week').value=orders.dataset.productionWeek;host.querySelector('.wi-filter').value='all';host.querySelector('.wi-hold-reason').value='all';host.querySelector('.wi-release-date').value='all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});return;}
     if(bridge){const panel=host.querySelector('.wi-balance');host.itemState.bridge=bridge.getAttribute('aria-expanded')==='true'?null:bridge.dataset.bridge;
      for(const b of panel.querySelectorAll('[data-bridge]')){const show=b.dataset.bridge===host.itemState.bridge;b.setAttribute('aria-expanded',String(show));host.querySelector('#'+b.getAttribute('aria-controls')).hidden=!show;}return;}
-    if(week){host.querySelector('.wi-week').value=week.dataset.itemWeek;host.querySelector('.wi-filter').value=week.dataset.bucket||'all';host.querySelector('.wi-hold-reason').value='all';host.querySelector('.wi-release-date').value='all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});}
+    if(week){host.itemState.productionFilter=null;host.querySelector('.wi-week').value=week.dataset.itemWeek;host.querySelector('.wi-filter').value=week.dataset.bucket||'all';host.querySelector('.wi-hold-reason').value='all';host.querySelector('.wi-release-date').value='all';host.querySelector('.wi-find').value='';host.querySelector('.wi-browser').open=true;host.itemState.page=0;list(host);host.querySelector('.wi-browser').scrollIntoView({block:'start'});}
     if(step){host.itemState.page+=Number(step.dataset.step);list(host);}};
   }
   host.hidden=false;
-  const s=host.itemState;s.orders=data.ebay_item_orders.map(withPayout).map(o=>({...o,holdInfo:window.OGEbayHoldDetails?.model(o.id,o.hold_detail||{},o.fund==='held'?true:o.fund==='mixed'?undefined:false)}));
+  const s=host.itemState;s.client=client;s.reload=reload;s.production=data.ebay_production;s.orders=data.ebay_item_orders.map(withPayout).map(o=>({...o,holdInfo:window.OGEbayHoldDetails?.model(o.id,o.hold_detail||{},o.fund==='held'?true:o.fund==='mixed'?undefined:false)}));
   const rows=data.rows.filter(r=>r.market==='ebay'),weeks=rows.map(r=>r.week);
+  if(s.production){const days=[];for(const r of rows){for(let d=r.first_day;d<r.end_day&&(!data.cutoff||d<=data.cutoff.slice(0,10));){days.push({week:r.week,day:d});d=new Date(Date.parse(d+'T12:00:00Z')+86400000).toISOString().slice(0,10);}}s.production={...s.production,days};}
   const wk=host.querySelector('.wi-week'),before=wk.value;
   const label=r=>day(r.first_day)+' – '+day(new Date(Date.parse(r.end_day+'T12:00Z')-86400000).toISOString().slice(0,10));
   wk.innerHTML='<option value="">Whole month</option>'+[...rows].reverse().map(r=>'<option value="'+r.week+'">'+label(r)+'</option>').join('');
@@ -126,6 +133,9 @@
   const drill=(name,w,bucket,value)=>'<button type="button" data-item-week="'+w+'" data-bucket="'+bucket+'" aria-label="'+esc(name+' · '+filters[bucket]+': '+value)+'">'+value+'</button>';
   const weekCell=(name,w,orders)=>'<th scope="row"><button type="button" data-item-week="'+w+'">'+name+'</button><small>'+info(orders)+'</small></th>';
   function balanceRow(name,w,orders,sales,total){
+   const productionId='wi-production-'+(w||'month'),productionOpen=s.productionOpen.has(w);
+   const productionButton=window.WeeklyEbayProduction?'<button type="button" class="wp-expand" data-production-toggle="'+w+'" aria-expanded="'+productionOpen+'" aria-controls="'+productionId+'">By seller, day &amp; show <span aria-hidden="true">▾</span></button>':'';
+   const productionRow=window.WeeklyEbayProduction?'<tr id="'+productionId+'" class="wi-production-detail" '+(productionOpen?'':'hidden')+'><td colspan="8">'+window.WeeklyEbayProduction.render(s.production,w,s.productionViews[w]||'seller')+'</td></tr>':'';
    const st=stats(orders);
    const deduction=n=>n==null?money(null):(n>0?'−':'')+money(n);
    const combined=sales.cancelled!=null&&sales.refunded!=null?Number(sales.cancelled)+Number(sales.refunded):null;
@@ -150,11 +160,11 @@
    const b=reconciliation(sales,orders),id='wi-bridge-'+(w||'month'),open=s.bridge===w;
    const bridge='<button type="button" class="wi-bridge-toggle" data-bridge="'+w+'" aria-expanded="'+open+'" aria-controls="'+id+'" aria-label="'+esc(name+' · Why released differs: '+(b.gap==null?'Not confirmed':signed(b.gap)))+'">'+(b.gap==null?'Not confirmed':signed(b.gap))+' <span aria-hidden="true">▾</span></button>'+
     (b.gap?'<small class="wi-gap-direction">'+(b.gap>0?'More':'Less')+' released than net sales</small>':'')+'<small>'+esc(b.main)+'</small>';
-   return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders)+
+   return '<tr'+(total?' class="wi-total"':'')+'>'+weekCell(name,w,orders).replace('</th>',productionButton+'</th>')+
     cell('Original item sales',original)+cell('Net item sales',net)+cell('Why released differs',bridge)+
     cell('Released to eBay balance',amountCell('released'))+cell('On hold',amountCell('held'))+
     cell('Other funds statuses',other||'0 lines')+cell('Buyer payments',st.paid+' paid lines<small>'+st.unpaid+' not paid · '+st.unknown+' unconfirmed</small>')+'</tr>'+
-    '<tr id="'+id+'" class="wi-bridge-detail" '+(open?'':'hidden')+'><td colspan="8">'+reconciliationDetail(name,id+'-math',b)+'</td></tr>';
+    '<tr id="'+id+'" class="wi-bridge-detail" '+(open?'':'hidden')+'><td colspan="8">'+reconciliationDetail(name,id+'-math',b)+'</td></tr>'+productionRow;
   }
   const payoutRow=(name,w,orders,sales,total)=>{
    const amountCell=(bucket,value)=>drill(name,w,bucket,value);
@@ -175,10 +185,12 @@
    render('Month total','',s.orders,monthSales,true);
   const noteKey=d=>{const b=d.closest('td').querySelector('button');return b.dataset.itemWeek+':'+b.dataset.bucket;};
   const balanceTable=host.querySelector('.wi-balance'),expandedNotes=new Set([...balanceTable.querySelectorAll('.wi-credit-note[open]')].map(noteKey));
+  const expandedProduction=new Set([...balanceTable.querySelectorAll('[data-production-group][open]')].map(d=>d.closest('tr').id+':'+d.dataset.productionGroup));
   balanceTable.innerHTML='<table aria-label="Item sales and eBay funds by purchase week"><colgroup><col style="width:12%"></colgroup><colgroup><col style="width:13%"><col style="width:14%"></colgroup><colgroup><col style="width:17%"><col style="width:14%"><col style="width:12%"><col style="width:8%"></colgroup><colgroup><col style="width:10%"></colgroup>'+
    '<thead><tr class="wi-band"><th scope="col" rowspan="2">Purchase week<small>Eastern time</small></th><th scope="colgroup" colspan="2">01 · Item sales</th><th scope="colgroup" colspan="4">02 · From sales to eBay funds</th><th scope="col" rowspan="2">Buyer payments</th></tr>'+
    '<tr><th scope="col">Original item sales</th><th scope="col" class="wi-net-head">Net item sales<small>Verified · before fees</small></th><th scope="col">Why released differs<small>Released minus net sales</small></th><th scope="col">Released to eBay balance<small>Original sale credits</small></th><th scope="col">On hold</th><th scope="col">Other funds statuses</th></tr></thead><tbody>'+renderRows(balanceRow)+'</tbody></table>'+
    '<p><b>Net item sales</b> exclude cancellations, refunds, and amounts still under review. They cover merchandise only, before selling fees. <b>Released</b> and <b>On hold</b> show original sale credits including buyer shipping and after sale fees. A sale can count in net sales while eBay holds its funds.</p>';
+  for(const d of balanceTable.querySelectorAll('[data-production-group]'))d.open=expandedProduction.has(d.closest('tr').id+':'+d.dataset.productionGroup);
   for(const d of balanceTable.querySelectorAll('.wi-credit-note'))d.open=expandedNotes.has(noteKey(d));
   host.querySelector('.wi-matches>div').innerHTML='<table><thead><tr><th>Purchase week · Eastern</th><th>Paid out to us<small>Matched to orders</small></th><th>Not on hold<small>Payout not confirmed</small></th></tr></thead><tbody>'+renderRows(payoutRow)+'</tbody></table>'+
    '<p><b>Paid out to us</b> counts only transactions eBay links to a successful transfer, net of linked debits. <b>No match</b> means eBay has not identified which orders funded a transfer. Off-hold credits can include processing funds and are shown before later refunds and costs.</p>';
@@ -192,7 +204,8 @@
  }
  function list(host){
   const $=q=>host.querySelector(q),s=host.itemState,w=$('.wi-week').value,f=$('.wi-filter').value,q=$('.wi-find').value.trim().toLowerCase();
-  const holdSelect=$('.wi-hold-reason'),reason=holdSelect.value||'all',scope=s.orders.filter(o=>!w||o.week===w);
+  const holdSelect=$('.wi-hold-reason'),reason=holdSelect.value||'all',pf=s.productionFilter,chosen=pf?window.WeeklyEbayProduction?.filteredOrders(s.production,pf.week,pf.kind,pf.key,pf):null,scope=s.orders.filter(o=>(!w||o.week===w)&&(!chosen||chosen.has(o.id)));
+  const filterNote=$('.wi-production-filter');filterNote.hidden=!pf;filterNote.innerHTML=pf?'Filtered by '+esc(pf.kind==='show'?(s.production?.orders.find(r=>(r.show||r.show_source)===pf.key)?.show_title||'Unlinked / mixed show'):pf.key)+' <button type="button" data-production-clear>Clear breakdown filter</button>':'';
   if(window.OGEbayHoldDetails){holdSelect.innerHTML=window.OGEbayHoldDetails.options(scope.map(o=>o.holdInfo),reason);holdSelect.value=reason;}
   const byReason=scope.filter(o=>!window.OGEbayHoldDetails||window.OGEbayHoldDetails.matches(o.holdInfo,reason));
   const dateSelect=$('.wi-release-date'),releaseDate=dateSelect.value||'all';

@@ -131,7 +131,7 @@
   month.value=manualMonth?requested:month.max;
   const connect=$('ws-ebay-connect'),earnStatus=$('ws-ebay-status');
   const itemLedger=(data)=>{
-    window.WeeklyEbayItems?.update($('ws-ebay-items'),data);
+    window.WeeklyEbayItems?.update($('ws-ebay-items'),data,client,load);
     window.WeeklyEbayCash?.update($('ws-ebay-cash'),data,client,load);
     window.WeeklyEbayHolds?.update($('ws-ebay-holds'),data,client,load);
   };
