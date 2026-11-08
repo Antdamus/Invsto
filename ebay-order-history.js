@@ -373,6 +373,54 @@ function getValidDateValue(...values) {
   return "";
 }
 
+const historyPurchaseDayFormatter = new Intl.DateTimeFormat('en-US', {year:'numeric',month:'short',day:'numeric',timeZone:'UTC'});
+const historyPurchaseTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZone:'America/New_York',timeZoneName:'short'
+});
+// Purchase time is independent of payment, packing, and history completion time.
+function historyDateOnly(value) {
+  const text = String(value || '').trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const slash = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const named = text.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{2,4})$/);
+  if (!iso && !slash && !named) return '';
+  const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  let year = Number(iso ? iso[1] : slash ? slash[3] : named[3]);
+  if (year < 100) year += 2000;
+  const month = iso ? Number(iso[2])-1 : slash ? Number(slash[1])-1 : months.indexOf(named[1].toLowerCase());
+  const day = Number(iso ? iso[3] : slash ? slash[2] : named[2]);
+  const date = new Date(Date.UTC(year, month, day, 12));
+  return month >= 0 && date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day ? date.toISOString() : '';
+}
+
+function getHistoryPurchaseTime(line = {}) {
+  const order = getOrderFromLine(line), raw = order.raw_payload || {};
+  const valid = value => value && Number.isFinite(Date.parse(value));
+  const precise = value => valid(value) && /T\d{2}:\d{2}/.test(value) && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const apiDate = [raw.order?.creationDate, raw.ebay_order_dates?.sale_date].find(precise);
+  const sale = order.sale_date;
+  let value = raw.date_precision?.sale_date === 'timestamp' && precise(sale) ? sale : apiDate || sale;
+  if (!valid(value)) return {value:'', text:'Purchase time unavailable', precision:'unknown'};
+  const originalDay = historyDateOnly(Object.entries(raw.first_row || {}).find(([key]) => key.trim().toLowerCase() === 'sale date')?.[1]);
+  const dateOnly = !apiDate && (raw.date_precision?.sale_date === 'day' || historyDateOnly(value)
+    || (raw.date_precision?.sale_date !== 'timestamp' && originalDay && Date.parse(originalDay) === Date.parse(value)));
+  if (dateOnly) {
+    value = historyDateOnly(value) || value;
+    return {value, precision:'day', text:historyPurchaseDayFormatter.format(new Date(value)) + ' · time not provided'};
+  }
+  if (!precise(value)) return {value:'',text:'Purchase time unavailable',precision:'unknown'};
+  return {value, precision:'timestamp', text:historyPurchaseTimeFormatter.format(new Date(value))};
+}
+
+function getHistoryLiveShowUrl(receiptUrl) {
+  if (!receiptUrl) return '';
+  const url = new URL(receiptUrl);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('playback','true');
+  return url.toString();
+}
+
 function getHistoryLineTimelineAt(line = {}) {
   const order = getOrderFromLine(line);
   const apiOrder = order?.raw_payload?.order || {};
@@ -708,12 +756,18 @@ function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
   return "";
 }
 
-function getReturnLineVideoReceiptUrl(line = {}) {
+function getReturnLineVideoReceiptUrl(line = {}, photos = []) {
   const order = getOrderFromLine(line);
   return [
     ...getMetadataVideoReceiptUrls(line.label_metadata),
     ...getMetadataVideoReceiptUrls(order.label_metadata),
     line.videoReceiptUrl,
+    ...photos.flatMap(photo => [
+      ...getMetadataVideoReceiptUrls(photo.metadata),
+      photo.metadata?.pageUrl,
+      ...getMetadataVideoReceiptUrls(photo.event?.payload),
+      ...getMetadataVideoReceiptUrls(photo.event?.task_metadata),
+    ]),
   ].map((url) => normalizeVideoReceiptUrlForLine(url, line)).find(Boolean) || "";
 }
 
@@ -725,9 +779,9 @@ function buildEbayOrderDetailsUrl(orderNumber = "") {
   return url.toString();
 }
 
-function getReturnLineVideoReceiptLink(line = {}) {
+function getReturnLineVideoReceiptLink(line = {}, photos = []) {
   const order = getOrderFromLine(line);
-  const directUrl = getReturnLineVideoReceiptUrl(line);
+  const directUrl = getReturnLineVideoReceiptUrl(line, photos);
   return {
     url: directUrl,
     orderId: line.order_id || order.id || "",
@@ -5237,14 +5291,18 @@ function renderGroupReturnControl(group) {
 
 function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
   const photos = getHistoryLineVideoReceiptPhotos(line, events);
-  const receiptLink = getReturnLineVideoReceiptLink(line);
+  const receiptLink = getReturnLineVideoReceiptLink(line, photos);
   const hasLink = Boolean(receiptLink.url || receiptLink.orderNumber);
-  if (!photos.length && !hasLink) return "";
+  const purchased = getHistoryPurchaseTime(line);
+  const showUrl = getHistoryLiveShowUrl(receiptLink.url);
 
   return `
     <div class="history-video-receipt-strip">
       <div class="history-video-receipt-head">
-        <span>Video receipt</span>
+        <div class="history-purchase-time">
+          <span>Purchased</span>
+          <strong>${purchased.value ? `<time datetime="${escapeHtml(purchased.precision === 'day' ? new Date(purchased.value).toISOString().slice(0,10) : purchased.value)}">${escapeHtml(purchased.text)}</time>` : escapeHtml(purchased.text)}</strong>
+        </div>
         ${hasLink ? `
           <a class="secondary-btn history-video-receipt-link"
             href="${escapeHtml(receiptLink.url || receiptLink.orderDetailsUrl)}"
@@ -5261,6 +5319,7 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
             data-direct="${receiptLink.direct ? "1" : "0"}"
           >Open video receipt</a>
         ` : ""}
+        ${showUrl ? `<a class="secondary-btn history-live-show-link" href="${escapeHtml(showUrl)}" target="_blank" rel="noopener noreferrer" title="Open the live show for this item">Open live show</a>` : ''}
       </div>
       ${photos.length ? `<div class="history-video-receipt-grid">
         ${photos.map((photo, index) => {
