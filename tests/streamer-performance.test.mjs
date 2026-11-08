@@ -12,12 +12,25 @@ test('same-weekday comparisons use distinct active dates and strictly prior show
  const monday=m.sellers[0].comparisons[0];assert.equal(monday.base,500);assert.equal(monday.now,750);assert.equal(monday.lift,.5);assert.equal(monday.previous,2);assert.equal(m.past.length,3);
  assert.equal(m.sellers[0].comparisons[1].base,null);
 });
-test('DST uses Eastern start dates; missing, partial and provisional evidence never becomes a zero day',()=>{
+test('sales remain included with partial or provisional evidence; no-sales starts are omitted',()=>{
  const a=show('a','2026-10-05T14:00Z'),b=show('b','2026-10-05T18:00Z',500,{airtime_provisional:true});
  const m=analysis.model(history([a,b,show('partial','2026-10-12T14:00Z',100,{insights:{paid_items:30}}),show('today','2026-11-08T15:00Z'),show('unknown','2026-10-06T14:00Z',0,{orders:0,insights:null,airtime_seconds:null}),show('zero','2026-10-07T14:00Z',0,{orders:0,linked_lines:0,insights:{paid_items:0}}),show('dst','2026-11-02T04:30Z',200,{seller:'Otello'})]),period);
- assert.equal(m.excluded.length,4);assert.equal(m.sellers.find(s=>s.name==='Sydney').comparisons[0].previous,0);
+ assert.equal(m.excluded.length,2);assert.equal(m.sellers.find(s=>s.name==='Sydney').comparisons[0].previous,2);
  assert.equal(m.all.find(s=>s.event_id==='dst').day,'2026-11-01');assert.equal(m.all.find(s=>s.event_id==='dst').slot,22);
- assert.equal(m.past.find(s=>s.event_id==='zero').net,0);
+ assert.equal(m.past.find(s=>s.event_id==='zero'),undefined);
+ assert.ok(m.past.find(s=>s.event_id==='partial').warnings.some(s=>s.includes('Partial order coverage')));
+ assert.equal(m.past.find(s=>s.event_id==='b').rate,null);
+});
+
+test('fully reversed and very short shows remain visible; unrecovered totals are never invented as zero',()=>{
+ const m=analysis.model(history([
+  show('cancelled','2026-10-05T14:00Z',0,{booked:100,cancelled:100,airtime_seconds:120,insights:{paid_items:0}}),
+  show('refund','2026-10-06T14:00Z',0,{booked:200,refunded:200,insights:{paid_items:0}}),
+  show('missing','2026-10-07T14:00Z',0,{orders:0,booked:0,insights:{paid_items:20}})
+ ]),period);
+ assert.equal(m.usable.length,3);assert.equal(m.excluded.length,0);assert.equal(m.usable[0].rate,0);
+ assert.equal(m.usable[2].net,null);assert.equal(m.usable[2].booked,null);assert.equal(m.usable[2].rate,null);
+ assert.equal(m.sellers[0].stats.mean,0);assert.equal(m.sellers[0].days.length,2);
 });
 test('sample size alone cannot recommend a window without matched weekday/month/type groups',()=>{
  const a=[];for(let i=0;i<8;i++)a.push({event_id:String(i),weekday:0,month:i<4?'2026-09':'2026-10',format:'Jewelry',slot:10,net:100,rate:100,day:String(i)});

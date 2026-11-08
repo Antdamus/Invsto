@@ -110,9 +110,10 @@ test('calendar filters use the Eastern start date once across midnight, month bo
  const late=D.build(m,{distMonth:'2026-08',distPhase:'2',distOccurrence:'5'});assert.equal(late.rows.length,1);assert.equal(late.rows[0].day,'2026-08-31');assert.equal(late.rows[0].startHour,23);
  const dst=D.build(m,{distMonth:'2026-11',distStart:'1',distOccurrence:'1'});assert.equal(dst.rows.length,2);assert.equal(dst.stats.median,250);assert.equal(dst.rows[0].day,'2026-11-01');
 });
-test('hourly distributions exclude missing and short airtime; half-hours exactly match common duration cohorts',()=>{
+test('hourly rates include short shows; complete half-hours still match common duration cohorts',()=>{
  const a=show('a',500),m=model([a,show('short',50,undefined,{airtime_seconds:600}),show('missing',100,undefined,{airtime_seconds:null}),show('incomplete',200,undefined,{commercial:{...a.commercial,precise_orders:0}})]);
- assert.equal(D.build(m).rows.length,4);assert.equal(D.build(m,{distMetric:'rate'}).rows.length,2);
+ assert.equal(D.build(m).rows.length,4);assert.equal(D.build(m,{distMetric:'rate'}).rows.length,3);
+ assert.equal(D.elapsedHours(m.rows.find(s=>s.event_id==='short')).rows[0].exposure,600);
  const half=D.build(m,{distMetric:'half:1'});assert.equal(half.rows.length,1);assert.equal(half.stats.median,0);assert.equal(half.excluded,3);
  assert.equal(D.build(m,{distMetric:'half:99'}).metric,'net');
 });

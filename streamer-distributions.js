@@ -64,7 +64,7 @@
  }
  function elapsedHours(s){
   const c=s.commercial,seconds=Number(s.airtime_seconds);
-  const available=c?.version===1&&Number(c.orders)===Number(s.orders)&&Number(c.precise_orders??0)===Number(s.orders)&&seconds>=900&&!s.airtime_provisional;
+  const available=c?.version===1&&Number(c.orders)===Number(s.orders)&&Number(c.precise_orders??0)===Number(s.orders)&&seconds>0&&!s.airtime_provisional;
   if(!available)return {available:false,rows:[],outsideNet:null};
   const rows=Array.from({length:Math.ceil(seconds/3600)},(_,index)=>{
    const exposure=Math.min(3600,seconds-index*3600),halves=(c.halves||[]).filter(b=>Number(b.bin)>=index*2&&Number(b.bin)<(index+1)*2);
@@ -119,13 +119,13 @@
   const selectedBin=options.distBin!=null&&histogram[Number(options.distBin)]?.rows.length?histogram[Number(options.distBin)]:null;
   const selectedShow=rows.find(s=>s.event_id===options.distShow)||null;
   const selectedRows=selectedShow?[selectedShow]:selectedBin?selectedBin.rows:rows;
-  const daily=[...new Set(rows.map(s=>s.day))].sort().map(day=>{const shows=rows.filter(s=>s.day===day),total=k=>shows.every(s=>finite(s[k]))?shows.reduce((n,s)=>n+Number(s[k]),0):null,airtime=shows.every(s=>s.airtime_seconds>=900&&!s.airtime_provisional)?total('airtime_seconds'):null;return {day,caption:dayCaption(shows[0]),shows,airtime,rate:airtime?total('net')/(airtime/3600):null,...Object.fromEntries(['booked','cancelled','refunded','held','net'].map(k=>[k,total(k)]))};});
+  const daily=[...new Set(rows.map(s=>s.day))].sort().map(day=>{const shows=rows.filter(s=>s.day===day),total=k=>shows.every(s=>finite(s[k]))?shows.reduce((n,s)=>n+Number(s[k]),0):null,airtime=shows.every(s=>s.airtime_seconds>0&&!s.airtime_provisional)?total('airtime_seconds'):null;return {day,caption:dayCaption(shows[0]),shows,airtime,rate:airtime?total('net')/(airtime/3600):null,...Object.fromEntries(['booked','cancelled','refunded','held','net'].map(k=>[k,total(k)]))};});
   return {metric,label,metrics,eligible,months,month,phase,nth,push,view,starts,start,target,scale,population,rows,bounds,histogram,groups,maxCount,stats:stats(rows),excluded:m.rows.length-eligible.length,selectedBin,selectedShow,selectedRows,minHours:m.minHours,monthGroups,monthStarts,dayMode:m.dayMode,daily};
  }
  const select=(label,key,value,values)=>'<label>'+label+'<select data-sca-filter="'+key+'" aria-label="'+label+'">'+values.map(([v,t])=>'<option value="'+esc(v)+'"'+(String(v)===String(value)?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></label>';
  const miniStats=(s,metric)=>'<span><b>'+s.n+'</b> shows</span><span>Median <b>'+metricAmount(s.median,metric,true)+'</b></span><span>Mean <b>'+metricAmount(s.mean,metric,true)+'</b></span><span>Middle 50% <b>'+metricAmount(s.q1,metric,true)+'–'+metricAmount(s.q3,metric,true)+'</b></span>';
  const weekdayChips=rows=>'<div class="sde-weekdays" aria-label="Show counts by weekday">'+weekdayCounts(rows).map((w,i)=>'<span><i style="background:'+weekdayColors[i]+'"></i>'+w.name+' <b>'+w.n+'</b></span>').join('')+'</div>';
- function financialSummary(s){const f=finance(s);return '<div class="sde-finance">'+[['Original sales',f.booked],['Canceled',f.cancelled],['Refunded',f.refunded],['Under review',f.held],['Current net sales',f.net]].map(([label,value])=>'<span>'+label+' <b>'+amount(value)+'</b></span>').join('')+'</div>'+(!f.reconciled?'<p class="wpr-warning">Financial breakdown needs verification.</p>':'');}
+ function financialSummary(s){const f=finance(s);return ((s.warnings||[]).length?'<p class="wpr-warning">'+esc(s.warnings.join(' · '))+'</p>':'')+'<div class="sde-finance">'+[['Original sales',f.booked],['Canceled',f.cancelled],['Refunded',f.refunded],['Under review',f.held],['Current net sales',f.net]].map(([label,value])=>'<span>'+label+' <b>'+amount(value)+'</b></span>').join('')+'</div>'+(!f.reconciled?'<p class="wpr-warning">Financial breakdown needs verification.</p>':'');}
  function hourlyTable(s,compact=false){
   const h=elapsedHours(s);if(!h.available)return '<p class="wpr-note">Hourly sales unavailable: complete purchase timestamps and finalized airtime are required.</p>';
   return '<div class="wpr-table-wrap"><table class="sde-hourly"><thead><tr>'+['Hours after start','Live time',...(!compact?['Orders','Original sales']:[]),'Net sales','Net / live hour'].map(t=>'<th scope="col">'+t+'</th>').join('')+'</tr></thead><tbody>'+h.rows.map(r=>'<tr><th scope="row">'+r.index+'–'+(r.index+1)+'h'+(!r.complete?' · partial':'')+'</th><td>'+duration(r.exposure)+'</td>'+(!compact?'<td>'+r.orders+'</td><td>'+amount(r.booked)+'</td>':'')+'<td>'+amount(r.net)+'</td><td>'+amount(r.rate)+'</td></tr>').join('')+'</tbody></table></div>'+(Math.abs(h.outsideNet)>.01?'<p class="wpr-note">'+amount(h.outsideNet)+' of show net is outside the recorded timing window; it remains in the show total.</p>':'');

@@ -521,6 +521,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-buyer-history-sync/index.ts"
 
+[functions.ebay-show-history-reconcile]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/ebay-show-history-reconcile/index.ts"
+
 [functions.ebay-account-deletion]
 enabled = true
 verify_jwt = false

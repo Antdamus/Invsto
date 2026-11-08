@@ -25,9 +25,20 @@ before(async()=>{
  with orders as(select market,order_number,purchased,booked,cancelled,refunded,0 held,booked net from sale_rows)
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${admin}';`);
- for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql','20261108120000_streamer_start_date.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
 });
 after(()=>db?.close());
+test('September 23 and 6 AM boundaries use the owner confirmed streamer schedule',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('cut-before','Before Sydney','2026-09-22T12:00-04:00',60,'{"paid_items":0}'),
+ ('cut-day','Sydney first day','2026-09-23T06:00-04:00',60,'{"paid_items":0}'),
+ ('cut-night','Otello morning','2026-09-23T05:59-04:00',60,'{"paid_items":0}'),
+ ('cut-evening','Otello evening','2026-09-23T18:00-04:00',60,'{"paid_items":0}'),
+ ('cut-weekend','Weekend daytime','2026-09-26T12:00-04:00',60,'{"paid_items":0}');`);
+ const h=(await db.query("select get_streamer_performance_history('2026-09-22','2026-09-27') r")).rows[0].r;
+ assert.equal(h.sydney_estimated_start,'2026-09-23');
+ for(const [id,name]of [['cut-before','Otello'],['cut-day','Sydney'],['cut-night','Otello'],['cut-evening','Otello'],['cut-weekend','Manuella']])assert.equal(h.shows.find(s=>s.event_id===id).seller,name);
+});
 test('push labels honor the Eastern cutoff, explicit exceptions, audit and concurrent edits',async()=>{
  await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
  ('push-before','Before cutoff','2026-08-25T03:59Z',3600,'{"paid_items":0}'),
@@ -84,7 +95,7 @@ test('historical hosts, overnight money, reversals and unlinked coverage remain 
  insert into sale_rows values('ebay','1','2026-07-01T08:30',100,10,20,false),('ebay','2','2026-07-01T01:30',50,0,0,true),('ebay','3','2026-06-05T15:00',30,0,0,false);`);
  const r=(await db.query("select get_streamer_performance_history('2026-06-01','2026-07-01') r")).rows[0].r;
  assert.equal(r.shows.length,3);
- assert.equal(r.shows.find(s=>s.event_id==='earlyday').seller,'Historical seller unassigned');
+ assert.equal(r.shows.find(s=>s.event_id==='earlyday').seller,'Otello');
  assert.equal(r.shows.find(s=>s.event_id==='earlysaved').seller,'Sydney');
  const night=r.shows.find(s=>s.event_id==='overnight');assert.equal(night.seller,'Otello');assert.equal(night.net,70);assert.equal(night.held,50);assert.equal(night.orders,2);assert.equal(night.linked_lines,2);assert.equal(r.coverage.unlinked_orders,1);assert.equal(r.coverage.unlinked_net,30);
  const next=(await db.query("select get_streamer_performance_history('2026-07-01','2026-07-02') r")).rows[0].r;

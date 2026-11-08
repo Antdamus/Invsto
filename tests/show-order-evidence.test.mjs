@@ -1,0 +1,73 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {PGlite} from '@electric-sql/pglite';
+import {stripTypeScriptTypes} from 'node:module';
+import vm from 'node:vm';
+let db;
+const oid='00000000-0000-4000-8000-000000000001',lid='00000000-0000-4000-8000-000000000002';
+const evidence={orderId:'01-12345-12345',creationDate:'2026-08-31T03:17:00Z',orderPaymentStatus:'FULLY_REFUNDED',orderFulfillmentStatus:'FULFILLED',buyer:{username:'fixture'},paymentSummary:{payments:[{paymentDate:'2026-08-31T03:18:00Z'}]},pricingSummary:{total:{value:'100'}},lineItems:[{lineItemId:'txn',legacyItemId:'item',title:'Watch',quantity:1,lineItemCost:{value:'100'},refunds:[{amount:{value:'100'}}]}]};
+before(async()=>{
+ db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role;
+ create table ebay_orders(id uuid primary key default gen_random_uuid(),order_number text unique,buyer_username text,buyer_name text,sale_date timestamptz,paid_on_date timestamptz,total_price numeric,status text,tracking_number text,raw_payload jsonb);
+ create table ebay_order_lines(id uuid primary key default gen_random_uuid(),order_id uuid,item_number text,transaction_id text,item_title text,quantity int,sold_for numeric,total_price numeric,line_status text,fulfilled_quantity int,raw_payload jsonb,internal_item_id uuid,custom_label text,notes text);
+ create function weekly_sales_money(text) returns numeric language sql strict immutable as $$select $1::numeric$$;
+ insert into ebay_orders values('${oid}','01-12345-12345','fixture','Fixture','2026-08-31T04:00Z',null,100,'fulfilled','keep-tracking','{"source":"csv","date_precision":{"sale_date":"day"},"ebayFinance":{"status":"on_hold"},"note":"keep"}');
+ insert into ebay_order_lines values('${lid}','${oid}','item',null,'Watch',1,100,100,'fulfilled',1,'{"photo":"keep.jpg","review":{"approved":true}}','${oid}','warehouse-label','Keep notes');`);
+ await db.exec(readFileSync(new URL('../supabase/migrations/20261108110000_show_order_evidence.sql',import.meta.url),'utf8'));
+});
+after(()=>db?.close());
+const run=(orders,dry=false)=>db.query('select reconcile_ebay_show_orders($1,$2) r',[JSON.stringify(orders),dry]).then(x=>x.rows[0].r);
+test('evidence reconciliation preserves warehouse state, refunds, notes and finance; dry-run and repeat are safe',async()=>{
+ const snapshot=()=>db.query('select to_jsonb(o) r from ebay_orders o').then(x=>x.rows);
+ const before=await snapshot(),preview=await run([evidence],true);assert.equal(preview.datesCorrected,1);assert.deepEqual(await snapshot(),before);
+ const applied=await run([evidence]);assert.equal(applied.ordersUpdated,1);assert.equal(applied.linesInserted,0);
+ const o=(await snapshot())[0].r;assert.equal(Date.parse(o.sale_date),Date.parse(evidence.creationDate));
+ for(const key of ['status','tracking_number','total_price','buyer_username'])assert.equal(o[key],before[0].r[key]);
+ assert.equal(o.raw_payload.note,'keep');assert.equal(o.raw_payload.ebayFinance.status,'on_hold');assert.equal(o.raw_payload.order.orderPaymentStatus,'FULLY_REFUNDED');
+ const l=(await db.query('select * from ebay_order_lines')).rows[0];assert.equal(l.notes,'Keep notes');assert.equal(l.custom_label,'warehouse-label');assert.equal(l.internal_item_id,oid);assert.equal(l.fulfilled_quantity,1);assert.equal(l.raw_payload.photo,'keep.jpg');assert.equal(l.raw_payload.line.refunds[0].amount.value,'100');
+ assert.equal((await run([evidence])).datesCorrected,0);assert.equal((await db.query('select count(*)::int n from ebay_order_lines')).rows[0].n,1);
+ assert.equal((await db.query('select previous_date_precision p from ebay_show_order_evidence')).rows[0].p,'day');
+});
+test('missing paid and fully canceled orders are imported without assigning inventory; ambiguous mappings roll back',async()=>{
+ const paid={...evidence,orderId:'02-12345-12345',orderPaymentStatus:'PAID',orderFulfillmentStatus:'NOT_STARTED'};
+ assert.equal((await run([paid])).ordersInserted,1);
+ const l=(await db.query("select l.* from ebay_order_lines l join ebay_orders o on o.id=l.order_id where o.order_number='02-12345-12345'")).rows[0];assert.equal(l.custom_label,null);assert.equal(l.internal_item_id,null);assert.equal(l.line_status,'pending');
+ const cancelled={...paid,orderId:'03-12345-12345',orderPaymentStatus:'FULLY_REFUNDED',cancelStatus:{cancelState:'CANCELED'}};
+ assert.equal((await run([cancelled])).ordersInserted,1);
+ assert.equal((await db.query("select status from ebay_orders where order_number='03-12345-12345'")).rows[0].status,'cancelled');
+ assert.equal((await run([{...paid,orderId:'04-12345-12345',orderPaymentStatus:'PENDING'}])).unpaidOrdersSkipped,1);
+ await assert.rejects(run([evidence,evidence]),/duplicate/);
+ await assert.rejects(run([{...evidence,lineItems:[evidence.lineItems[0],{...evidence.lineItems[0],lineItemId:'second'}]}]),/Ambiguous|Duplicate/);
+ assert.equal((await db.query('select count(*)::int n from ebay_order_lines')).rows[0].n,3);
+ await db.exec('set role authenticated');await assert.rejects(run([evidence]),/permission denied/);await db.exec('reset role');
+});
+test('internal endpoint rejects unauthorized callers and incomplete pagination before applying evidence',async()=>{
+ let called=0,fetches=0,payload={orders:[evidence],total:2};
+ const ctx={Deno:{env:{get:n=>n==='SUPABASE_SERVICE_ROLE_KEY'?'fixture-key':''},serve:h=>ctx.handler=h},Date,Request,Response,URLSearchParams,AbortSignal,btoa,createClient:()=>({rpc:async()=>{called++;return {data:{ordersUpdated:1}};}}),fetch:async()=>{fetches++;return new Response(JSON.stringify(fetches%2?{access_token:'fixture-token'}:payload));}};
+ vm.runInNewContext(stripTypeScriptTypes(readFileSync(new URL('../supabase/functions/ebay-show-history-reconcile/index.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/,'')),ctx);
+ const request=(auth='fixture-key')=>new Request('https://fixture.test',{method:'POST',headers:{Authorization:'Bearer '+auth},body:JSON.stringify({from:'2026-08-30T00:00Z',to:'2026-09-01T00:00Z',dryRun:false})});
+ assert.equal((await ctx.handler(request('bad'))).status,403);assert.equal(fetches,0);
+ assert.equal((await ctx.handler(request())).status,500);assert.equal(called,0);
+ payload={orders:[evidence],total:1};assert.equal((await ctx.handler(request())).status,200);assert.equal(called,1);
+ payload={orders:[{...evidence,creationDate:'bad'}],total:1};assert.equal((await ctx.handler(request())).status,500);assert.equal(called,1);
+});
+
+test('batching reconciles a changed live event once atomically; ordinary writes still reconcile immediately',async()=>{
+ await db.exec(`create table reconcile_calls(event_id text);
+ create function reconcile_ebay_live_orders_internal(text) returns void language sql as $$insert into public.reconcile_calls values($1)$$;
+ create function ebay_live_order_changed() returns trigger language plpgsql as $$declare v_event text:='fixture-event';begin perform public.reconcile_ebay_live_orders_internal(v_event);return new;end$$;
+ create function ebay_live_order_lines_changed_statement() returns trigger language plpgsql as $$declare event_id_to_check text:='fixture-event';begin perform public.reconcile_ebay_live_orders_internal(event_id_to_check);return null;end$$;
+ create trigger order_changed after update on ebay_orders for each row execute function ebay_live_order_changed();
+ create trigger lines_changed after update on ebay_order_lines for each statement execute function ebay_live_order_lines_changed_statement();`);
+ await db.exec(readFileSync(new URL('../supabase/migrations/20261108130000_show_reconcile_batch.sql',import.meta.url),'utf8'));
+ await run([evidence,{...evidence,orderId:'02-12345-12345'}]);
+ assert.equal((await db.query('select count(*)::int n from reconcile_calls')).rows[0].n,1);
+ assert.equal((await db.query('select count(*)::int n from ebay_show_reconcile_batch')).rows[0].n,0);
+ await db.exec("update ebay_orders set raw_payload=raw_payload||'{\"ordinary\":true}' where order_number='01-12345-12345'");
+ assert.equal((await db.query('select count(*)::int n from reconcile_calls')).rows[0].n,2);
+ await assert.rejects(run([{...evidence,lineItems:[{...evidence.lineItems[0],quantity:0}]}]),/quantity/);
+ assert.equal((await db.query('select count(*)::int n from ebay_show_reconcile_batch')).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from reconcile_calls')).rows[0].n,2);
+ await db.exec('set role service_role');await assert.rejects(db.query("insert into ebay_show_reconcile_batch values(txid_current(),'')"),/permission denied/);await db.exec('reset role');
+});

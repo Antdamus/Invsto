@@ -50,7 +50,7 @@
   const series=titles.includes(options.series)?options.series:'all';
   if(series!=='all')rows=rows.filter(s=>s.title===series);
   const minHours=[3,5,8].includes(Number(options.minHours))?Number(options.minHours):5;
-  const enriched=rows.filter(valid),timed=enriched.filter(s=>seconds(s)>=900&&!s.airtime_provisional&&Number(s.commercial.precise_orders??0)===Number(s.orders));
+  const enriched=rows.filter(valid),timed=enriched.filter(s=>seconds(s)>0&&!s.airtime_provisional&&Number(s.commercial.precise_orders??0)===Number(s.orders));
   const cohort=timed.filter(s=>seconds(s)>=minHours*3600),starts=group(cohort,s=>etHour(s.scheduled_start||s.starts_at)).sort(([a],[b])=>dayMode==='night'?(a+6)%24-(b+6)%24:a-b);
   const clock=Array.from({length:24},(_,h)=>{
    const entries=timed.map(s=>({s,hours:exposure(s,h)})).filter(r=>r.hours>=1-1e-9);

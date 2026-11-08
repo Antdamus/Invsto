@@ -7,7 +7,7 @@ vm.runInNewContext(await readFile(new URL('../weekly-production-report.js',impor
 const report=context.window.WeeklyProductionReport;
 
 test('zero-sale shows use weekend daytime fallback in Eastern time and preserve saved sellers',()=>{
- const week='2026-11-02',starts=['2026-11-07T12:59Z','2026-11-07T13:00Z','2026-11-07T22:59Z','2026-11-07T23:00Z','2026-11-08T15:00Z','2026-11-06T15:00Z'];
+ const week='2026-11-02',starts=['2026-11-07T10:59Z','2026-11-07T11:00Z','2026-11-07T22:59Z','2026-11-07T23:00Z','2026-11-08T15:00Z','2026-11-06T15:00Z'];
  const timing=starts.map((starts_at,i)=>({event_id:String(i),starts_at,airtime_seconds:3600}));
  timing.push({event_id:'saved',starts_at:'2026-11-08T16:00Z',seller_name:'Sydney',airtime_seconds:1800});
  const m=report.model({days:[{day:week,week},{day:'2026-11-08',week}],orders:[],timing},week);
