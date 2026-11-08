@@ -166,7 +166,7 @@
    jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});modal.querySelector('.wpr-toolbar').insertBefore(jump,print);
    content.addEventListener('change',e=>{
     const key=e.target.dataset.scaFilter;if(!key||m.history?.status!=='ready')return;
-    const options=Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]));
+    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
     if(key==='seller'){options.format='all';options.weekday='all';options.series='all';options.distStart='all';options.distMonth='all';options.distPhase='all';options.distOccurrence='all';}
     if(key==='format'||key==='weekday')options.series='all';m.analysisOptions=options;
     content.querySelector('#wpr-commercial').innerHTML=commercial(m);
@@ -177,7 +177,7 @@
     if(!button||m.history?.status!=='ready')return;
     if(e.type==='keydown'&&(button.tagName.toLowerCase()==='button'||!['Enter',' '].includes(e.key)))return;
     e.preventDefault();
-    const options=Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]));
+    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
     if(button.hasAttribute('data-sde-bin'))options.distBin=button.dataset.sdeBin;
     if(button.hasAttribute('data-sde-show'))options.distShow=button.dataset.sdeShow;
     if(button.hasAttribute('data-sde-start'))options.distStart=button.dataset.sdeStart;

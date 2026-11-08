@@ -31,6 +31,16 @@ test('calendar view shows the push cutoff and shares calendar and money axes acr
  assert.match(html,/data-sde-tooltip="sde-tip-show-july"/);assert.match(html,/id="sde-tip-show-july"/);
  assert.match(D.render(model([show('later',100)]),{distView:'calendar'}),/outside displayed dates/);
 });
+test('optional calendar point labels show simultaneous peak, total audience and duration without inventing missing metrics',()=>{
+ const m=model([show('known',100,undefined,{insights:{status:'ready',sales_status:'ready',paid_items:1,peak_viewers:45,total_viewers:1234},airtime_seconds:10800}),show('missing',50),show('zero',0,undefined,{insights:{status:'ready',sales_status:'ready',paid_items:1,peak_viewers:0,total_viewers:0}})]);
+ assert.doesNotMatch(D.render(m,{distView:'calendar'}),/class="sde-point-label"/);
+ const html=D.render(m,{distView:'calendar',distPointLabels:'on'});
+ assert.equal((html.match(/class="sde-point-label"/g)||[]).length,3,'main chart labels each show once');
+ assert.match(html,/Peak 45 · Total 1,234/);assert.match(html,/Live 3h 00m 00s/);
+ assert.match(html,/Peak — · Total —/);assert.match(html,/Peak 0 · Total 0/);
+ assert.match(html,/Peak simultaneous viewers 45/);assert.match(html,/pointer-events="none"/);
+ assert.doesNotMatch(D.render(m,{distPointLabels:'on'}),/class="sde-point-label"/);
+});
 test('selling nights group 6 PM through next-day 5:59 AM, across month and DST boundaries',()=>{
  const dates=['2026-10-05T17:59-04:00','2026-10-05T18:00-04:00','2026-10-06T02:00-04:00','2026-10-06T05:59-04:00','2026-10-06T06:00-04:00','2026-11-01T01:30-04:00','2026-11-01T01:30-05:00'];
  const shows=dates.map((d,i)=>show(String(i),100,d)),m=A.build(history(shows),period,{...filters,dayMode:'night'}),d=D.build(m);
@@ -64,6 +74,43 @@ test('elapsed-hour distributions use complete eligible intervals and exclude mis
  const a=show('a',500),m=model([a,show('partial',200,undefined,{airtime_seconds:5400}),show('missing',300,undefined,{commercial:null})]);
  const first=D.build(m,{distMetric:'elapsed:0'}),second=D.build(m,{distMetric:'elapsed:1'});
  assert.equal(first.rows.length,2);assert.equal(first.stats.median,350);assert.equal(second.rows.length,1);assert.equal(second.stats.median,0);assert.equal(second.excluded,2);
+});
+test('first-hours rate uses cumulative adjusted sales and actual exposure, preserving short and zero-sales shows',()=>{
+ const commercial={version:1,orders:4,precise_orders:4,halves:[{bin:0,net:200,orders:1},{bin:1,net:100,orders:1},{bin:4,net:120,orders:1},{bin:6,net:480,orders:1}]};
+ const m=model([show('long',900,undefined,{orders:4,commercial}),show('short',420,undefined,{orders:3,airtime_seconds:9000,commercial:{...commercial,orders:3,precise_orders:3,halves:commercial.halves.slice(0,3)}}),show('zero',0,undefined,{orders:0,commercial:{version:1,orders:0,precise_orders:0,halves:[]},insights:{paid_items:0,sales_status:'ready'}})]);
+ for(const [selection,long,short,seconds] of [['1',300,300,3600],['2',150,150,7200],['3',140,168,9000]]){
+  const d=D.build(m,{distMetric:'rate',distRateWindow:selection}),a=d.rows.find(s=>s.event_id==='long'),b=d.rows.find(s=>s.event_id==='short');
+  assert.equal(a.value,long);assert.equal(b.value,short);assert.equal(b.rateWindow.seconds,seconds);
+  assert.equal(b.rateWindow.partial,selection==='3');assert.equal(d.rows.find(s=>s.event_id==='zero').value,0);
+  assert.equal(a.rate,180,'whole-show rate remains intact');assert.equal(d.excluded,0);
+  assert.equal(d.histogram.reduce((n,b)=>n+b.rows.length,0),3);
+ }
+ const first3=D.build(m,{distMetric:'rate',distRateWindow:'3'});
+ assert.equal(first3.daily[0].windowNet,840);assert.equal(first3.daily[0].windowSeconds,30600);
+ assert.equal(first3.daily[0].windowRate,840/8.5);
+ assert.equal(D.build(m,{distMetric:'rate',distRateWindow:'invalid'}).rows.find(s=>s.event_id==='long').value,180);
+ assert.equal(D.build(m,{distMetric:'net',distRateWindow:'1'}).rows.find(s=>s.event_id==='long').value,900);
+ const negative=model([show('refund',-20,undefined,{commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:1,net:-20,orders:1}]}})]);
+ assert.equal(D.build(negative,{distMetric:'rate',distRateWindow:'2'}).stats.median,-10);
+});
+test('first-hours rates exclude unavailable timing and financial evidence without inventing zeroes',()=>{
+ const a=show('valid',500),m=model([a,show('no-timestamps',500,undefined,{commercial:{...a.commercial,precise_orders:0}}),show('no-airtime',500,undefined,{airtime_seconds:null}),show('provisional',500,undefined,{airtime_provisional:true}),show('unknown',null,undefined,{orders:0,commercial:{version:1,orders:0,precise_orders:0,halves:[]}})]);
+ const d=D.build(m,{distMetric:'rate',distRateWindow:'1'});
+ assert.deepEqual(Array.from(d.rows,s=>s.event_id),['valid']);assert.equal(d.excluded,4);
+ assert.equal(D.build(m,{distMetric:'rate'}).rows.length,2,'full show does not require interval timestamps');
+});
+test('range labels, hover averages, calendar values, records and CSV match selected first-hours metric',()=>{
+ const m=model([show('overnight',900,'2026-11-01T01:30-04:00',{orders:3,commercial:{version:1,orders:3,precise_orders:3,halves:[{bin:0,net:100,orders:1},{bin:2,net:200,orders:1},{bin:6,net:600,orders:1}]}})]);
+ const options={distMetric:'rate',distRateWindow:'2',distShow:'overnight',distView:'calendar'},html=D.render(m,options);
+ assert.match(html,/aria-label="Average over"/);assert.match(html,/Net sales per streaming hour · First 2 hours/);
+ assert.match(html,/Average net\/hour · First 2 hours <b>\$150<\/b>/);assert.match(html,/\$300 net ÷ 2h 00m 00s counted/);
+ assert.match(html,/Full-show sales/);assert.match(html,/Counted time · First 2 hours/);assert.doesNotMatch(html,/Average net\/hour · First 2 hours <b>\$180/);
+ assert.match(html,/not a verified actual go-live time/);
+ const csv=D.csvRows(m,options),head=csv.find(r=>r[0]==='Event ID'),row=csv.find(r=>r[0]==='overnight');
+ for(const [key,value] of [['Value',150],['Window average net per live hour',150],['Window live seconds',7200],['Window net sales',300],['Hourly average window','First 2 hours'],['Full-show average net per live hour',180]])assert.equal(row[head.indexOf(key)],value,key);
+ assert.equal(head.length,row.length);
+ assert.match(D.render(m,{distMetric:'rate'}),/Average net\/hour · Full show <b>\$180/);
+ assert.doesNotMatch(D.render(m,{distMetric:'net',distRateWindow:'2'}),/aria-label="Average over"/);
 });
 test('monthly start-hour matrix retains missing months and honors Sunday and month-position scope',()=>{
  const shows=[show('aug',100,'2026-08-02T22:00-04:00'),show('oct',300,'2026-10-04T22:00-04:00'),show('early',500,'2026-10-04T19:00-04:00'),show('monday',10000,'2026-10-05T22:00-04:00'),show('later',900,'2026-10-25T22:00-04:00')];

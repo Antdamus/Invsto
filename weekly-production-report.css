@@ -66,6 +66,9 @@
 .sde-timeline text{font:11px Arial,sans-serif;fill:#496150}
 .sde-timeline circle{cursor:pointer}
 .sde-timeline circle:hover,.sde-timeline circle:focus{stroke:#182f20;stroke-width:3}
+.sde-point-label line{stroke:#8aa092;stroke-width:1}
+.sde-point-label rect{fill:#fffdf5;stroke:#ced8cf;stroke-width:1}
+.sde-timeline .sde-point-label text{fill:#233e30;font-size:11px;font-weight:600}
 .sde-legend{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:11px}
 .sde-legend span:nth-child(1){color:#96691d}.sde-legend span:nth-child(2){color:#347657}.sde-legend span:nth-child(3){color:#526b8b}
 .sde-small-multiples{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
