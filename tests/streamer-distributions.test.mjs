@@ -23,11 +23,24 @@ test('equal-width bins include every boundary once, including the final upper bo
   const e=D.edges(values,8),b=D.bins(values.map(value=>({value})),e);assert.equal(b.reduce((n,x)=>n+x.rows.length,0),values.length);assert.ok(e.every(Number.isFinite));
  }
 });
-test('start-hour selection preserves shared histogram edges and scales; selecting a bar leaves the median intact',()=>{
+test('start hours fit their own bins and counts by default and shared comparison remains available',()=>{
  const m=model([show('a',100),show('b',300),show('c',10000,'2026-10-04T21:30-04:00')]);
- const all=D.build(m),late=D.build(m,{distStart:'22'});assert.deepEqual(late.bounds,all.bounds);assert.equal(late.maxCount,all.maxCount);assert.equal(late.rows.length,2);assert.equal(late.stats.median,200);
+ const all=D.build(m),late=D.build(m,{distStart:'22'});assert.notDeepEqual(late.bounds,all.bounds);assert.ok(late.bounds.at(-1)<=350);assert.equal(late.maxCount,1);assert.equal(late.rows.length,2);assert.equal(late.stats.median,200);
+ assert.deepEqual(late.bounds,all.groups.find(g=>g.hour===22).bounds);
+ const shared=D.build(m,{distScale:'shared'}),sharedLate=D.build(m,{distStart:'22',distScale:'shared'});
+ assert.deepEqual(sharedLate.bounds,shared.bounds);assert.equal(sharedLate.maxCount,shared.maxCount);assert.ok(shared.groups.every(g=>JSON.stringify(g.bounds)===JSON.stringify(shared.bounds)));
  const b=all.histogram.find(b=>b.rows.some(s=>s.event_id==='c'));
  const picked=D.build(m,{distBin:String(b.index)});assert.equal(picked.stats.median,300);assert.equal(picked.selectedRows.length,1);assert.equal(picked.selectedRows[0].event_id,'c');
+});
+test('weekday counts reconcile per chart, per bin, per card and selected records using Eastern start dates',()=>{
+ const m=model([show('sunday',100,'2026-10-04T23:30-04:00'),show('monday',100,'2026-10-05T23:30-04:00'),show('tuesday',100,'2026-10-06T23:30-04:00'),show('other-hour',300,'2026-10-06T21:00-04:00')]);
+ const d=D.build(m,{distStart:'23'}),b=d.histogram.find(b=>b.rows.length);
+ assert.deepEqual(Array.from(b.weekdays,w=>w.n),[1,1,0,0,0,0,1]);
+ assert.equal(b.weekdays.reduce((n,w)=>n+w.n,0),b.rows.length);
+ assert.ok(d.groups.every(g=>g.bins.reduce((n,b)=>n+b.weekdays.reduce((t,w)=>t+w.n,0),0)===g.rows.length));
+ const selected=D.build(m,{distStart:'23',distBin:String(b.index)});assert.equal(D.weekdayCounts(selected.selectedRows)[6].n,1);
+ const csv=D.csvRows(m,{distStart:'23'});assert.ok(csv.some(r=>r[0]==='Shows'&&r[1]==='Displayed'&&r.slice(2).join(',')==='1,1,0,0,0,0,1'));
+ const html=D.render(m,{distStart:'23'});assert.match(html,/sde-tip-main-/);assert.match(html,/Mon, Oct 5, 2026, 11:30 PM/);assert.match(html,/Tuesday <b>1/);
 });
 test('calendar filters use the Eastern start date once across midnight, month boundaries and DST',()=>{
  const m=model([show('month-end',100,'2026-09-01T03:30Z'),show('dst',200,'2026-11-01T01:30-04:00'),show('dst2',300,'2026-11-01T01:30-05:00')]);
