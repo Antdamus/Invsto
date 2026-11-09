@@ -12,7 +12,7 @@
  const hours=ms=>{const m=Math.round(Math.max(0,ms)/60000);return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m';};
  const airtime=seconds=>seconds==null?'Not recorded':Math.floor(seconds/3600)+'h '+String(Math.floor(seconds%3600/60)).padStart(2,'0')+'m '+String(seconds%60).padStart(2,'0')+'s';
  const sum=(a,k)=>a.reduce((n,r)=>n+Math.round(Number(r[k]||0)*100),0)/100;
- const pushInfo=s=>window.StreamerDistributions?window.StreamerDistributions.pushBadges(s)+window.StreamerDistributions.pushEdit(s):'';
+ const pushInfo=s=>window.StreamerDistributions?window.StreamerDistributions.pushEdit(s):'';
  const pushValue=v=>v===true?'Yes':v===false?'No':'Not recorded';
  const groups=(rows,key)=>{const m=new Map();for(const r of rows){const k=key(r);if(!m.has(k))m.set(k,[]);m.get(k).push(r);}return [...m];};
  function range(data,week){
