@@ -78,6 +78,7 @@
 .sde-card button{display:block;width:100%;text-align:left;padding:6px 8px;border:1px solid #b1c5b6;background:#edf3ed;border-radius:4px;font-weight:600;font-size:12px}
 .sde-card button[aria-pressed=true]{border-color:#9b732a;background:#f5eddb}
 .sde-card .sde-label-toggle{width:auto;font-size:11px;margin:8px 0}
+.sde-card .sde-label-key{display:block;margin:-2px 0 10px;color:#526b5c;font-size:10px;line-height:1.5}
 @media print{body.wpr-printing .sde-label-toggle{display:none!important}}
 .sde-card svg{display:block;width:100%;margin:10px 0 6px}
 .sde-card [data-sde-bin]{cursor:pointer;outline:none}
