@@ -16,7 +16,8 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
    window.WeeklyProductionReport.open(data,'2026-11-02',{rpc:async()=>({data:history})});
   });
   const d=page.getByRole('dialog',{name:'Production report'}),panel=d.locator('#wpr-commercial');
-  await d.getByRole('button',{name:'Show insights',exact:true}).click();await panel.getByLabel('Analysis streamer').waitFor();
+  await d.getByRole('button',{name:'Show insights',exact:true}).click();await panel.locator('[data-wpr-filter-panel="analysis"]').waitFor();
+  for(const key of ['analysis','distribution']){const filters=panel.locator('[data-wpr-filter-panel="'+key+'"]');if(await filters.getAttribute('open')===null)await filters.locator('summary').click();}
   assert.equal(await panel.getByLabel('Analysis streamer').inputValue(),'Otello');assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'6');
   for(const [label,value] of [['Show day grouping','night'],['Distribution metric','rate'],['Average over','3'],['Chart view','calendar'],['Start hour · Eastern','all'],['Calendar month','all'],['Part of month','all'],['Weekday occurrence in month','all'],['Push labels','all']])assert.equal(await panel.getByLabel(label,{exact:true}).inputValue(),value,'report default: '+label);
   assert.match(await panel.locator('.sde-scope').innerText(),/Otello · Sunday · Selling nights · 6 PM–6 AM · All push statuses · Net sales per streaming hour · First 3 hours · All start hours · All months · All month parts · Any weekday occurrence/);

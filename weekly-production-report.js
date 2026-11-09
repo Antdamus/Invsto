@@ -41,10 +41,10 @@
   const analysisOptions={seller:'Otello',weekday:'6',dayMode:'night',distMetric:'rate',distRateWindow:'3',distView:'calendar',distPush:'all',distStart:'all',distMonth:'all',distPhase:'all',distOccurrence:'all'};
   return {data,week,period,rows,shows,inPeriod,timed,airtime:sum(timed,'airtime_seconds'),analysisOptions};
  }
- function table(headers,rows,cls='',caption=''){
+ function table(headers,rows,cls='wpr-summary-table',caption=''){
   return '<div class="wpr-table-wrap"><table class="'+cls+'">'+(caption?'<caption>'+caption+'</caption>':'')+
    (cls==='wpr-shows'?'<colgroup><col style="width:27%"><col style="width:17%"><col style="width:14%"><col span="5" style="width:8.4%"></colgroup>':'')+
-   '<thead><tr>'+headers.map(h=>'<th scope="col">'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(cells=>'<tr>'+cells.map((c,i)=>'<'+(i?'td':'th scope="row"')+'>'+c+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</tbody></table></div>';
+   '<thead><tr>'+headers.map(h=>'<th scope="col">'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(cells=>'<tr>'+cells.map((c,i)=>'<'+(i?'td data-label="'+esc(headers[i])+'"':'th scope="row"')+'>'+c+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</tbody></table></div>';
  }
  const saleCells=a=>['booked','cancelled','refunded','held','net'].map(k=>money(sum(a,k)));
  const saleHeaders=['Original sales','Canceled','Refunded','Under review','Net sales'];
@@ -132,7 +132,7 @@
  function open(data,week,client,focusHours=false){
   let m;try{m=model(JSON.parse(JSON.stringify(data)),week);}catch(e){window.alert(e.message);return;}
   const modal=document.createElement('dialog');modal.className='wpr-dialog';modal.setAttribute('aria-label','Production report');
-  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong>'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="all" selected>All available</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button><button type="button" data-wpr-close>Close</button></div><div class="wpr-content"></div>';
+  modal.innerHTML='<div class="wpr-toolbar"><strong>Report preview</strong><button type="button" data-wpr-close>Close</button><div class="wpr-toolbar-actions" role="group" aria-label="Report actions">'+(window.StreamerPerformance?'<label>History <select aria-label="History months" data-spa-months><option value="all" selected>All available</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label><button type="button" data-spa-jump>Streamer analysis</button>':'')+'<button type="button" data-wpr-print>Print / Save PDF</button><button type="button" data-wpr-csv>Download CSV</button></div></div><div class="wpr-content"></div>';
   const content=modal.querySelector('.wpr-content'),print=modal.querySelector('[data-wpr-print]'),download=modal.querySelector('[data-wpr-csv]');
   content.addEventListener('click',e=>{
    const button=e.target.closest('[data-wpr-push]');if(!button)return;
@@ -164,10 +164,11 @@
   });
   if(window.StreamerCommercialAnalysis){
    const jump=document.createElement('button');jump.type='button';jump.textContent='Show insights';jump.dataset.scaJump='';
-   jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});modal.querySelector('.wpr-toolbar').insertBefore(jump,print);
+   jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});print.parentNode.insertBefore(jump,print);
+   const filterPanels=()=>Object.fromEntries([...content.querySelectorAll('[data-wpr-filter-panel]')].map(p=>[p.dataset.wprFilterPanel,p.open]));
    content.addEventListener('change',e=>{
     const key=e.target.dataset.scaFilter;if(!key||m.history?.status!=='ready')return;
-    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    const options={filterPanels:filterPanels(),distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
     if(key==='distPointLabels')options.distCardLabels={};
     if(key==='seller'){options.format='all';options.weekday='all';options.series='all';options.distStart='all';options.distMonth='all';options.distPhase='all';options.distOccurrence='all';}
     if(key==='format'||key==='weekday')options.series='all';m.analysisOptions=options;
@@ -179,7 +180,7 @@
     if(!button||m.history?.status!=='ready')return;
     if(e.type==='keydown'&&(button.tagName.toLowerCase()==='button'||!['Enter',' '].includes(e.key)))return;
     e.preventDefault();
-    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    const options={filterPanels:filterPanels(),distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
     if(button.hasAttribute('data-sde-label-hour')){options.distCardLabels={...options.distCardLabels,[button.dataset.sdeLabelHour]:button.getAttribute('aria-pressed')==='true'?'off':'on'};options.distShow=m.analysisOptions?.distShow;}
     if(button.hasAttribute('data-sde-bin'))options.distBin=button.dataset.sdeBin;
     if(button.hasAttribute('data-sde-show'))options.distShow=button.dataset.sdeShow;
