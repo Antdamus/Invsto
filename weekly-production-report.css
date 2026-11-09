@@ -66,11 +66,11 @@
 .sde-timeline text{font:11px Arial,sans-serif;fill:#496150}
 .sde-timeline circle{cursor:pointer}
 .sde-timeline circle:hover,.sde-timeline circle:focus{stroke:#182f20;stroke-width:3}
-.sde-point-label line{stroke:#8aa092;stroke-width:1}
-.sde-point-label rect{fill:#fffdf5;stroke:#ced8cf;stroke-width:1}
-.sde-timeline .sde-point-label text{fill:#233e30;font-size:11px;font-weight:600}
-.sde-extreme-guide line{stroke:#426e58;stroke-width:1;opacity:.8}
-.sde-timeline .sde-extreme-guide text{fill:#214f38;font-size:9px;font-weight:700;paint-order:stroke;stroke:#fbfcfa;stroke-width:3px;stroke-linejoin:round}
+.sde-point-label line{stroke:#8aa092;stroke-width:.5}
+.sde-timeline .sde-point-label text{fill:#3f5949;font:7px ui-monospace,Consolas,monospace;paint-order:stroke;stroke:#fbfcfa;stroke-width:1px;stroke-linejoin:round}
+.sde-extreme-guide line,.sde-extreme-guide path{stroke:#426e58;stroke-width:.75;opacity:.8;fill:none}
+.sde-timeline .sde-extreme-guide text{fill:#214f38;font-size:8px;font-weight:600}
+.sde-timeline .sde-extreme-guide .sde-extreme-caption{font-size:6.5px;font-weight:400}
 .sde-legend{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:11px}
 .sde-legend span:nth-child(1){color:#96691d}.sde-legend span:nth-child(2){color:#347657}.sde-legend span:nth-child(3){color:#526b8b}
 .sde-small-multiples{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}

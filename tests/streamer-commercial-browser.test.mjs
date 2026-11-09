@@ -39,13 +39,14 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('rate');
   await explorer.getByLabel('Point labels',{exact:true}).selectOption('on');
   assert.equal(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').count(),1);
-  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').textContent(),/Peak — · Total 50/);
-  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').textContent(),/Live 5h 00m 00s/);
+  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').textContent(),/P— V50 5h0m/);
+  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').getAttribute('aria-label'),/Live 5h 00m 00s/);
   const card=explorer.locator('.sde-card:has([data-sde-label-hour="22"])');
   const coordinates=()=>card.locator('circle[data-sde-show]').evaluateAll(dots=>dots.map(dot=>[dot.getAttribute('cx'),dot.getAttribute('cy')]));
   const beforeToggle=await coordinates();
   assert.equal(await card.locator('.sde-point-label').count(),1);
-  assert.match(await card.locator('.sde-extreme-guide').textContent(),/High \/ low · \$200/);
+  assert.equal(await card.locator('.sde-extreme-caption').textContent(),'High / low');
+  assert.equal(await card.locator('.sde-extreme-value').textContent(),'$200');
   await card.getByRole('button',{name:/Viewer and duration labels/}).click();
   assert.equal(await card.locator('.sde-point-label').count(),0);assert.equal(await card.getByRole('button',{name:/Viewer and duration labels/}).getAttribute('aria-pressed'),'false');
   assert.deepEqual(await coordinates(),beforeToggle);assert.equal(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').count(),1);
@@ -137,15 +138,53 @@ test('calendar audience labels stay above and near their own shows when neighbor
    const m=window.StreamerCommercialAnalysis.build({shows,from:'2026-05-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z'},{from:'2026-11-02',through:'2026-11-08'},{seller:'Otello',format:'all',weekday:'all'});
    document.querySelector('main').innerHTML=window.StreamerDistributions.render(m,{distView:'calendar',distPointLabels:'on'});
   });
-  const layout=await page.locator('.sde-timeline-scroll:not(.sde-calendar-card) svg').evaluate(svg=>Array.from(svg.querySelectorAll('.sde-point-label'),label=>{
-   const title=label.getAttribute('aria-label').split(' · ')[0],id=title.slice(5),dot=svg.querySelector('circle[data-sde-show="'+id+'"]'),box=label.querySelector('rect').getBBox();
-   return {id,x:box.x,y:box.y,width:box.width,height:box.height,dotX:Number(dot.getAttribute('cx')),dotY:Number(dot.getAttribute('cy'))};
-  }));
-  assert.equal(layout.length,5);
-  for(const a of layout){
-   assert.ok(Math.abs(a.x+a.width/2-a.dotX)<=a.width/2+.01,'label stays in its own date position: '+JSON.stringify(a));
-   assert.ok(a.y+a.height<a.dotY,'label is above its dot');
-   for(const b of layout.filter(b=>b.id!==a.id))assert.ok(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y,'labels do not overlap');
+  for(const svg of await page.locator('.sde-timeline').all()){
+   const layout=await svg.evaluate(svg=>{
+    const box=el=>{const b=el.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};};
+    return {scale:svg.getBoundingClientRect().width/svg.viewBox.baseVal.width,dots:Array.from(svg.querySelectorAll('circle[data-sde-show]'),dot=>({id:dot.dataset.sdeShow,...box(dot)})),labels:Array.from(svg.querySelectorAll('.sde-point-label'),label=>({id:label.dataset.sdeLabelShow,...box(label.querySelector('text')),font:getComputedStyle(label.querySelector('text')).fontSize,transform:label.querySelector('text').getAttribute('transform'),rects:label.querySelectorAll('rect').length}))};
+   });
+   assert.equal(layout.labels.length,5);
+   const separate=(a,b)=>a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y;
+   for(const a of layout.labels){
+    const dot=layout.dots.find(d=>d.id===a.id);
+    assert.equal(a.font,'7px');assert.match(a.transform,/rotate\(-90\)/);assert.equal(a.rects,0);
+    assert.ok(a.width<=10*layout.scale,'vertical label stays narrow');
+    assert.ok(Math.abs(a.x+a.width/2-dot.x-dot.width/2)<=28*layout.scale,'label stays near its own date position');
+    assert.ok(a.y+a.height<dot.y,'label is above its dot');
+    for(const b of layout.labels.filter(b=>b.id!==a.id))assert.ok(separate(a,b),'labels do not overlap');
+    for(const b of layout.dots)assert.ok(separate(a,b),'labels do not cover a show');
+   }
+  }
+ }finally{await browser.close();}
+});
+
+test('high and low values stay on the shared y-axis without overlapping ticks or each other',async()=>{
+ const browser=await chromium.launch();try{
+  for(const width of [390,1440]){
+   const page=await browser.newPage({viewport:{width,height:950}});await page.setContent('<main class="wpr-paper"></main>');
+   await page.addStyleTag({path:fileURLToPath(new URL('../weekly-production-report.css',import.meta.url))});
+   for(const f of ['streamer-performance','streamer-distributions','streamer-commercial-analysis'])await page.addScriptTag({path:fileURLToPath(new URL('../'+f+'.js',import.meta.url))});
+   await page.evaluate(()=>{
+    const shows=[[100,18],[101,18],[9999,19],[10000,19],[0,20]].map(([net,hour],i)=>({event_id:String(i),title:'Show '+i,seller:'Otello',scheduled_start:'2026-05-'+String(3+i).padStart(2,'0')+'T'+hour+':00-04:00',net,orders:1,linked_lines:1,airtime_seconds:18000,insights:{sales_status:'ready',paid_items:1}}));
+    const m=window.StreamerCommercialAnalysis.build({shows,from:'2026-05-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z'},{from:'2026-11-02',through:'2026-11-08'},{seller:'Otello',format:'all',weekday:'all'});
+    document.querySelector('main').innerHTML=window.StreamerDistributions.render(m,{distView:'calendar'});
+   });
+   const layouts=await page.locator('.sde-calendar-card svg').evaluateAll(svgs=>svgs.map(svg=>{
+    const box=el=>{const b=el.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};};
+    const guides=Array.from(svg.querySelectorAll('.sde-extreme-guide'));
+    return {axis:guides[0].querySelector('line').getBoundingClientRect().left,labels:guides.flatMap(g=>Array.from(g.querySelectorAll('text'),box)),ticks:Array.from(svg.querySelectorAll(':scope > text'),box),values:guides.map(g=>({value:Number(g.dataset.value),y:Number(g.querySelector('line').getAttribute('y1')),dash:g.querySelector('line').getAttribute('stroke-dasharray')})),dots:Array.from(svg.querySelectorAll('circle[data-sde-show]'),dot=>Number(dot.getAttribute('cy'))),grid:Array.from(svg.querySelectorAll(':scope > line:not(.sde-push-cutoff)'),line=>line.getAttribute('y1'))};
+   }));
+   assert.equal(layouts.length,3);
+   const separate=(a,b)=>a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y;
+   for(const l of layouts){
+    assert.deepEqual(l.grid,layouts[0].grid,'every card keeps the same y-axis scale');
+    for(const [i,a] of l.labels.entries()){
+     assert.ok(a.x+a.width<l.axis,'high/low text is entirely left of the plot');
+     for(const b of [...l.labels.slice(i+1),...l.ticks])assert.ok(separate(a,b),'axis text does not overlap');
+    }
+    for(const v of l.values){assert.ok(l.dots.includes(v.y),'guide remains at the exact point value');assert.ok(v.dash);}
+   }
+   await page.close();
   }
  }finally{await browser.close();}
 });

@@ -46,8 +46,8 @@ test('optional calendar point labels show simultaneous peak, total audience and 
  assert.doesNotMatch(D.render(m,{distView:'calendar'}),/class="sde-point-label"/);
  const html=D.render(m,{distView:'calendar',distPointLabels:'on'});
  assert.equal((html.match(/class="sde-point-label"/g)||[]).length,6,'main chart and start-hour chart each label every show once');
- assert.match(html,/Peak 45 · Total 1,234/);assert.match(html,/Live 3h 00m 00s/);
- assert.match(html,/Peak — · Total —/);assert.match(html,/Peak 0 · Total 0/);
+ assert.match(html,/P45 V1,234 3h0m/);assert.match(html,/Live 3h 00m 00s/);
+ assert.match(html,/P— V—/);assert.match(html,/P0 V0/);assert.match(html,/rotate\(-90\)/);
  assert.match(html,/Peak simultaneous viewers 45/);assert.match(html,/pointer-events="none"/);
  assert.doesNotMatch(D.render(m,{distPointLabels:'on'}),/class="sde-point-label"/);
 });
