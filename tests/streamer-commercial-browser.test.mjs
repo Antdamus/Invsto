@@ -18,6 +18,9 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   const d=page.getByRole('dialog',{name:'Production report'}),panel=d.locator('#wpr-commercial');
   await d.getByRole('button',{name:'Show insights',exact:true}).click();await panel.getByLabel('Analysis streamer').waitFor();
   assert.equal(await panel.getByLabel('Analysis streamer').inputValue(),'Otello');assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'6');
+  for(const [label,value] of [['Show day grouping','night'],['Distribution metric','rate'],['Average over','3'],['Chart view','calendar'],['Start hour · Eastern','all'],['Calendar month','all'],['Part of month','all'],['Weekday occurrence in month','all'],['Push labels','all']])assert.equal(await panel.getByLabel(label,{exact:true}).inputValue(),value,'report default: '+label);
+  assert.match(await panel.locator('.sde-scope').innerText(),/Otello · Sunday · Selling nights · 6 PM–6 AM · All push statuses · Net sales per streaming hour · First 3 hours · All start hours · All months · All month parts · Any weekday occurrence/);
+  await panel.getByLabel('Average over',{exact:true}).selectOption('all');await panel.getByLabel('Chart view',{exact:true}).selectOption('histogram');await panel.getByLabel('Show day grouping',{exact:true}).selectOption('calendar');
   assert.equal(await panel.locator('.sca-heatmap').count(),2);assert.match(await panel.innerText(),/exact day-30 outcomes/);
   await panel.getByLabel('Show series').selectOption('Rolex watches');await panel.getByLabel('Timing comparison length').selectOption('3');
   assert.equal(await panel.locator('.sca-heatmap').count(),1);assert.match(await panel.locator('.sca-scope').innerText(),/Rolex watches/);
@@ -117,6 +120,7 @@ test('adaptive card bars show their own dates and weekday counts and open the ma
    window.WeeklyProductionReport.open(data,'2026-11-02',{rpc:async()=>({data:history})});
   });
   const panel=page.locator('#wpr-commercial');await panel.getByLabel('Start weekday',{exact:true}).selectOption('all');
+  await panel.getByLabel('Show day grouping',{exact:true}).selectOption('calendar');await panel.getByLabel('Distribution metric',{exact:true}).selectOption('net');await panel.getByLabel('Chart view',{exact:true}).selectOption('histogram');
   await panel.getByLabel('Start hour · Eastern',{exact:true}).selectOption('22');
   assert.match(await panel.locator('.sde-hist').innerText(),/\$100/);assert.doesNotMatch(await panel.locator('.sde-hist').innerText(),/10,000/);
   const cardBar=panel.locator('.sde-card [data-sde-bin][data-sde-start="21"]');await cardBar.hover();

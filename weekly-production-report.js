@@ -38,7 +38,8 @@
    .map(s=>({...s,seller:sellerFor(s,rows),inPeriod:Boolean(s.starts_at&&localDay(s.starts_at)>=period.from&&localDay(s.starts_at)<=period.through)}))
    .sort((a,b)=>(Date.parse(a.starts_at)||Infinity)-(Date.parse(b.starts_at)||Infinity));
   const inPeriod=shows.filter(s=>s.inPeriod),timed=inPeriod.filter(s=>s.airtime_seconds!=null);
-  return {data,week,period,rows,shows,inPeriod,timed,airtime:sum(timed,'airtime_seconds')};
+  const analysisOptions={seller:'Otello',weekday:'6',dayMode:'night',distMetric:'rate',distRateWindow:'3',distView:'calendar',distPush:'all',distStart:'all',distMonth:'all',distPhase:'all',distOccurrence:'all'};
+  return {data,week,period,rows,shows,inPeriod,timed,airtime:sum(timed,'airtime_seconds'),analysisOptions};
  }
  function table(headers,rows,cls='',caption=''){
   return '<div class="wpr-table-wrap"><table class="'+cls+'">'+(caption?'<caption>'+caption+'</caption>':'')+
