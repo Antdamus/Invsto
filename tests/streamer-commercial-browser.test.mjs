@@ -11,16 +11,20 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   for(const f of ['streamer-performance','streamer-distributions','streamer-commercial-analysis','weekly-production-report'])await page.addScriptTag({path:fileURLToPath(new URL('../'+f+'.js',import.meta.url))});
   await page.evaluate(()=>{
    const s={title:'Rolex watches',seller:'Otello',seller_source:'time_rule',scheduled_start:'2026-10-04T22:00-04:00',starts_at:'2026-10-04T22:00-04:00',orders:1,linked_lines:1,net:1000,booked:1200,cancelled:100,refunded:100,held:0,airtime_seconds:18000,insights:{paid_items:1,sales_status:'ready',total_viewers:50,purchasers:1},commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:0,net:1000,orders:1}],clocks:[{hour:22,net:1000}],merchandise:[{category:'Watch',brand:'Rolex',evidence:'Staff classification',price_band:'$1,000-$4,999',lines:1,units:1,priced_units:1,priced_lines:1,original_sales:1200}],largest_order_net:1000,top_three_orders_net:1000,largest_buyer_net:1000,missing_buyer_orders:0}};
-   const history={from:'2026-09-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows:[{...s,event_id:'otello'},{...s,event_id:'sydney',title:'Gold jewelry',seller:'Sydney',scheduled_start:'2026-10-05T10:00-04:00'}]};
+   const history={from:'2026-09-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows:[{...s,event_id:'otello'},{...s,event_id:'monday',scheduled_start:'2026-10-05T22:00-04:00'},{...s,event_id:'sydney',title:'Gold jewelry',seller:'Sydney',scheduled_start:'2026-10-05T10:00-04:00'}]};
    const data={as_of:history.as_of,days:[{day:'2026-11-02',week:'2026-11-02'},{day:'2026-11-08',week:'2026-11-02'}],orders:[],timing:[]};
    window.WeeklyProductionReport.open(data,'2026-11-02',{rpc:async()=>({data:history})});
   });
   const d=page.getByRole('dialog',{name:'Production report'}),panel=d.locator('#wpr-commercial');
   await d.getByRole('button',{name:'Show insights',exact:true}).click();await panel.locator('[data-wpr-filter-panel="analysis"]').waitFor();
   for(const key of ['analysis','distribution']){const filters=panel.locator('[data-wpr-filter-panel="'+key+'"]');if(await filters.getAttribute('open')===null)await filters.locator('summary').click();}
-  assert.equal(await panel.getByLabel('Analysis streamer').inputValue(),'Otello');assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'6');
-  for(const [label,value] of [['Show day grouping','night'],['Distribution metric','rate'],['Average over','3'],['Chart view','calendar'],['Start hour · Eastern','all'],['Calendar month','all'],['Part of month','all'],['Weekday occurrence in month','all'],['Push labels','all']])assert.equal(await panel.getByLabel(label,{exact:true}).inputValue(),value,'report default: '+label);
-  assert.match(await panel.locator('.sde-scope').innerText(),/Otello · Sunday · Selling nights · 6 PM–6 AM · All push statuses · Net sales per streaming hour · First 3 hours · All start hours · All months · All month parts · Any weekday occurrence/);
+  assert.equal(await panel.getByLabel('Analysis streamer').inputValue(),'Otello');assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'0');
+  assert.equal(await panel.getByLabel('Show group',{exact:true}).inputValue(),'all');assert.equal(await panel.getByLabel('Show series',{exact:true}).inputValue(),'all');
+  assert.match(await panel.locator('.sca-scope').innerText(),/Otello · All show titles · Monday · All matching titles · Selling nights · 6 PM–6 AM/);
+  for(const [label,value] of [['Show day grouping','night'],['Distribution metric','rate'],['Average over','3'],['Chart view','calendar'],['Point labels','on'],['Start hour · Eastern','all'],['Calendar month','all'],['Part of month','all'],['Weekday occurrence in month','all'],['Push labels','all']])assert.equal(await panel.getByLabel(label,{exact:true}).inputValue(),value,'report default: '+label);
+  assert.equal(await panel.locator('.sde-label-toggle').evaluateAll(buttons=>buttons.length>0&&buttons.every(b=>b.getAttribute('aria-pressed')==='true')),true,'every start-time chart begins with labels on');
+  assert.match(await panel.locator('.sde-scope').innerText(),/Otello · Monday · Selling nights · 6 PM–6 AM · All push statuses · Net sales per streaming hour · First 3 hours · All start hours · All months · All month parts · Any weekday occurrence/);
+  await panel.getByLabel('Start weekday',{exact:true}).selectOption('6');
   await panel.getByLabel('Average over',{exact:true}).selectOption('all');await panel.getByLabel('Chart view',{exact:true}).selectOption('histogram');await panel.getByLabel('Show day grouping',{exact:true}).selectOption('calendar');
   assert.equal(await panel.locator('.sca-heatmap').count(),2);assert.match(await panel.innerText(),/exact day-30 outcomes/);
   await panel.getByLabel('Show series').selectOption('Rolex watches');await panel.getByLabel('Timing comparison length').selectOption('3');

@@ -9,7 +9,7 @@ async function openReport(page){
  for(const css of ['dashboard','dashboard-workspace','weekly-marketplace-sales','weekly-production-report','ebay-hold-details'])await page.addStyleTag({path:fileURLToPath(new URL('../'+css+'.css',import.meta.url))});
  for(const f of ['streamer-performance','streamer-distributions','streamer-commercial-analysis','weekly-production-report'])await page.addScriptTag({path:fileURLToPath(new URL('../'+f+'.js',import.meta.url))});
  await page.evaluate(()=>{
-  const shows=Array.from({length:8},(_,i)=>({event_id:'show-'+i,title:'Original Rolex Cartier Breitling Watches · '+i,seller:'Otello',seller_source:'time_rule',scheduled_start:i<2?'2026-10-04T22:00-04:00':'2026-10-'+String(11+(i-2)*7%21).padStart(2,'0')+'T22:'+String(i).padStart(2,'0')+'-04:00',orders:1,linked_lines:1,booked:1400+i*100,cancelled:100,refunded:100,held:0,net:1200+i*100,airtime_seconds:18000,insights:{sales_status:'ready',paid_items:1,total_viewers:2773+i,peak_viewers:102+i},commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:0,net:1000,booked:1200,orders:1},{bin:2,net:200+i*100,booked:200+i*100,orders:0}]}}));
+  const shows=Array.from({length:8},(_,i)=>({event_id:'show-'+i,title:'Original Rolex Cartier Breitling Watches · '+i,seller:'Otello',seller_source:'time_rule',scheduled_start:i<2?'2026-10-05T22:00-04:00':'2026-10-'+String(12+(i-2)*7%21).padStart(2,'0')+'T22:'+String(i).padStart(2,'0')+'-04:00',orders:1,linked_lines:1,booked:1400+i*100,cancelled:100,refunded:100,held:0,net:1200+i*100,airtime_seconds:18000,insights:{sales_status:'ready',paid_items:1,total_viewers:2773+i,peak_viewers:102+i},commercial:{version:1,orders:1,precise_orders:1,halves:[{bin:0,net:1000,booked:1200,orders:1},{bin:2,net:200+i*100,booked:200+i*100,orders:0}]}}));
   shows[1].net=shows[0].net;shows[1].commercial=shows[0].commercial;
   const history={from:'2026-09-01',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows};
   const data={as_of:history.as_of,days:[{day:'2026-11-02',week:'2026-11-02'}],orders:[{order:'order',day:'2026-11-02',week:'2026-11-02',show:'current',seller:'Otello',booked:1400,cancelled:100,refunded:100,held:0,net:1200}],timing:[{event_id:'current',starts_at:'2026-11-02T23:00-05:00',title:'Current watch show',airtime_seconds:18000}]};
@@ -78,6 +78,8 @@ for(const [engine,width,height] of [[chromium,320,740],[chromium,390,844],[chrom
   assert.equal(await card.locator('.sde-timeline-scroll').evaluate(e=>e.scrollWidth>e.clientWidth),true);
   await card.getByRole('button',{name:'Fit chart',exact:true}).tap();
   assert.equal(await card.locator('.sde-timeline-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth+1),true);
+  assert.equal(await card.getByRole('button',{name:/Viewer and duration labels/}).getAttribute('aria-pressed'),'true');assert.ok(await card.locator('.sde-point-label').count()>0);
+  await card.getByRole('button',{name:/Viewer and duration labels/}).tap();assert.equal(await card.locator('.sde-point-label').count(),0);
   await card.getByRole('button',{name:/Viewer and duration labels/}).tap();assert.ok(await card.locator('.sde-point-label').count()>0);
   await dots.last().tap();await sheet.waitFor();await sheet.getByRole('button',{name:'Open full show details'}).tap();
   await panel.locator('.sde-show-detail').waitFor();assert.equal(await sheet.isVisible(),false);assert.match(await panel.locator('.sde-show-detail').innerText(),/First 2 hours/);
