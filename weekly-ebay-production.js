@@ -7,9 +7,9 @@
  const total=(rows,key)=>rows.reduce((n,r)=>n+Math.round(Number(r[key]||0)*100),0)/100;
  const group=(rows,key)=>{const groups=new Map();for(const r of rows){const k=key(r);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}return [...groups];};
  const showKey=r=>r.show||r.show_source;
- const showTitle=r=>r.show_title||(r.show_source==='multiple'?'Multiple shows — review':'Show not linked');
+ const showTitle=r=>r.show_title||({multiple:'Multiple shows — review',non_live:'Regular eBay purchase',mixed:'Live and regular purchases — review'}[r.show_source]||'Show not linked');
  const sources={recorded:'Recorded seller',override:'Report assignment',time_rule:'Time rule',multiple:'Multiple sellers',unknown:'Unassigned'};
- const showSources={captured:'Confirmed show link',time_window:'Estimated from show time',multiple:'Multiple shows',unmatched:'Show not linked'};
+ const showSources={captured:'Confirmed show link',time_window:'Estimated from show time',multiple:'Multiple shows',non_live:'eBay source: regular purchase',mixed:'Mixed purchase sources',unmatched:'Show not linked'};
  function summary(rows){
   return '<span class="wp-total"><small>Net item sales</small><b>'+money(total(rows,'net'))+'</b></span>';
  }

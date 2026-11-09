@@ -69,7 +69,7 @@
    const caption='<strong>'+esc(date==='unknown'?'Show date not recorded':showDateLabel(date))+'</strong><span>'+list.length+' '+(list.length===1?'show':'shows')+' · Eastern time</span>';
    return '<div class="wpr-show-day" data-show-day="'+date+'">'+table(showHeaders,ordered.map(showRow),'wpr-shows',caption)+'</div>';
   }).join('');
-  const unlinked=groups(rows.filter(r=>!r.show),r=>r.show_source).map(([key,a])=>[key==='multiple'?'Multiple shows — review':'Show not linked','—','—',...saleCells(a)]);
+  const unlinked=groups(rows.filter(r=>!r.show),r=>r.show_source).map(([key,a])=>[({multiple:'Multiple shows — review',non_live:'Regular eBay purchases',mixed:'Live and regular purchases — review'})[key]||'Show not linked','—','—',...saleCells(a)]);
   if(unlinked.length)showTables+='<div class="wpr-show-day wpr-show-unlinked">'+table(showHeaders,unlinked,'wpr-shows','<strong>Sales without one linked show</strong><span>Show date not assigned</span>')+'</div>';
   const known=rows.filter(r=>r.show_source==='captured').length,estimated=rows.filter(r=>r.show_source==='time_window').length;
   return '<article class="wpr-paper"><header class="wpr-masthead"><div><span>OG JEWELERS · OPERATIONS</span><h1>Sales, shows & streamer hours</h1><p>'+day(period.from)+' – '+day(period.through)+'</p></div><div class="wpr-stamp">Eastern time<br>Snapshot '+esc(stamp(m.data.as_of))+'</div></header>'+
@@ -111,7 +111,7 @@
   if(months!=='all'){const start=new Date(period.through.slice(0,7)+'-01T12:00Z');start.setUTCMonth(start.getUTCMonth()-Number(months)+1);target=start.toISOString().slice(0,10);}
   const chunks=[];
   const read=async(from,to)=>{
-   const {data,error}=await client.rpc('get_streamer_performance_history',{_from:from,_until:to});
+   const {data,error}=await client.rpc('get_streamer_performance_history_range',{_from:from,_until:to,_report_until:until});
    if(error)throw error;if(!data||!Array.isArray(data.shows))throw Error('Historical records were not returned.');
    chunks.push(data);return data;
   };
@@ -124,7 +124,7 @@
    const from=previous.toISOString().slice(0,10)<target?target:previous.toISOString().slice(0,10);
    await read(from,boundary);if(!isCurrent())return null;boundary=from;
   }
-  const coverage={...first.coverage};for(const key of ['orders','unlinked_orders','unlinked_net'])coverage[key]=sum(chunks.map(c=>c.coverage||{}),key);
+  const coverage={...first.coverage};for(const key of ['orders','unlinked_orders','unlinked_net','non_live_orders','review_orders'])coverage[key]=sum(chunks.map(c=>c.coverage||{}),key);
   return {...first,from:boundary,until,as_of:chunks.map(c=>c.as_of).sort().at(-1),coverage,
    shows:[...new Map(chunks.flatMap(c=>c.shows).map(s=>[s.event_id,s])).values()]};
  }
@@ -166,18 +166,20 @@
    jump.onclick=()=>content.querySelector('#wpr-commercial')?.scrollIntoView({block:'start'});modal.querySelector('.wpr-toolbar').insertBefore(jump,print);
    content.addEventListener('change',e=>{
     const key=e.target.dataset.scaFilter;if(!key||m.history?.status!=='ready')return;
-    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    if(key==='distPointLabels')options.distCardLabels={};
     if(key==='seller'){options.format='all';options.weekday='all';options.series='all';options.distStart='all';options.distMonth='all';options.distPhase='all';options.distOccurrence='all';}
     if(key==='format'||key==='weekday')options.series='all';m.analysisOptions=options;
     content.querySelector('#wpr-commercial').innerHTML=commercial(m);
     content.querySelector('[data-sca-filter="'+key+'"]').focus({preventScroll:true});
    });
    const distributionAction=e=>{
-    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start],[data-sde-weekday],[data-sde-scale]');
+    const button=e.target.closest('[data-sde-bin],[data-sde-show],[data-sde-clear],[data-sde-start],[data-sde-weekday],[data-sde-scale],[data-sde-label-hour]');
     if(!button||m.history?.status!=='ready')return;
     if(e.type==='keydown'&&(button.tagName.toLowerCase()==='button'||!['Enter',' '].includes(e.key)))return;
     e.preventDefault();
-    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    const options={distRateWindow:m.analysisOptions?.distRateWindow,distPointLabels:m.analysisOptions?.distPointLabels,distCardLabels:m.analysisOptions?.distCardLabels,...Object.fromEntries([...content.querySelectorAll('[data-sca-filter]')].map(s=>[s.dataset.scaFilter,s.value]))};
+    if(button.hasAttribute('data-sde-label-hour')){options.distCardLabels={...options.distCardLabels,[button.dataset.sdeLabelHour]:button.getAttribute('aria-pressed')==='true'?'off':'on'};options.distShow=m.analysisOptions?.distShow;}
     if(button.hasAttribute('data-sde-bin'))options.distBin=button.dataset.sdeBin;
     if(button.hasAttribute('data-sde-show'))options.distShow=button.dataset.sdeShow;
     if(button.hasAttribute('data-sde-start'))options.distStart=button.dataset.sdeStart;
@@ -185,7 +187,7 @@
     if(button.hasAttribute('data-sde-scale'))options.distScale=button.dataset.sdeScale;
     if(button.hasAttribute('data-sde-weekday')){options.weekday=button.dataset.sdeWeekday;options.distStart='all';options.distMonth='all';}
     m.analysisOptions=options;content.querySelector('#wpr-commercial').innerHTML=commercial(m);
-    const target=content.querySelector(button.hasAttribute('data-sde-scale')?'[data-sde-scale]':button.hasAttribute('data-sde-weekday')?'[data-sde-weekday="'+options.weekday+'"]':button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-show-detail, .sde-records summary');
+    const target=content.querySelector(button.hasAttribute('data-sde-label-hour')?'[data-sde-label-hour="'+button.dataset.sdeLabelHour+'"]':button.hasAttribute('data-sde-scale')?'[data-sde-scale]':button.hasAttribute('data-sde-weekday')?'[data-sde-weekday="'+options.weekday+'"]':button.hasAttribute('data-sde-start')&&!button.hasAttribute('data-sde-bin')?'[data-sca-filter="distStart"]':'.sde-show-detail, .sde-records summary');
     target?.focus({preventScroll:true});target?.scrollIntoView({block:'center'});
    };
    content.addEventListener('click',distributionAction);content.addEventListener('keydown',distributionAction);

@@ -69,12 +69,16 @@
 .sde-point-label line{stroke:#8aa092;stroke-width:1}
 .sde-point-label rect{fill:#fffdf5;stroke:#ced8cf;stroke-width:1}
 .sde-timeline .sde-point-label text{fill:#233e30;font-size:11px;font-weight:600}
+.sde-extreme-guide line{stroke:#426e58;stroke-width:1;opacity:.8}
+.sde-timeline .sde-extreme-guide text{fill:#214f38;font-size:9px;font-weight:700;paint-order:stroke;stroke:#fbfcfa;stroke-width:3px;stroke-linejoin:round}
 .sde-legend{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:11px}
 .sde-legend span:nth-child(1){color:#96691d}.sde-legend span:nth-child(2){color:#347657}.sde-legend span:nth-child(3){color:#526b8b}
 .sde-small-multiples{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .sde-card{border:1px solid #d3dfd5;background:#f8faf7;padding:12px;border-radius:5px;break-inside:avoid}
 .sde-card button{display:block;width:100%;text-align:left;padding:6px 8px;border:1px solid #b1c5b6;background:#edf3ed;border-radius:4px;font-weight:600;font-size:12px}
 .sde-card button[aria-pressed=true]{border-color:#9b732a;background:#f5eddb}
+.sde-card .sde-label-toggle{width:auto;font-size:11px;margin:8px 0}
+@media print{body.wpr-printing .sde-label-toggle{display:none!important}}
 .sde-card svg{display:block;width:100%;margin:10px 0 6px}
 .sde-card [data-sde-bin]{cursor:pointer;outline:none}
 .sde-card [data-sde-bin]:hover,.sde-card [data-sde-bin]:focus{filter:brightness(.75)}

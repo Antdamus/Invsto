@@ -10,6 +10,16 @@ const show=(id,net,start='2026-10-04T22:15-04:00',extra={})=>({event_id:id,title
 const history=shows=>({from:'2025-08-07',until:'2026-11-09',as_of:'2026-11-08T20:00Z',coverage:{},shows});
 const model=shows=>A.build(history(shows),period,filters);
 
+test('small calendar charts label selected-metric extremes and allow independent audience labels',()=>{
+ const m=model([show('a',100),show('b',500,'2026-10-11T22:15-04:00'),show('c',50,'2026-10-04T21:15-04:00')]);
+ const options={distView:'calendar',distMetric:'rate',distRateWindow:'2',distCardLabels:{22:'on',21:'off'}};
+ const d=D.build(m,options);assert.deepEqual(JSON.parse(JSON.stringify(D.metricExtremes(d.rows))),[{label:'High',value:250},{label:'Low',value:25}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(D.metricExtremes([{value:0},{value:0}]))),[{label:'High / low',value:0}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(D.metricExtremes([{value:-10},{value:0}]))),[{label:'High',value:0},{label:'Low',value:-10}]);
+ const html=D.render(m,options);assert.match(html,/data-sde-extreme="High" data-value="250"/);assert.match(html,/data-sde-extreme="Low" data-value="50"/);assert.match(html,/data-sde-extreme="High \/ low" data-value="25"/);
+ assert.equal((html.match(/class="sde-point-label"/g)||[]).length,2);assert.match(html,/data-sde-label-hour="22"[^>]+aria-pressed="true"/);assert.match(html,/data-sde-label-hour="21"[^>]+aria-pressed="false"/);
+});
+
 test('push labels preserve unknowns and dual labels across charts, filters, shared bins and CSV',()=>{
  const rows=[show('manual',50,undefined,{push:{manual:true,automatic:true,note:'<script>no</script>',manual_source:'recorded'}}),show('rule',1000,'2026-10-04T23:00-04:00',{push:{manual:false,automatic:null,manual_source:'date_rule'}}),show('unknown',500,'2026-10-04T20:00-04:00')],m=model(rows);
  assert.equal(D.pushSymbols(rows[0]),'★◆');assert.equal(D.pushSymbols(rows[1]),'☆');assert.equal(D.pushSymbols(rows[2]),'');
@@ -35,7 +45,7 @@ test('optional calendar point labels show simultaneous peak, total audience and 
  const m=model([show('known',100,undefined,{insights:{status:'ready',sales_status:'ready',paid_items:1,peak_viewers:45,total_viewers:1234},airtime_seconds:10800}),show('missing',50),show('zero',0,undefined,{insights:{status:'ready',sales_status:'ready',paid_items:1,peak_viewers:0,total_viewers:0}})]);
  assert.doesNotMatch(D.render(m,{distView:'calendar'}),/class="sde-point-label"/);
  const html=D.render(m,{distView:'calendar',distPointLabels:'on'});
- assert.equal((html.match(/class="sde-point-label"/g)||[]).length,3,'main chart labels each show once');
+ assert.equal((html.match(/class="sde-point-label"/g)||[]).length,6,'main chart and start-hour chart each label every show once');
  assert.match(html,/Peak 45 · Total 1,234/);assert.match(html,/Live 3h 00m 00s/);
  assert.match(html,/Peak — · Total —/);assert.match(html,/Peak 0 · Total 0/);
  assert.match(html,/Peak simultaneous viewers 45/);assert.match(html,/pointer-events="none"/);

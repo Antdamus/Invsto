@@ -38,9 +38,17 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('elapsed:1');assert.match(await explorer.locator('.sde-stats').first().innerText(),/Median \$0/);
   await explorer.getByLabel('Distribution metric',{exact:true}).selectOption('rate');
   await explorer.getByLabel('Point labels',{exact:true}).selectOption('on');
-  assert.equal(await explorer.locator('.sde-point-label').count(),1);
-  assert.match(await explorer.locator('.sde-point-label').textContent(),/Peak — · Total 50/);
-  assert.match(await explorer.locator('.sde-point-label').textContent(),/Live 5h 00m 00s/);
+  assert.equal(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').count(),1);
+  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').textContent(),/Peak — · Total 50/);
+  assert.match(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').textContent(),/Live 5h 00m 00s/);
+  const card=explorer.locator('.sde-card:has([data-sde-label-hour="22"])');
+  const coordinates=()=>card.locator('circle[data-sde-show]').evaluateAll(dots=>dots.map(dot=>[dot.getAttribute('cx'),dot.getAttribute('cy')]));
+  const beforeToggle=await coordinates();
+  assert.equal(await card.locator('.sde-point-label').count(),1);
+  assert.match(await card.locator('.sde-extreme-guide').textContent(),/High \/ low · \$200/);
+  await card.getByRole('button',{name:/Viewer and duration labels/}).click();
+  assert.equal(await card.locator('.sde-point-label').count(),0);assert.equal(await card.getByRole('button',{name:/Viewer and duration labels/}).getAttribute('aria-pressed'),'false');
+  assert.deepEqual(await coordinates(),beforeToggle);assert.equal(await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').count(),1);
   assert.equal(await explorer.getByLabel('Average over',{exact:true}).inputValue(),'all');
   assert.match(await explorer.locator('.sde-stats').first().innerText(),/Median \$200/);
   for(const [window,label,average] of [['1','First hour','$1,000'],['2','First 2 hours','$500'],['3','First 3 hours','$333.33']]){
@@ -51,7 +59,11 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
    await page.keyboard.press('Escape');await dot.click();
    assert.ok((await explorer.locator('.sde-show-detail').innerText()).includes('Average net/hour · '+label+' '+average));
    assert.equal(await explorer.getByLabel('Average over',{exact:true}).inputValue(),window);
+   assert.equal(await card.locator('.sde-point-label').count(),0);
+   assert.ok((await card.locator('.sde-extreme-guide').textContent()).includes(average));
   }
+  await explorer.getByLabel('Point labels',{exact:true}).selectOption('off');await explorer.getByLabel('Point labels',{exact:true}).selectOption('on');
+  assert.equal(await card.locator('.sde-point-label').count(),1);
   const rangeDownload=page.waitForEvent('download');await d.getByRole('button',{name:'Download CSV'}).click();
   const rangeCsv=await readFile(await (await rangeDownload).path(),'utf8');
   assert.match(rangeCsv,/Net sales per streaming hour · First 3 hours/);assert.match(rangeCsv,/"First 3 hours","10800","1000","333\.3333333333333"/);
@@ -68,7 +80,7 @@ for(const width of [390,1440])test(`commercial report filters, evidence, CSV and
   assert.match(await explorer.locator('.sde-scope').innerText(),/First 3 hours/);await page.emulateMedia({media:'screen'});await page.evaluate(()=>document.body.classList.remove('wpr-printing'));
   await explorer.getByLabel('Chart view',{exact:true}).selectOption('calendar');
   assert.equal(await explorer.getByLabel('Point labels',{exact:true}).inputValue(),'on');
-  const labelBox=await explorer.locator('.sde-point-label').boundingBox(),chartBox=await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) svg').boundingBox();
+  const labelBox=await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) .sde-point-label').boundingBox(),chartBox=await explorer.locator('.sde-timeline-scroll:not(.sde-calendar-card) svg').boundingBox();
   assert.ok(labelBox.x>=chartBox.x&&labelBox.x+labelBox.width<=chartBox.x+chartBox.width);
   await explorer.locator('[data-sde-weekday="all"]').click();assert.equal(await panel.getByLabel('Start weekday',{exact:true}).inputValue(),'all');
   await panel.getByLabel('Show day grouping').selectOption('night');await explorer.locator('[data-sde-weekday="6"]').click();assert.match(await explorer.locator('.sde-scope').innerText(),/Selling nights/);

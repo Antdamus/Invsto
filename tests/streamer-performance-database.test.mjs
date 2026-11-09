@@ -26,8 +26,45 @@ before(async()=>{
  select jsonb_build_object('ebay_item_orders','[]'::jsonb) from orders;return '{}';end$$;
  set test.actor='${admin}';`);
  for(const file of ['20261108030000_weekly_ebay_production.sql','20261108040000_weekly_production_reports.sql','20261108050000_weekly_weekend_streamer.sql','20261108060000_streamer_performance_history.sql','20261108070000_streamer_all_history.sql','20261108080000_streamer_commercial_analysis.sql','20261108100000_show_push_labels.sql','20261108120000_streamer_start_date.sql','20261108140000_verified_show_orders.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261108150000_api_live_show_evidence.sql',import.meta.url),'utf8'));
 });
 after(()=>db?.close());
+test('API Live evidence links delayed checkout to its actual show and isolates mixed or non-Live orders',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
+ ('api-origin','Original show','2026-10-20T10:00-04:00',3600,'{"paid_items":1}'),
+ ('api-later','Later show','2026-10-21T22:00-04:00',3600,'{"paid_items":1}');`);
+ const cases=[['api-exact',[['EBAY_LIVE','api-origin']],null],['api-core',[['CORE',null]],null],
+  ['api-multiple',[['EBAY_LIVE','api-origin'],['EBAY_LIVE','api-later']],null],
+  ['api-partial',[['EBAY_LIVE','api-origin'],[null,null]],null],
+  ['api-unknown',[['EBAY_LIVE','not-saved']],null],
+  ['api-conflict',[['EBAY_LIVE','api-origin']],'api-later'],
+  ['api-capture',[['EBAY_LIVE','api-origin']],'api-origin'],
+  ['api-canonical',[['EBAY_LIVE','api-origin'],[null,null]],null],
+  ['api-sentinel',[['EBAY_LIVE','UNKNOWN']],null]];
+ for(const [id,lines,capture] of cases){
+  await db.query("insert into ebay_orders values($1,$1,'2026-10-21T22:30-04:00','{\"source\":\"ebay_fulfillment_api\"}',null)",[id]);
+  for(const [i,[source,event]]of lines.entries()){
+   await db.query('insert into ebay_order_lines(id,order_id,raw_payload) values($1,$2,$3)',[id+i,id,JSON.stringify({line:{purchaseSource:source,ebayLiveContext:{eventId:event}}})]);
+   if(capture)await db.query('insert into ebay_live_attempts(order_line_id,event_id) values($1,$2)',[id+i,capture]);
+  }
+ }
+ await db.query("update ebay_orders set raw_payload=raw_payload||$1 where id='api-canonical'",[JSON.stringify({order:{lineItems:[{purchaseSource:'EBAY_LIVE',ebayLiveContext:{eventId:'api-origin'}}]}})]);
+ const sales=cases.map(([id])=>({order_number:id,purchased:'2026-10-21T22:30',booked:100,cancelled:10,refunded:20,held:0,net:70}));
+ for(const fn of ['streamer_performance_orders','weekly_ebay_production']){
+  const r=(await db.query(`select ${fn}($1) r`,[JSON.stringify(sales)])).rows[0].r;
+  const byId=Object.fromEntries(r.orders.map(o=>[o.order,o]));
+  for(const id of ['api-exact','api-capture','api-canonical']){assert.equal(byId[id].show,'api-origin');assert.equal(byId[id].show_source,'captured');assert.equal(byId[id].seller,'Sydney');}
+  assert.equal(byId['api-sentinel'].show,'api-later');assert.equal(byId['api-sentinel'].show_source,'time_window');
+  for(const id of ['api-core','api-multiple','api-partial','api-unknown','api-conflict'])assert.equal(byId[id].show,null,id);
+  assert.equal(byId['api-core'].show_source,'non_live');assert.equal(byId['api-multiple'].show_source,'multiple');
+  assert.equal(byId['api-core'].seller,'Seller unassigned');assert.equal(byId['api-multiple'].seller_source,'unknown');
+  assert.equal(r.orders.reduce((n,o)=>n+o.net,0),cases.length*70);
+  if(fn==='streamer_performance_orders'){
+   const commercial=(await db.query("select streamer_commercial_details($1,'2026-10-20','2026-10-22') r",[JSON.stringify(r)])).rows[0].r;
+   assert.equal(commercial['api-origin'].after_duration_orders,3);assert.equal(commercial['api-origin'].timed_orders,0);
+  }
+ }
+});
 test('exact sold-listing evidence resolves overlapping starts without changing order money or operational records',async()=>{
  await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values
  ('overlap-first','First show','2026-11-05T14:27-05:00',9374,'{"paid_items":1}'),
@@ -54,6 +91,22 @@ test('September 23 and 6 AM boundaries use the owner confirmed streamer schedule
  const h=(await db.query("select get_streamer_performance_history('2026-09-22','2026-09-27') r")).rows[0].r;
  assert.equal(h.sydney_estimated_start,'2026-09-23');
  for(const [id,name]of [['cut-before','Otello'],['cut-day','Sydney'],['cut-night','Otello'],['cut-evening','Otello'],['cut-weekend','Manuella']])assert.equal(h.shows.find(s=>s.event_id===id).seller,name);
+});
+
+test('historical batches include later checkout through the shared report end without duplicating coverage',async()=>{
+ await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights)
+ values('batch-origin','Old watch show','2026-04-30T22:00-04:00',3600,'{"paid_items":1}');
+ insert into ebay_orders(id,order_number,sale_date,raw_payload) values('batch-late','batch-late','2026-06-05T12:00-04:00','{"source":"ebay_fulfillment_api","order":{"lineItems":[{"purchaseSource":"EBAY_LIVE","ebayLiveContext":{"eventId":"batch-origin"}}]}}');
+ insert into ebay_order_lines(id,order_id) values('batch-late','batch-late');
+ insert into sale_rows values('ebay','batch-late','2026-06-05T12:00',100,10,20,false);`);
+ const old=(await db.query("select get_streamer_performance_history_range('2026-04-01','2026-05-01','2026-07-01') r")).rows[0].r;
+ assert.equal(old.shows.find(s=>s.event_id==='batch-origin').net,70);assert.equal(old.coverage.orders,0);
+ assert.equal(old.shows.find(s=>s.event_id==='batch-origin').commercial.after_duration_orders,1);
+ const later=(await db.query("select get_streamer_performance_history_range('2026-05-01','2026-07-01','2026-07-01') r")).rows[0].r;
+ assert.equal(later.coverage.orders,1);assert.ok(!later.shows.some(s=>s.event_id==='batch-origin'));
+ await assert.rejects(db.query("select get_streamer_performance_history_range('2026-04-01','2026-05-01','2026-04-01')"),/valid report end/);
+ await db.exec("set test.actor='';set role authenticated");await assert.rejects(db.query("select get_streamer_performance_history_range('2026-04-01','2026-05-01','2026-07-01')"),/Active admin/);
+ await db.exec(`reset role;set test.actor='${admin}'`);
 });
 test('push labels honor the Eastern cutoff, explicit exceptions, audit and concurrent edits',async()=>{
  await db.exec(`insert into weekly_ebay_show_catalog(event_id,title,starts_at,airtime_seconds,insights) values

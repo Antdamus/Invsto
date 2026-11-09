@@ -16,7 +16,7 @@ for(const width of [390,1440])test(`historical report loading, retry, ranges, ex
   });
   const dialog=page.getByRole('dialog',{name:'Production report'}),print=dialog.getByRole('button',{name:'Print / Save PDF'});
   assert.equal(await print.isDisabled(),true);assert.match(await dialog.locator('#wpr-history').innerText(),/Loading historical/);
-  assert.deepEqual(await page.evaluate(()=>window.calls[0]),{name:'get_streamer_performance_history',args:{_from:'2026-09-01',_until:'2026-11-09'}});
+  assert.deepEqual(await page.evaluate(()=>window.calls[0]),{name:'get_streamer_performance_history_range',args:{_from:'2026-09-01',_until:'2026-11-09',_report_until:'2026-11-09'}});
   assert.equal(await dialog.getByLabel('History months').inputValue(),'all');
   await page.evaluate(()=>window.reply({error:{message:'Temporary failure'}}));
   await dialog.getByRole('button',{name:'Retry historical analysis'}).waitFor();assert.equal(await print.isDisabled(),false);
