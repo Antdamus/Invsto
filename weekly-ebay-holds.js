@@ -9,6 +9,44 @@
  const url='https://www.ebay.com/mes/transactionlist?sh=true&filter=transactionStatus:%7BFUNDS_ON_HOLD%7D&pillFilterId=FUNDS_ON_HOLD_FILTER';
  const link=(href,label)=>'<a target="_blank" rel="noopener" href="'+h(href)+'">'+h(label)+' ↗</a>';
  const month=r=>r.date?.slice(0,7)||'unknown';
+ const purchaseDay=r=>r.date||'unknown';
+ const dayLabel=d=>d==='unknown'?'Purchase date unknown':new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+ function creditReason(r){
+  const m=r.holdInfo;
+  if(m?.releaseObserved&&Date.parse(m.financeChecked)>Date.parse(m.snapshot))return 'updated';
+  return [...new Set(m?.categories?.length?m.categories:['unknown'])].sort().join('+');
+ }
+ const reasonLabel=k=>k==='updated'?'Newer payment record reports released':k.split('+').map(v=>window.OGEbayHoldDetails?.labels[v]||'Reason not provided').join(' + ');
+ function creditGroups(rows){
+  const groups=new Map();for(const r of rows){const key=creditReason(r);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
+  return [...groups].sort((a,b)=>sum(b[1])-sum(a[1])||a[0].localeCompare(b[0]));
+ }
+ const creditCount=rows=>rows.length+' '+(rows.length===1?'credit':'credits');
+ function creditSummary(el){
+  const s=el.wh,box=el.querySelector('.wh-credit-summary');box.hidden=!s.verified;if(box.hidden)return;
+  const credits=s.entries.filter(r=>r.kind==='sale'),months=[...new Set(credits.map(month))].sort().reverse(),sel=box.querySelector('.wh-credit-month');
+  // Retain a selected month even if its last credit has just been released.
+  if(s.creditMonth&&!months.includes(s.creditMonth))months.push(s.creditMonth);
+  sel.innerHTML=option('','All purchase months')+months.map(m=>option(m,monthLabel(m))).join('');sel.value=s.creditMonth||'';
+  const rows=credits.filter(r=>!s.creditMonth||month(r)===s.creditMonth),groups=new Map();
+  for(const r of rows){const key=purchaseDay(r);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
+  const dates=[...groups.keys()].sort((a,b)=>a==='unknown'?1:b==='unknown'?-1:b.localeCompare(a)),pages=Math.max(1,Math.ceil(dates.length/10));
+  s.creditPage=Math.min(s.creditPage||0,pages-1);
+  const button=(day,reason,label)=>'<button type="button" data-wh-credit-day="'+h(day)+'" data-wh-credit-reason="'+h(reason)+'" aria-label="'+h('Inspect '+(day?dayLabel(day):'all selected dates')+(reason?' · '+reasonLabel(reason):''))+'">'+label+'</button>';
+  const reasons=(items,day)=>creditGroups(items).map(([key,list])=>button(day,key,'<span>'+h(reasonLabel(key))+'</span><b>'+creditCount(list)+' · '+usd(sum(list))+'</b>')).join('');
+  box.querySelector('.wh-credit-total').textContent=creditCount(rows)+' · '+usd(sum(rows))+' · '+dates.length+' purchase '+(dates.length===1?'date':'dates');
+  box.querySelector('.wh-credit-reasons').innerHTML=reasons(rows,'');
+  box.querySelector('.wh-credit-body').innerHTML=dates.slice(s.creditPage*10,s.creditPage*10+10).map(d=>{
+   const items=groups.get(d);return '<tr><th scope="row">'+button(d,'',h(dayLabel(d)))+'</th><td data-label="Credits">'+items.length+'</td><td data-label="Amount on hold">'+usd(sum(items))+'</td><td data-label="Hold reasons"><div class="wh-credit-breakdown">'+reasons(items,d)+'</div></td></tr>';
+  }).join('');
+  box.querySelector('.wh-credit-table').hidden=!rows.length;box.querySelector('.wh-credit-empty').hidden=!!rows.length;
+  box.querySelector('.wh-credit-foot').innerHTML='<tr><th scope="row">All selected dates</th><td data-label="Credits">'+rows.length+'</td><td data-label="Amount on hold">'+usd(sum(rows))+'</td><td data-label="Coverage">'+dates.length+' purchase '+(dates.length===1?'date':'dates')+' · includes every page</td></tr>';
+  box.querySelector('.wh-credit-nav').hidden=pages===1;
+  box.querySelector('.wh-credit-position').textContent='Dates '+(s.creditPage*10+1)+'–'+Math.min((s.creditPage+1)*10,dates.length)+' of '+dates.length;
+  box.querySelector('.wh-credit-prev').disabled=!s.creditPage;box.querySelector('.wh-credit-next').disabled=s.creditPage>=pages-1;
+  box.querySelector('.wh-credit-checked').textContent='Held amounts verified '+stamp(s.verified)+'. This summary updates with the report. Dates are purchase dates in Eastern time.';
+  box.querySelector('.wh-credit-release-note').hidden=!rows.some(r=>creditReason(r)==='updated');
+ }
  function holdInfo(r,checked){
   const api=window.OGEbayHoldDetails;if(!api)return null;
   if(r.kind==='sale')return {...api.model(r.oid,r.hold_detail||{},true),snapshot:checked};
@@ -54,7 +92,9 @@
  }
  function browse(el){
   const {entries}=el.wh,sel=key=>el.querySelector('.wh-'+key),mo=sel('month').value,kind=sel('kind').value,w=sel('week').value,find=sel('find').value.trim().toLowerCase();
-  const scope=entries.filter(r=>(!mo||month(r)===mo)&&(!w||week(r.date)===w)&&(!kind||(kind==='reserves'?r.kind!=='sale':r.kind===kind))&&(!find||[r.oid,r.ref,r.item_context?.name,r.item_context?.user,r.item_context?.ship_name,...(r.item_context?.items||[]).flatMap(i=>[i.title,i.number])].some(x=>x?.toLowerCase().includes(find))));
+  const filter=el.wh.creditFilter,banner=sel('credit-filter');banner.hidden=!filter;
+  if(filter)banner.innerHTML='<span>Original sale credits · '+h(filter.day?dayLabel(filter.day):filter.month?monthLabel(filter.month):'All purchase dates')+(filter.reason?' · '+h(reasonLabel(filter.reason)):'')+'</span><button type="button" class="wh-credit-clear">Clear date / reason selection</button>';
+  const scope=entries.filter(r=>(!filter||r.kind==='sale'&&(!filter.month||month(r)===filter.month)&&(!filter.day||purchaseDay(r)===filter.day)&&(!filter.reason||creditReason(r)===filter.reason))&&(!mo||month(r)===mo)&&(!w||week(r.date)===w)&&(!kind||(kind==='reserves'?r.kind!=='sale':r.kind===kind))&&(!find||[r.oid,r.ref,r.item_context?.name,r.item_context?.user,r.item_context?.ship_name,...(r.item_context?.items||[]).flatMap(i=>[i.title,i.number])].some(x=>x?.toLowerCase().includes(find))));
   const reason=sel('reason').value||'all';
   if(window.OGEbayHoldDetails){sel('reason').innerHTML=window.OGEbayHoldDetails.options(scope.map(r=>r.holdInfo),reason,'hold entries');sel('reason').value=reason;}
   const byReason=scope.filter(r=>!window.OGEbayHoldDetails||window.OGEbayHoldDetails.matches(r.holdInfo,reason));
@@ -75,21 +115,32 @@
   if(!snap){el.hidden=true;el.wh=null;el.replaceChildren();return;}
   const selected=data.month.slice(0,7),fresh=!el.wh,entries=(Array.isArray(snap.entries)?snap.entries:[]).map(r=>({...r,holdInfo:holdInfo(r,snap.verified_at)}));
   if(fresh){
-   el.innerHTML='<header><small>EBAY PAYMENTS · ALL PURCHASE MONTHS</small><h3>Where the money on hold comes from</h3></header><div class="wh-account"></div><div class="wh-why"></div><div class="wh-cohorts"></div>'+
+   el.innerHTML='<header><small>EBAY PAYMENTS · ALL PURCHASE MONTHS</small><h3>Where the money on hold comes from</h3></header><div class="wh-account"></div><div class="wh-why"></div>'+
+   '<section class="wh-credit-summary" aria-label="Original sale credits by purchase date" hidden><div class="wh-credit-heading"><div><h4>Original sale credits by purchase date</h4><p class="wh-credit-total"></p></div><label>Purchase month<select class="wh-credit-month"></select></label></div><p class="wh-credit-checked"></p><p>Select a date or reason to inspect its credits. Each credit is counted once; multiple reasons stay together.</p><div class="wh-credit-reasons" aria-label="Totals by hold reason"></div><p class="wh-credit-release-note wh-attention" hidden>Some newer payment records report released funds. These remain in the verified held total until the Seller Hub list is refreshed.</p><table class="wh-credit-table"><caption>Held sale credits by purchase date and reason</caption><thead><tr><th scope="col">Purchase date · Eastern</th><th scope="col">Credits</th><th scope="col">Amount on hold</th><th scope="col">Hold reasons · count and amount</th></tr></thead><tbody class="wh-credit-body"></tbody><tfoot class="wh-credit-foot"></tfoot></table><p class="wh-credit-empty" hidden>No original sale credits on hold for these purchase dates.</p><div class="wh-credit-nav"><button type="button" class="wh-credit-prev">Previous dates</button><span class="wh-credit-position"></span><button type="button" class="wh-credit-next">Next dates</button></div></section><div class="wh-cohorts"></div>'+
    '<details class="wh-browser"><summary>Inspect held orders and eBay evidence</summary><div class="ws-controls"><label>Purchase month<select class="wh-month"></select></label><label>Week of purchase<select class="wh-week"></select></label><label>Hold type<select class="wh-kind">'+option('','All hold types')+option('reserves','All separate holds')+Object.entries(kinds).map(([k,v])=>option(k,v)).join('')+'</select></label><label>Hold reason<select class="wh-reason"><option value="all">All hold entries</option></select></label><label>Estimated release date<select class="wh-date"><option value="all">All estimated dates</option></select></label><label>Find an entry<input class="wh-find" type="search" placeholder="Order, return, buyer or item"></label></div>'+(review()?.controls||'')+'<div class="whr-reminder-list"></div><div class="wh-list"></div><div class="wh-nav"><button class="wh-prev" type="button">Previous</button> <span class="wh-position"></span> <button class="wh-next" type="button">Next</button></div></details>'+
    '<footer><button type="button" class="wh-sync">Refresh hold details from eBay</button> '+link(url,'View live holds in Seller Hub')+'<p class="wh-msg" role="status"></p></footer>'+(review()?.dialogHTML||'');
+   el.querySelector('.wh-list').insertAdjacentHTML('beforebegin','<div class="wh-credit-filter" role="status" hidden></div>');
    el.wh={page:0};el.onclick=e=>{
     const b=e.target.closest('button');if(!b)return;
     if(review()?.click(el,b,browse))return;
     if(b.matches('.wh-sync')){refresh(el,el.wh);return;}
+    if(b.matches('.wh-credit-prev,.wh-credit-next')){el.wh.creditPage+=b.matches('.wh-credit-next')?1:-1;creditSummary(el);return;}
+    if(b.hasAttribute('data-wh-credit-day')){
+     el.wh.creditFilter={day:b.dataset.whCreditDay,reason:b.dataset.whCreditReason,month:el.wh.creditMonth||''};el.wh.page=0;
+     for(const [key,value] of [['kind','sale'],['month',el.wh.creditMonth||''],['week',''],['reason','all'],['date','all'],['find','']])el.querySelector('.wh-'+key).value=value;
+     el.querySelector('.wh-browser').open=true;browse(el);el.querySelector('.wh-credit-filter').scrollIntoView({block:'nearest'});return;
+    }
+    if(b.matches('.wh-credit-clear')){el.wh.creditFilter=null;el.wh.page=0;browse(el);return;}
     if(b.hasAttribute('data-wh-kind')||b.hasAttribute('data-wh-month')){
+     el.wh.creditFilter=null;
      el.querySelector('.wh-kind').value=b.dataset.whKind||'';el.querySelector('.wh-month').value=b.dataset.whMonth||'';
      el.querySelector('.wh-week').value='';el.querySelector('.wh-reason').value='all';el.querySelector('.wh-date').value='all';el.querySelector('.wh-find').value='';el.querySelector('.wh-browser').open=true;el.wh.page=0;el.querySelector('.wh-browser').scrollIntoView({block:'nearest'});
     }else if(b.matches('.wh-prev,.wh-next'))el.wh.page+=b.matches('.wh-next')?1:-1;else return;
     browse(el);
-   };el.onchange=e=>{if(e.target.matches('.ws-controls select')){el.wh.page=0;if(e.target.matches('.wh-month'))el.querySelector('.wh-week').value='';if(e.target.matches('.wh-reason'))el.querySelector('.wh-date').value='all';browse(el);}};el.oninput=e=>{if(e.target.matches('.wh-find')){el.wh.page=0;browse(el);}};
+   };el.onchange=e=>{if(e.target.matches('.wh-credit-month')){el.wh.creditMonth=e.target.value;el.wh.creditPage=0;creditSummary(el);return;}if(e.target.matches('.ws-controls select')){el.wh.page=0;el.wh.creditFilter=null;if(e.target.matches('.wh-month'))el.querySelector('.wh-week').value='';if(e.target.matches('.wh-reason'))el.querySelector('.wh-date').value='all';browse(el);}};el.oninput=e=>{if(e.target.matches('.wh-find')){el.wh.page=0;browse(el);}};
   }
-  el.hidden=false;Object.assign(el.wh,{entries,client,load,reviews:data.ebay_hold_work,reminders:data.ebay_hold_reminders});
+  el.hidden=false;Object.assign(el.wh,{entries,client,load,verified:Array.isArray(snap.entries)?snap.verified_at:null,reviews:data.ebay_hold_work,reminders:data.ebay_hold_reminders});
+  creditSummary(el);
   const has=!!snap.verified_at&&Array.isArray(snap.entries),apiNew=snap.api_at&&(!has||Date.parse(snap.api_at)>Date.parse(snap.verified_at)),control=apiNew?snap.api_cents:snap.ledger_cents;
   const gap=has&&control!=null?control-snap.ledger_cents:null,stale=has&&Date.now()-Date.parse(snap.verified_at)>6*3600000;
   const headline=has?snap.ledger_cents:control;
