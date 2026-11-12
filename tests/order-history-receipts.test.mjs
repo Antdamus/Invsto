@@ -95,7 +95,7 @@ test('history without screenshots offers the eBay order fallback and rejects ano
   await expect(page.locator('.video-receipt-dialog')).toBeVisible();
   await expect(page.locator('.video-receipt-lookup')).toContainText('No saved');
   await expect(page.locator('.video-receipt-direct')).toBeHidden();
-  const [popup] = await Promise.all([page.waitForEvent('popup'), page.getByRole('link', {name: 'Open eBay order', exact: true}).click()]);
+  const [popup] = await Promise.all([page.waitForEvent('popup'), page.locator('.video-receipt-dialog').getByRole('link', {name: 'Open eBay order', exact: true}).click()]);
   await popup.waitForLoadState();
   assert.equal(popup.url(), 'https://www.ebay.com/mesh/ord/details?orderid=11-22222-33333');
   await popup.close();
@@ -108,4 +108,33 @@ test('desktop history retains the receipt options and correct saved video link',
   await expect(page.locator('.video-receipt-direct')).toHaveAttribute('href', receiptUrl);
   await page.getByRole('button', {name: 'Close video receipt', exact: true}).click();
   await expect(page.locator('.video-receipt-dialog')).toHaveCount(0);
+});
+
+test('phone history shows reconciled earnings and opens the order directly from its line', async t => {
+  const page = await openHistory(t, {width: 320, role: 'admin'});
+  await page.evaluate(() => {
+    state.historyFinancialsStatus = 'ready';
+    state.historyFinancials.set('11-22222-33333', {line_ids: ['receipt-line'], original: 145, cancelled: 0,
+      refunded: 25, net_sales: 120, earnings: 102, sales_complete: true, earnings_complete: true});
+    applyFilters();
+  });
+  await expect(page.locator('#summary-gross')).toHaveText('$120.00');
+  await expect(page.locator('#summary-payout')).toHaveText('$102.00');
+  await expect(page.locator('#summary-gross-detail')).toContainText('refunded $25.00');
+  await expect(page.locator('.history-money-row')).toContainText('Order earnings $102.00');
+  const orderLink = page.locator('.history-direct-order-link');
+  await expect(orderLink).toBeVisible();
+  assert.ok((await orderLink.boundingBox()).height >= 44);
+  const [popup] = await Promise.all([page.waitForEvent('popup'), orderLink.click()]);
+  await popup.waitForLoadState(); assert.equal(popup.url(), 'https://www.ebay.com/mesh/ord/details?orderid=11-22222-33333');
+  await popup.close();
+  await expect(page.locator('.video-receipt-dialog')).toHaveCount(0);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.locator('#phone-workspace-tools').click();
+  await page.locator('#summary-payout').scrollIntoViewIfNeeded();
+  await page.screenshot({path: 'test-results/order-history-financials-phone.png'});
+  await page.evaluate(() => {state.historyFinancials.clear(); state.historyFinancialsStatus = 'error'; applyFilters();});
+  await expect(page.locator('#summary-payout')).toHaveText('Needs verification');
+  await expect(page.locator('#summary-payout-detail')).toContainText('unavailable');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 });

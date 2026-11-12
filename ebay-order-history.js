@@ -2,6 +2,8 @@ const state = {
   user: null,
   employee: null,
   lines: [],
+  historyFinancials: new Map(),
+  historyFinancialsStatus: "idle",
   adminEvents: [],
   revertEvents: [],
   labelEvents: [],
@@ -82,6 +84,7 @@ const state = {
 let evidencePhotoViewerReturnFocus = null;
 let historyTargetedSearchTimer = null;
 let historyNextScanReadyTimer = null;
+let historyLoadVersion = 0;
 let proofTrailRenderVersion = 0;
 let proofTrailPhotoObserver = null;
 const evidencePhotoViewerState = {
@@ -814,6 +817,84 @@ function getLineGross(line) {
   const total = Number(line.total_price || 0);
   if (total > 0) return total;
   return Number(line.sold_for || 0) * Math.max(Number(line.fulfilled_quantity || line.quantity || 1), 1);
+}
+
+async function fetchHistoryFinancials(lines) {
+  if (!isAdminUser() || isReturnsWorkbenchPage()) return { records: new Map(), status: "idle" };
+  const orders = [...new Set(lines.map(line => getOrderFromLine(line).order_number).filter(Boolean))];
+  if (!orders.length) return { records: new Map(), status: "ready" };
+  const records = new Map();
+  let next = 0, failures = 0;
+  const read = async () => {
+    while (next < orders.length) {
+      const batch = orders.slice(next, next + 25);
+      next += 25;
+      try {
+        const { data, error } = await supabase.rpc("get_order_history_financials", { _orders: batch });
+        if (error || !Array.isArray(data)) throw error || new Error("Missing financial reconciliation");
+        for (const record of data) records.set(record.order_number, record);
+      } catch (error) {
+        failures++;
+        console.warn("Order history financial verification unavailable:", error);
+      }
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(3, Math.ceil(orders.length / 25))}, read));
+  return { records, status: failures ? records.size ? "partial" : "error" : "ready" };
+}
+
+function getHistoryFinancialTotals(lines, records = state.historyFinancials) {
+  const orders = new Map();
+  for (const line of lines) {
+    const number = getOrderFromLine(line).order_number || line.order_id || line.id;
+    if (!orders.has(number)) orders.set(number, new Set());
+    orders.get(number).add(line.id);
+  }
+  const totals = { orders: orders.size, original: 0, cancelled: 0, refunded: 0, sales: 0,
+    earnings: 0, salesKnown: 0, earningsKnown: 0, partialOrders: 0 };
+  const money = value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+  for (const [number, visibleIds] of orders) {
+    const record = records.get(number);
+    if (!record || !Array.isArray(record.line_ids) || !record.line_ids.length) continue;
+    const allIds = new Set(record.line_ids);
+    // Never repeat order earnings on each line or guess an allocation when
+    // search/status/date filters show only some of a multi-line order.
+    if (allIds.size !== visibleIds.size || [...allIds].some(id => !visibleIds.has(id))) {
+      totals.partialOrders++;
+      continue;
+    }
+    if (record.sales_complete === true && [record.net_sales, record.original, record.cancelled, record.refunded].every(money)) {
+      totals.salesKnown++;
+      totals.sales += Number(record.net_sales);
+      totals.original += Number(record.original);
+      totals.cancelled += Number(record.cancelled);
+      totals.refunded += Number(record.refunded);
+    }
+    if (money(record.earnings)) {
+      if (record.earnings_complete === true) {
+        totals.earningsKnown++;
+        totals.earnings += Number(record.earnings);
+      } else {
+        // Match the dashboard: preserve known losses while withholding an
+        // unverified positive balance. Zero/negative is never "missing".
+        totals.earnings += Math.min(0, Number(record.earnings));
+      }
+    }
+  }
+  for (const key of ["original", "cancelled", "refunded", "sales", "earnings"]) totals[key] = roundMoney(totals[key]);
+  return totals;
+}
+
+function historyFinancialValue(totals, kind) {
+  const known = kind === "sales" ? totals.salesKnown : totals.earningsKnown;
+  return totals.orders && !known && totals[kind] === 0 ? "Needs verification" : formatMoney(totals[kind]);
+}
+
+function historyFinancialCoverage(totals, kind) {
+  const known = kind === "sales" ? totals.salesKnown : totals.earningsKnown;
+  const missing = totals.orders - known;
+  return missing ? `${known} of ${totals.orders} orders verified · ${missing} need verification${totals.partialOrders ? " (includes partially shown orders)" : ""}`
+    : `${known} order${known === 1 ? "" : "s"} verified`;
 }
 
 function roundMoney(value) {
@@ -2482,7 +2563,12 @@ async function fetchReturnCasesForOrders(orderIds = []) {
 }
 
 async function loadOrderHistory() {
+  const loadVersion = ++historyLoadVersion;
   state.historyLoaded = false;
+  state.historyFinancials = new Map();
+  state.historyFinancialsStatus = "loading";
+  for (const id of ["summary-gross", "summary-payout"]) if ($(id)) $(id).textContent = "Checking…";
+  for (const id of ["summary-gross-detail", "summary-payout-detail"]) if ($(id)) $(id).textContent = "";
   const list = $("history-list");
   const eventList = $("event-list");
   if (list) list.innerHTML = `<div class="history-empty">Loading order history...</div>`;
@@ -2544,10 +2630,12 @@ async function loadOrderHistory() {
     labelEventsQuery,
     returnEventsQuery,
   ]);
+  if (loadVersion !== historyLoadVersion) return;
 
   if (linesResult.error) {
     console.error("Failed to load eBay order history:", linesResult.error);
     if (list) list.innerHTML = `<div class="history-empty">Could not load order history.</div>`;
+    for (const id of ["summary-gross", "summary-payout"]) if ($(id)) $(id).textContent = "Unavailable";
     return;
   }
 
@@ -2578,6 +2666,7 @@ async function loadOrderHistory() {
   }
 
   const closedLines = (linesResult.data || []).map(normalizeLine);
+  const financialsPromise = fetchHistoryFinancials(closedLines);
   const closedLineIds = closedLines.map((line) => line.id).filter(Boolean);
   const closedOrderIds = [...new Set(closedLines.map((line) => line.order_id).filter(Boolean))];
   state.historySearchRelatedLineIds = new Set(linesResult.relatedLineIds || []);
@@ -2643,6 +2732,8 @@ async function loadOrderHistory() {
     }
   }
 
+  const financials = await financialsPromise;
+  if (loadVersion !== historyLoadVersion) return;
   state.adminEvents = adminEventsResult.data || [];
   state.revertEvents = revertEventsResult.data || [];
   state.labelEvents = labelEventsResult.error ? [] : labelEventsResult.data || [];
@@ -2660,6 +2751,8 @@ async function loadOrderHistory() {
       .flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
   );
   state.lines = closedLines;
+  state.historyFinancials = financials.records;
+  state.historyFinancialsStatus = financials.status;
   state.historyLoadedTargetedSearch = targetedRangeSearch;
   state.historyLoadedAllDatesSearch = searchAllDates;
   state.historyLoaded = true;
@@ -4791,14 +4884,7 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   const visibleEvents = getUniqueEventsFromGroups(groups);
   const visibleOrders = getUniqueOrdersFromLines(visibleLines);
   const status = $("history-status")?.value || "all";
-  const gross = visibleLines.reduce((sum, line) => sum + getLineGross(line), 0);
-  const payout = visibleLines.reduce((sum, line) => sum + getLinePayout(line), 0);
-  const payoutSourceCounts = visibleLines.reduce((counts, line) => {
-    const source = getLinePayoutSource(line);
-    counts[source] = (counts[source] || 0) + 1;
-    return counts;
-  }, {});
-  const estimatedPayoutLines = (payoutSourceCounts.deduction_estimate || 0) + (payoutSourceCounts.gross_estimate || 0);
+  const financials = getHistoryFinancialTotals(visibleLines);
   const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
   const closeouts = visibleLines.filter(isAdminCloseoutLine).length;
   const closeoutProofDetail = closeoutEvents.length
@@ -4824,13 +4910,17 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   setSummaryCardLabel("summary-shipped-lines", primaryLabels[1]);
   $("summary-shipped-orders").textContent = String(visibleOrders.length || groups.length);
   $("summary-shipped-lines").textContent = String(visibleLines.length);
-  $("summary-gross").textContent = formatMoney(gross);
-  $("summary-payout").textContent = formatMoney(payout);
+  setSummaryCardLabel("summary-gross", financials.salesKnown < financials.orders ? "Net Item Sales · Verified Subtotal" : "Net Item Sales");
+  setSummaryCardLabel("summary-payout", financials.earningsKnown < financials.orders ? "Order Earnings · Verified Subtotal" : "Order Earnings");
+  $("summary-gross").textContent = historyFinancialValue(financials, "sales");
+  $("summary-payout").textContent = historyFinancialValue(financials, "earnings");
+  const salesDetail = $("summary-gross-detail");
+  if (salesDetail) salesDetail.textContent = `Original items ${formatMoney(financials.original)} − canceled ${formatMoney(financials.cancelled)} − refunded ${formatMoney(financials.refunded)}. ${historyFinancialCoverage(financials, "sales")}. Tax and shipping excluded.`;
   const payoutDetail = $("summary-payout-detail");
   if (payoutDetail) {
-    payoutDetail.textContent = estimatedPayoutLines
-      ? `${estimatedPayoutLines.toLocaleString()} line${estimatedPayoutLines === 1 ? "" : "s"} estimated from gross`
-      : "";
+    payoutDetail.textContent = state.historyFinancialsStatus === "error"
+      ? "Financial verification unavailable. Refresh to retry."
+      : `${historyFinancialCoverage(financials, "earnings")}. After recorded refunds, eBay fees and eBay postage. Known losses are included. Before financing repayments; see dashboard cash reconciliation for bank payouts.${state.historyFinancialsStatus === "partial" ? " Some records could not load; refresh to retry." : ""}`;
   }
   $("summary-admin-closeouts").textContent = String(closeouts);
   const closeoutDetail = $("summary-admin-closeouts-detail");
@@ -6312,6 +6402,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       taskSummary,
     });
     const groupApiSourceLabel = unique(group.lines.map(getEbayHistoryApiSourceLabel).filter(Boolean))[0] || "";
+    const groupFinancials = getHistoryFinancialTotals(group.lines);
     const completedByText = groupApiSourceLabel && !workers.length
       ? `Source: ${groupApiSourceLabel}`
       : `Completed by: ${workers.join(", ") || "Unknown"}`;
@@ -6345,10 +6436,11 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 <div class="history-line-order-number${lineOrderNumber ? "" : " is-missing"}">
                   <span>Order number</span>
                   <strong>${escapeHtml(lineOrderNumber || "Not available")}</strong>
+                  ${lineOrderNumber ? `<a class="history-direct-order-link" href="${escapeHtml(buildEbayOrderDetailsUrl(lineOrderNumber))}" target="_blank" rel="noopener noreferrer">Open eBay order ↗</a>` : ""}
                 </div>
                 <div class="history-line-title-row">
                   <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-                  <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
+                  <b title="Original line amount before refunds and deductions">Original ${escapeHtml(formatMoney(getLineGross(line)))}</b>
                 </div>
                 <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
                 <div class="history-worker-row">
@@ -6425,8 +6517,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         </div>
         <div class="history-order-summary-actions">
           <div class="history-money-row">
-            <span>Gross ${escapeHtml(formatMoney(group.gross))}</span>
-            <span>Payout ${escapeHtml(formatMoney(group.payout))}</span>
+            <span title="${escapeHtml(historyFinancialCoverage(groupFinancials, "sales"))}">Net items ${escapeHtml(historyFinancialValue(groupFinancials, "sales"))}</span>
+            <span title="${escapeHtml(historyFinancialCoverage(groupFinancials, "earnings"))}">Order earnings ${escapeHtml(historyFinancialValue(groupFinancials, "earnings"))}</span>
+            ${groupFinancials.salesKnown < groupFinancials.orders || groupFinancials.earningsKnown < groupFinancials.orders ? '<small>Partial totals · financial verification needed</small>' : ""}
           </div>
           <div class="history-order-badge-row">${summaryBadges}</div>
           <div class="history-order-summary-buttons">

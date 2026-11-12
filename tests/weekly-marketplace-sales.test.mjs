@@ -202,7 +202,37 @@ test('weekly report revises the original ET week, separates cancellation and ref
   const posted=(await one("select get_weekly_sales_for_market('2025-06-01','ebay') r")).r.ebay_posted_orders;
   assert.deepEqual(posted.map(p=>p.id),['e2','only-posted']);
   assert.equal((await one("select get_weekly_sales_for_market('2025-06-01','whatnot') r")).r.ebay_posted_orders,null);
-  await db.exec("update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
+  // Order history uses the identical dashboard calculation, regardless of
+  // completion dates, without allocating whole-order earnings to each line.
+  await db.exec("alter table ebay_orders add column seller_collected_tax numeric default 0");
+  const dashboardBeforeScope=(await report()).rows;
+  await db.exec(await readFile(new URL('../supabase/migrations/20261112010000_order_history_financials.sql',import.meta.url),'utf8'));
+  assert.deepEqual((await report()).rows,dashboardBeforeScope);
+  const history = async numbers => (await one('select get_order_history_financials($1) r',[numbers])).r;
+  for (const [id,pay,earnings,refunds] of [['hp','PAID',95,0],['hz','PAID',0,0],['hr','FULLY_REFUNDED',-3,110],['hc','PAID',0,100]]) {
+   const raw={orderPaymentStatus:pay,orderCancelStatus:id==='hc'?'CANCELED':undefined,
+    order:{pricingSummary:{total:{currency:'USD',value:'110'},deliveryCost:{currency:'USD',value:'10'}}}};
+   await db.query('insert into ebay_orders(id,order_number,status,sale_date,paid_on_date,total_price,raw_payload) values($1,$1,$2,$3,now(),117,$4)',
+    [id,id==='hc'?'cancelled':'fulfilled','2025-08-01T10:00:00Z',JSON.stringify(raw)]);
+   await db.query('insert into ebay_order_lines(id,order_id,line_status,quantity,sold_for,raw_payload) values($1,$2,$3,1,117,$4)',
+    [id+'-line',id,id==='hc'?'cancelled':'fulfilled',JSON.stringify({line:{lineItemCost:{currency:'USD',value:'100'}}})]);
+   await db.query('insert into weekly_ebay_order_earnings(order_number,purchased_at,earnings,refunds,checked_at) values($1,now(),$2,$3,now())',[id,earnings,refunds]);
+  }
+  let h=await history(['hp','hz','hr','hc','hp']);assert.equal(h.length,4);
+  const byId=id=>h.find(x=>x.order_number===id);
+  assert.deepEqual([byId('hp').original,byId('hp').net_sales,byId('hp').earnings],[100,100,95]);
+  assert.equal(byId('hz').earnings,0);assert.equal(byId('hz').earnings_complete,true);
+  assert.deepEqual([byId('hr').net_sales,byId('hr').refunded,byId('hr').earnings],[0,100,-3]);
+  assert.deepEqual([byId('hc').net_sales,byId('hc').cancelled,byId('hc').earnings],[0,100,0]);
+  assert.deepEqual(byId('hp').line_ids,['hp-line']);
+  await db.exec("update ebay_orders set seller_collected_tax=6 where id='hp'");
+  assert.equal((await history(['hp']))[0].earnings_complete,false);
+  assert.equal((await history(['hp']))[0].earnings,null);
+  assert.deepEqual(await history([]),[]);
+  await assert.rejects(history(Array(5001).fill('hp')),/Too many orders/);
+  await db.exec("update employees set role='employee';set role authenticated");await assert.rejects(history(['hp']),/admin access/i);
+  await db.exec("reset role;update employees set active=false;set role authenticated");await assert.rejects(report(),/admin access/i);
+  await assert.rejects(history(['hp']),/admin access/i);
   await assert.rejects(saveCash(6000),/admin access/i);
  }finally{await db.close();}
 });

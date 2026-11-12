@@ -8,7 +8,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="ebay-order-history.css?v=20261107-purchase-time" />
+  <link rel="stylesheet" href="ebay-order-history.css?v=20261112-financials" />
   <link rel="stylesheet" href="ebay-buyer-insights.css?v=20261029-report-2" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -267,12 +267,13 @@
             <strong id="summary-shipped-lines">0</strong>
           </div>
           <div class="history-summary-card" data-admin-only="true">
-            <span>Gross Total</span>
-            <strong id="summary-gross">$0.00</strong>
+            <span>Net Item Sales</span>
+            <strong id="summary-gross">Checking…</strong>
+            <small id="summary-gross-detail"></small>
           </div>
           <div class="history-summary-card" data-admin-only="true">
-            <span>Estimated Payout</span>
-            <strong id="summary-payout">$0.00</strong>
+            <span>Order Earnings</span>
+            <strong id="summary-payout">Checking…</strong>
             <small id="summary-payout-detail"></small>
           </div>
           <div class="history-summary-card">
@@ -666,6 +667,6 @@
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
   <script src="order-tracking-search.js?v=20261030"></script>
   <script src="customer-followups.js?v=20261108-history"></script>
-<script src="ebay-order-history.js?v=20261108-care"></script>
+  <script src="ebay-order-history.js?v=20261112-financials"></script>
 </body>
 </html>

@@ -255,6 +255,7 @@ textarea {
   color: var(--history-text);
   font-size: clamp(1.4rem, 3vw, 2rem);
   line-height: 1;
+  overflow-wrap: anywhere;
 }
 
 .history-summary-card small {
@@ -1372,6 +1373,23 @@ a.history-line-finance-pill:hover {
 .history-line-order-number.is-missing {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.035);
+}
+
+.history-direct-order-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: #ffe4ad;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.history-direct-order-link:focus-visible {
+  outline: 2px solid #ffe4ad;
+  outline-offset: 3px;
+  border-radius: 3px;
 }
 
 .history-line-title-row strong {
