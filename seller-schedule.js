@@ -41,6 +41,7 @@ function showCard(row, agenda = false, day = null) {
     <span class="ss-card-time">${agenda ? `<span class="ss-card-platform">${escapeHtml(showPlatforms[row.channel] || row.channel)}</span>` : ""}${escapeHtml(timeLabel)}</span>
     <span class="ss-card-person"><span class="ss-avatar" aria-hidden="true">${escapeHtml(showInitials(row.seller_name))}</span>${escapeHtml(row.seller_name || "Seller")}</span>
     <span class="ss-card-place">${escapeHtml(row.store_name || "Studio")}</span>
+    ${row.metadata?.recurrence_id ? '<span class="ss-card-status">↻ Repeats weekly</span>' : ''}
     ${row.notes ? `<span class="ss-card-note">${escapeHtml(row.notes)}</span>` : ""}
     ${pending ? `<span class="ss-card-status"><span class="ss-dot ss-pending"></span>${row.status === "edit_pending" ? "Change requested" : "Cancellation requested"}</span>` : ""}
     ${["checked_in", "in_progress", "completed", "no_show"].includes(row.status) ? `<span class="ss-card-status">${escapeHtml(row.status.replace(/_/g, " "))}</span>` : ""}

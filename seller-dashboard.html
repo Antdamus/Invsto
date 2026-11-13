@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#183d35" />
   <title>Show Schedule · OG Jewelry</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-show-studio1" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-recurring-shows1" />
 
 </head>
 <body>
@@ -186,6 +186,7 @@
       <label>Show notes<textarea id="booking-note" rows="3" maxlength="2000" placeholder="The theme, the collection, or something the team should know…"></textarea></label>
       <div id="booking-availability" class="seller-availability" role="status">Choose a start and end time.</div>
       <div id="seller-form-status" class="seller-status" role="status" aria-live="polite"></div>
+      <div id="booking-repeat-info" class="ss-form-hint hidden">Repeats weekly. Changes here affect this show only. <button id="booking-stop-repeat" class="ss-quiet-button hidden" type="button">Stop repeating</button></div>
       <div class="seller-form-actions"><button id="booking-cancel-shift" class="seller-danger hidden" type="button">Cancel show</button><button id="seller-clear-edit" class="ss-quiet-button hidden" type="button">New show</button><button id="booking-submit" class="seller-submit" type="submit">Schedule show</button></div>
     </form>
   </dialog>
@@ -200,7 +201,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js?v=20261113-show-studio1"></script>
-  <script src="seller-schedule.js?v=20261113-show-studio1"></script>
+  <script src="seller-dashboard.js?v=20261113-recurring-shows1"></script>
+  <script src="seller-schedule.js?v=20261113-recurring-shows1"></script>
 </body>
 </html>

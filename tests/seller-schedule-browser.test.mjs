@@ -18,12 +18,13 @@ window.testRows=[
  {shift_id:'s6',seller_employee_id:'seller-otello',seller_name:'Otello',channel:'ebay',start_at:at(4,20),end_at:at(5,1),notes:'Friday night, in good company'},
  {shift_id:'s7',seller_employee_id:'seller-sydney',seller_name:'Sydney',channel:'whatnot',start_at:at(5,13),end_at:at(5,16),notes:'Weekend treasures'},
  {shift_id:'s8',seller_employee_id:'seller-manny',seller_name:'Manny',channel:'tiktok',start_at:at(6,16),end_at:at(6,19),notes:'The Sunday selection'},
-].map(r=>({...r,row_type:'shift',store_id:'store-1',store_name:'Main studio',status:'booked',is_blocked:false,is_mine:false,can_change_without_approval:true}));
+].map(r=>({...r,metadata:['s1','s3'].includes(r.shift_id)?{recurrence_id:'repeat-1'}:{},row_type:'shift',store_id:'store-1',store_name:'Main studio',status:'booked',is_blocked:false,is_mine:false,can_change_without_approval:true}));
 window.testSellers=[testEmployee,{id:'seller-otello',display_name:'Otello'},{id:'seller-sydney',display_name:'Sydney'},{id:'seller-manny',display_name:'Manny'}];
 window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmployee.user_id}}}}),signOut:async()=>({})},from(table){
  const q={select(){return q},eq(){return q},in(){return q},order(){return q},limit(){return q},update(){return q},maybeSingle:async()=>({data:testEmployee}),then(resolve){resolve({data:table==='store_locations'?[{id:'store-1',name:'Main studio',active:true}]:[]})}};return q;
 },rpc:async(name,args)=>{
  window.testCalls.push({name,args});
+ if(name==='current_user_can_use_seller_schedule')return {data:true};
  if(name==='get_seller_schedule_month')return window.testFailLoad?{error:{message:'Connection unavailable'}}:{data:window.testRows};
  if(name==='get_live_sale_seller_directory')return {data:window.testSellers};
  if(name==='get_seller_show_sms_readiness')return {data:window.testSellers.map(s=>({seller_employee_id:s.id,sms_ready:s.id!=='seller-otello',phone_last_four:s.id==='seller-sydney'?'7356':'1234',reason:s.id==='seller-otello'?'missing_phone':'ready'}))};
@@ -34,18 +35,19 @@ window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmploye
  }
  if(name==='request_seller_sale_shift_edit'){const row=window.testRows.find(r=>r.shift_id===args._shift_id);Object.assign(row,{channel:args._channel,start_at:args._start_at,end_at:args._end_at,notes:args._reason});return {data:{status:'updated'}};}
  if(name==='cancel_seller_sale_shift'){window.testRows=window.testRows.filter(r=>r.shift_id!==args._shift_id);return {data:{status:'cancelled'}};}
+ if(name==='admin_stop_seller_show_recurrence'){window.testRows=window.testRows.filter(r=>r.metadata?.recurrence_id!==args._recurrence_id);return {data:{status:'stopped',cancelled_shows:2}};}
  return {data:[]};
 }};
 `;
 
-async function openPage(browser,width){
+async function openPage(browser,width,employeeHost=false){
   const page=await browser.newPage({viewport:{width,height:width<600?844:1060},timezoneId:'America/New_York'});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',async route=>{
     const url=new URL(route.request().url());
     if(url.hostname!=='schedule.test')return route.fulfill({body:'',contentType:url.pathname.endsWith('.css')?'text/css':'text/javascript'});
     const file=url.pathname.slice(1)||'seller-dashboard.html';
-    if(file==='initSupabase.js')return route.fulfill({body:mock,contentType:'text/javascript'});
+    if(file==='initSupabase.js')return route.fulfill({body:mock+(employeeHost?"testEmployee.role='employee';testEmployee.id='seller-sydney';":''),contentType:'text/javascript'});
     if(file==='task-notifications.js')return route.fulfill({body:'',contentType:'text/javascript'});
     try{await route.fulfill({body:await readFile(new URL(file,root)),contentType:file.endsWith('.html')?'text/html':file.endsWith('.css')?'text/css':'text/javascript'});}catch{await route.fulfill({status:404,body:''});}
   });
@@ -152,6 +154,42 @@ test('seller permissions, conflicts across platforms, and load failure remain vi
     await page.getByText(/Could not load the schedule. Connection unavailable/).waitFor();
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
+});
+
+test('assigned employee host can follow the schedule link on a phone',async()=>{
+ const browser=await chromium.launch();try{
+   const {page,errors}=await openPage(browser,390,true);
+   assert.equal(await page.locator('#seller-management-panel').isVisible(),false);
+   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.name==='current_user_can_use_seller_schedule').length),1);
+   assert.equal(new URL(page.url()).pathname,'/seller-dashboard.html');
+   assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+test('phone recurring show distinguishes one cancellation from stopping its series',async()=>{
+ const browser=await chromium.launch();try{
+   const {page,errors}=await openPage(browser,360);
+   await page.locator('[data-view="agenda"]').click();
+   const card=page.locator('#seller-calendar [data-show-id="s1"]');
+   assert.match(await card.innerText(),/Repeats weekly/);
+   await card.click();
+   assert.match(await page.locator('#booking-repeat-info').innerText(),/this show only/);
+   await page.locator('#booking-stop-repeat').click();
+   assert.match(await page.locator('#ss-cancel-caption').innerText(),/All future shows/);
+   await page.locator('#ss-cancel-keep').click();
+   await page.locator('#booking-cancel-shift').click();
+   assert.equal(await page.locator('#ss-cancel-title').innerText(),'Cancel this show?');
+   await page.locator('#ss-cancel-keep').click();
+   await page.locator('#booking-stop-repeat').click();
+   await page.screenshot({path:new URL('../output/show-studio/phone-stop-repeating.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1')});
+   await page.locator('#ss-cancel-submit').click();
+   await page.waitForFunction(()=>document.querySelector('#schedule-status').textContent.includes('Repeating time slot stopped'));
+   assert.equal(await page.locator('#seller-calendar [data-show-id="s1"]').count(),0);
+   assert.equal(await page.locator('#seller-calendar [data-show-id="s3"]').count(),0);
+   assert.equal(await page.locator('#seller-calendar [data-show-id="s4"]').count(),1);
+   assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.name==='admin_stop_seller_show_recurrence').at(-1).args._recurrence_id),'repeat-1');
+   assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
 });
 
 test('WebKit phone layout: date selection, full-screen editor, and keyboard escape',async()=>{

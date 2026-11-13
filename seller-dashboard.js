@@ -246,7 +246,13 @@ async function loadCurrentUser() {
   }
 
   const role = String(employee.role || "").toLowerCase();
-  if (!["seller", "admin", "manager"].includes(role)) {
+  let assignedHost = false;
+  if (role === "employee") {
+    const { data, error: accessError } = await window.supabase.rpc("current_user_can_use_seller_schedule");
+    if (accessError) throw accessError;
+    assignedHost = data === true;
+  }
+  if (!["seller", "admin", "manager"].includes(role) && !assignedHost) {
     window.location.href = role === "employee" ? "worker-dashboard.html" : "index.html";
     return false;
   }
@@ -899,6 +905,8 @@ function setEditMode(row) {
   setSelectedChannel(row.channel);
   $("booking-submit").textContent = row.can_change_without_approval || canManageSellers() ? "Save changes" : "Request change";
   $("booking-cancel-shift")?.classList.remove("hidden");
+  $("booking-repeat-info").classList.toggle("hidden", !row.metadata?.recurrence_id);
+  $("booking-stop-repeat").classList.toggle("hidden", !row.metadata?.recurrence_id || !canManageSellers() || !showEditable(row));
   $("seller-clear-edit")?.classList.remove("hidden");
   $("booking-overnight").checked = dateKey(start) !== dateKey(end);
   renderAll();
@@ -922,6 +930,8 @@ function clearEditMode() {
   $("booking-seller").disabled = false;
   $("ss-editor-title").textContent = "Schedule a show";
   $("booking-cancel-shift")?.classList.add("hidden");
+  $("booking-repeat-info").classList.add("hidden");
+  $("booking-stop-repeat").classList.add("hidden");
   $("seller-clear-edit")?.classList.add("hidden");
   setStatus("");
   updateAvailabilityPreview();
@@ -952,15 +962,22 @@ async function submitBooking(event) {
   finally{state.busy=false;$("booking-submit").disabled=false;}
 }
 
-async function cancelShift(shiftId) {
+async function cancelShift(shiftId, stopRepeating = false) {
   if (!shiftId || state.busy) return;
   const row = state.rows.find(item => item.shift_id === shiftId);
   if (!row || !showEditable(row)) return;
   const dialog = $("ss-cancel-dialog");
   dialog.dataset.shiftId = shiftId;
+  const recurrenceId = stopRepeating && canManageSellers() ? row.metadata?.recurrence_id : null;
+  if (stopRepeating && !recurrenceId) return;
+  dialog.dataset.recurrenceId = recurrenceId || "";
+  $("ss-cancel-title").textContent = recurrenceId ? "Stop this repeating time slot?" : "Cancel this show?";
+  $("ss-cancel-submit").textContent = recurrenceId ? "Stop repeating" : "Cancel show";
+  $("ss-cancel-keep").textContent = recurrenceId ? "Keep schedule" : "Keep show";
   $("ss-cancel-reason").value = "";
   $("ss-cancel-status").textContent = "";
   $("ss-cancel-caption").textContent = `${row.seller_name} · ${showPlatforms[row.channel]} · ${formatDateTime(row.start_at)}. ${row.can_change_without_approval || canManageSellers() ? "This will free the slot on your schedule." : "Management will review your cancellation request."}`;
+  if (recurrenceId) $("ss-cancel-caption").textContent = `${row.seller_name} · ${showPlatforms[row.channel]}. All future shows in this recurring series will be cancelled, and their reminders will stop. Other recurring time slots stay scheduled.`;
   dialog.showModal();
 }
 
@@ -968,21 +985,22 @@ async function confirmCancelShow(event) {
   event.preventDefault();
   if (state.busy) return;
   const shiftId = $("ss-cancel-dialog").dataset.shiftId;
+  const recurrenceId = $("ss-cancel-dialog").dataset.recurrenceId;
   if (!shiftId) return;
   state.busy = true;
   $("ss-cancel-submit").disabled = true;
   $("ss-cancel-status").textContent = "Updating the schedule…";
 
   try {
-    const { data, error } = await window.supabase.rpc("cancel_seller_sale_shift", {
-      _shift_id: shiftId,
+    const { data, error } = await window.supabase.rpc(recurrenceId ? "admin_stop_seller_show_recurrence" : "cancel_seller_sale_shift", {
+      ...(recurrenceId ? { _recurrence_id: recurrenceId } : { _shift_id: shiftId }),
       _reason: $("ss-cancel-reason").value || null,
     });
     if (error) throw error;
     $("ss-cancel-dialog").close();
     $("ss-editor").close();
     clearEditMode();
-    if (await refreshAll({ afterMutation: true })) showPageStatus(data?.status === "approval_requested" ? "Cancellation sent to management." : "Show cancelled.");
+    if (await refreshAll({ afterMutation: true })) showPageStatus(recurrenceId ? "Repeating time slot stopped. Future shows in this series have been cancelled." : data?.status === "approval_requested" ? "Cancellation sent to management." : "Show cancelled.");
   } catch (error) {
     console.error("Seller shift cancellation failed:", error);
     $("ss-cancel-status").textContent = error.message || "Could not cancel the show. Please try again.";
@@ -1269,6 +1287,7 @@ function setupListeners() {
     cancelShift(shiftId);
   });
   $("seller-clear-edit")?.addEventListener("click", clearEditMode);
+  $("booking-stop-repeat")?.addEventListener("click", () => cancelShift($("booking-shift-id").value, true));
 
   ["selected-day-roster", "my-shifts-list", "seller-notifications", "seller-requests-list", "commission-list", "seller-unassigned-sales"].forEach((id) => {
     $(id)?.addEventListener("click", handleActionClick);

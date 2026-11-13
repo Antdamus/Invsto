@@ -32,11 +32,15 @@ before(async()=>{
  await db.exec(`create function public.notify_seller_management(uuid,text,text,text,text,uuid,uuid,jsonb,boolean) returns void language sql as $$select$$;`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261113010000_show_schedule_studio.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261113020000_show_schedule_host_reminders.sql',import.meta.url),'utf8'));
+ await db.exec(`create schema cron;create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);
+ await db.exec(await readFile(new URL('../supabase/migrations/20261113030000_recurring_seller_shows.sql',import.meta.url),'utf8'));
 });
 
 async function resetSms(){
+ await db.exec('delete from seller_show_recurrence_conflicts');
  await db.exec(`set test.uid='${ids.admin}';delete from sms_outbox;delete from seller_shift_change_requests;delete from seller_notifications;delete from seller_sale_shifts;delete from effective_work_shifts;delete from shift_sms_reminders;delete from user_phones;update employees set active=true;
  insert into user_phones values('${ids.s1}','+12025550101',true),('${ids.s2}','+12025550102',true);`);
+ await db.exec('delete from seller_show_recurrences');
 }
 async function seedShow(seller=ids.s1,minutes=20,status='booked'){
  return (await db.query(`insert into seller_sale_shifts(seller_employee_id,seller_user_id,channel,store_id,start_at,end_at,status)
@@ -100,6 +104,85 @@ test('reminder readiness flags missing phones, limits seller visibility, and pro
 });
 after(async()=>db?.close());
 beforeEach(async()=>{await db.exec(`set test.uid='${ids.admin}'`);});
+
+async function seedRecurringWeek(){
+ await resetSms();
+ return (await db.query(`insert into seller_show_recurrences(seller_employee_id,channel,store_id,weekdays,start_local,end_local,ends_next_day,effective_from)
+ select employee,'ebay',$3,days,start_time,end_time,overnight,date_trunc('week',now() at time zone 'America/New_York')::date+7
+ from (values ($1::uuid,array[1,2,3,4,5],'10:00'::time,'13:00'::time,false),
+ ($1::uuid,array[1,2,3,4,5],'14:00'::time,'17:00'::time,false),
+ ($2::uuid,array[0,5,6],'22:30'::time,'01:30'::time,true)) v(employee,days,start_time,end_time,overnight)
+ returning id,to_char(effective_from,'YYYY-MM-DD') as first_day`,[ids.s1,ids.s2,ids.store])).rows;
+}
+async function fillRecurringWeek(firstDay){return (await db.query('select materialize_seller_show_recurrences($1::date+6) as result',[firstDay])).rows[0].result;}
+
+test('weekly patterns create thirteen correct local-time shows, cross midnight, extend and deduplicate',async()=>{
+ const patterns=await seedRecurringWeek();
+ assert.deepEqual(await fillRecurringWeek(patterns[0].first_day),{created:13,conflicts:0,window_days:90});
+ assert.equal((await fillRecurringWeek(patterns[0].first_day)).created,0);
+ const check=(await db.query(`select count(*)::int as n,bool_and(s.channel='ebay' and s.store_id=$1 and
+   (s.start_at at time zone 'America/New_York')::time=r.start_local and
+   (s.end_at at time zone 'America/New_York')::time=r.end_local and
+   extract(dow from s.recurrence_date)::int=any(r.weekdays) and
+   (s.end_at at time zone 'America/New_York')::date=s.recurrence_date+case when r.ends_next_day then 1 else 0 end
+   and s.metadata->>'recurrence_id'=r.id::text) as valid
+ from seller_sale_shifts s join seller_show_recurrences r on r.id=s.recurrence_id`,[ids.store])).rows[0];
+ assert.deepEqual(check,{n:13,valid:true});
+ const result=(await db.query('select materialize_seller_show_recurrences($1::date+13) as result',[patterns[0].first_day])).rows[0].result;
+ assert.equal(result.created,13);
+ // Long horizons cross DST in season; every generated occurrence must retain its local wall time.
+ await db.query('select materialize_seller_show_recurrences(current_date+180)');
+ assert.equal((await db.query(`select count(*)::int as n from seller_sale_shifts s join seller_show_recurrences r on r.id=s.recurrence_id
+ where (s.start_at at time zone 'America/New_York')::time<>r.start_local or (s.end_at at time zone 'America/New_York')::time<>r.end_local`)).rows[0].n,0);
+});
+
+test('employees assigned to shows can open the schedule without receiving manager access',async()=>{
+ await resetSms();
+ await db.exec(`update employees set role='employee' where id='${ids.s1}';set test.uid='${ids.s1}'`);
+ assert.equal((await db.query('select current_user_can_use_seller_schedule() as allowed')).rows[0].allowed,false);
+ const patterns=await seedRecurringWeek();await fillRecurringWeek(patterns[0].first_day);
+ await db.exec(`set test.uid='${ids.s1}'`);
+ const access=(await db.query('select current_user_can_use_seller_schedule() as allowed,current_user_can_manage_sellers() as manager')).rows[0];
+ assert.deepEqual(access,{allowed:true,manager:false});
+ assert.ok((await db.query('select * from get_seller_schedule_month($1)',[patterns[0].first_day])).rows.some(r=>r.is_mine));
+ await db.exec(`update employees set active=false where id='${ids.s1}'`);
+ assert.equal((await db.query('select current_user_can_use_seller_schedule() as allowed')).rows[0].allowed,false);
+ await db.exec(`update employees set role='seller',active=true where id='${ids.s1}'`);
+});
+
+test('individual exceptions survive refill; stopping a series cancels only its future shows, pending requests and SMS',async()=>{
+ const patterns=await seedRecurringWeek();await fillRecurringWeek(patterns[0].first_day);
+ const series=patterns[0].id;
+ const rows=(await db.query('select * from seller_sale_shifts where recurrence_id=$1 order by start_at',[series])).rows;
+ await db.query("update seller_sale_shifts set status='cancelled' where id=$1",[rows[0].id]);
+ await db.query("update seller_sale_shifts set start_at=date_trunc('minute',now())+interval '20 minutes',end_at=date_trunc('minute',now())+interval '200 minutes',status='edit_pending' where id=$1",[rows[1].id]);
+ await db.query("insert into seller_shift_change_requests(shift_id,seller_employee_id,request_type) values($1,$2,'edit')",[rows[1].id,ids.s1]);
+ assert.equal((await fillRecurringWeek(patterns[0].first_day)).created,0);
+ assert.equal((await db.query('select enqueue_seller_show_reminders() as n')).rows[0].n,1);
+ await db.exec(`set test.uid='${ids.s1}'`);
+ await assert.rejects(db.query('select admin_stop_seller_show_recurrence($1)',[series]),/Only managers/);
+ await db.exec(`set test.uid='${ids.admin}'`);
+ const stopped=(await db.query('select admin_stop_seller_show_recurrence($1) as result',[series])).rows[0].result;
+ assert.equal(stopped.cancelled_shows,4);
+ assert.equal((await db.query('select status from sms_outbox')).rows[0].status,'cancelled');
+ assert.equal((await db.query('select status from seller_shift_change_requests')).rows[0].status,'cancelled');
+ assert.equal((await db.query("select count(*)::int as n from seller_sale_shifts where status='booked'")).rows[0].n,8);
+ assert.equal((await fillRecurringWeek(patterns[0].first_day)).created,0);
+ const grants=(await db.query("select has_function_privilege('authenticated','materialize_seller_show_recurrences(date)','execute') as staff,has_function_privilege('anon','admin_stop_seller_show_recurrence(uuid,text)','execute') as anon")).rows[0];
+ assert.deepEqual(grants,{staff:false,anon:false});
+});
+
+test('recurring shows record conflicts and retry the missing occurrence after the conflict is removed',async()=>{
+ const patterns=await seedRecurringWeek();
+ const conflict=(await db.query(`insert into seller_sale_shifts(seller_employee_id,seller_user_id,channel,store_id,start_at,end_at)
+ values($1,$1,'whatnot',$2,($3::date+time '10:00') at time zone 'America/New_York',($3::date+time '13:00') at time zone 'America/New_York') returning id`,[ids.s1,ids.store,patterns[0].first_day])).rows[0];
+ assert.deepEqual(await fillRecurringWeek(patterns[0].first_day),{created:12,conflicts:1,window_days:90});
+ assert.equal((await db.query('select count(*)::int as n from seller_show_recurrence_conflicts')).rows[0].n,1);
+ await db.query("update seller_sale_shifts set status='cancelled' where id=$1",[conflict.id]);
+ assert.deepEqual(await fillRecurringWeek(patterns[0].first_day),{created:1,conflicts:0,window_days:90});
+ assert.equal((await db.query('select count(*)::int as n from seller_show_recurrence_conflicts')).rows[0].n,0);
+ await resetSms();
+});
 
 test('managers assign TikTok and overnight shows to the selected seller in future months',async()=>{
  const row=await book(ids.s1,'tiktok','2031-01-31T22:00:00-05:00','2031-02-01T01:00:00-05:00');
