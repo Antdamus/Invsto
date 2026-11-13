@@ -58,27 +58,47 @@ function renderShowWeek() {
       return `<div class="ss-platform-heading ss-channel-${channel}"><span class="ss-platform-logo">${showPlatforms[channel]}</span><small>${count} show${count === 1 ? "" : "s"}</small><span class="ss-dot ss-${channel}"></span></div>${days.map(d => `<div class="ss-slot ${showDayClasses(d)}">${showRowsForDay(d).filter(r => r.channel === channel || r.channel === "all").map(r => showCard(r, false, d)).join("")}<button class="ss-add-slot" data-add-date="${dateKey(d)}" data-add-platform="${channel}" aria-label="Add ${showPlatforms[channel]} show on ${formatDayTitle(d)}">+ Add show</button></div>`).join("")}`;
     }).join("")}</div></div>`;
 }
-function showCompactTime(value) {
-  const d=new Date(value),minutes=d.getMinutes();
-  return `${d.getHours()%12||12}${minutes?":"+String(minutes).padStart(2,"0"):""}${d.getHours()<12?"a":"p"}`;
+function showPersonClass(id) {
+  return "ss-person-"+([...String(id||"")].reduce((n,c)=>n+c.charCodeAt(0),0)%4);
 }
-function showMonthEvent(row,day) {
-  const start=new Date(row.start_at),end=new Date(row.end_at),dayStart=startOfToday(day);
-  const continues=start<dayStart,overnight=dateKey(end)!==dateKey(day);
-  const name=row.is_blocked?"Blocked":row.seller_name||"Seller";
-  const label=`${name}, ${showPlatforms[row.channel]||row.channel}, ${showTimeRange(row)}${continues?", continues from previous day":""}`;
-  return `<button class="ss-month-event ss-channel-${normalizeChannel(row.channel)}" ${row.is_blocked?`data-day="${dateKey(day)}"`:`data-show-id="${escapeHtml(row.shift_id)}"`} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
-    <span class="ss-month-person"><strong>${escapeHtml(row.is_blocked?"—":showInitials(name))}</strong><span class="ss-month-name">${escapeHtml(name)}</span>${continues||overnight?`<small aria-label="${continues?"Continued from previous day":"Ends next day"}">${continues?"↳":"+1"}</small>`:""}</span>
-    <span class="ss-month-range"><time>${showCompactTime(continues?dayStart:start)}</time><time>–${showCompactTime(end)}</time></span>
+function showDayCard(row,day) {
+  const start=new Date(row.start_at),end=new Date(row.end_at),continues=start<startOfToday(day);
+  const overnight=dateKey(end)!==dateKey(day);
+  const startLabel=continues?"Midnight":formatTime(start),endLabel=formatTime(end);
+  const detail=continues?`Started ${start.toLocaleDateString([],{weekday:"long"})} at ${formatTime(start)}`:
+    overnight?`Ends ${end.toLocaleDateString([],{weekday:"long",month:"short",day:"numeric"})}`:"";
+  const pending=["edit_pending","cancel_pending"].includes(row.status);
+  return `<button class="ss-day-show ${continues?"is-continuation":""}" data-show-id="${escapeHtml(row.shift_id)}" aria-label="${escapeHtml(`${row.seller_name}, ${showPlatforms[row.channel]}, ${startLabel} to ${endLabel}${detail?", "+detail:""}`)}">
+    <span class="ss-day-show-head"><span class="ss-person-token ${showPersonClass(row.seller_employee_id)}" aria-hidden="true">${escapeHtml(showInitials(row.seller_name))}</span><strong>${escapeHtml(row.seller_name||"Seller")}</strong><span class="ss-day-chevron" aria-hidden="true">›</span></span>
+    <span class="ss-day-show-time"><time>${escapeHtml(startLabel)}</time><span aria-hidden="true">–</span><time>${escapeHtml(endLabel)}</time></span>
+    ${detail?`<span class="ss-day-show-detail">${escapeHtml(detail)}</span>`:""}
+    <span class="ss-day-show-meta"><span class="ss-dot ss-${normalizeChannel(row.channel)}"></span>${escapeHtml(showPlatforms[row.channel]||row.channel)}<span>·</span>${continues?"Overnight continuation":escapeHtml(formatHours(minutesBetween(start,end)))}${!continues&&row.metadata?.recurrence_id?`<span>·</span>${escapeHtml(row.metadata.recurrence_label||"Repeats weekly")}`:""}</span>
+    ${pending?`<span class="ss-day-pending">${row.status==="edit_pending"?"Change requested":"Cancellation requested"}</span>`:""}
+    ${row.notes?`<span class="ss-day-show-note">${escapeHtml(row.notes)}</span>`:""}
   </button>`;
+}
+function renderMonthLineup() {
+  const day=state.selectedDate,rows=showRowsForDay(day),shows=rows.filter(r=>!r.is_blocked);
+  const starting=shows.filter(r=>new Date(r.start_at)>=startOfToday(day)),continuing=shows.filter(r=>new Date(r.start_at)<startOfToday(day));
+  return `<section id="ss-month-lineup" class="ss-month-lineup" aria-labelledby="ss-lineup-date">
+    <div class="ss-lineup-head"><div><span class="seller-kicker">${day.toLocaleDateString([],{weekday:"long"})}</span><h3 id="ss-lineup-date">${day.toLocaleDateString([],{month:"long",day:"numeric"})}</h3></div><button class="ss-lineup-add" data-add-date="${dateKey(day)}">+ Add show</button></div>
+    <p class="ss-lineup-summary" role="status">${starting.length} show${starting.length===1?"":"s"} starting · Airport Store</p>
+    ${rows.filter(r=>r.is_blocked).map(r=>`<div class="ss-day-block"><strong>${escapeHtml(showPlatforms[r.channel]||r.channel)} · Blocked</strong><span>${escapeHtml(showTimeRange(r))}</span>${r.notes?`<span>${escapeHtml(r.notes)}</span>`:""}</div>`).join("")}
+    ${continuing.length?`<div class="ss-lineup-group ss-carry-group"><h4>Continuing from the previous night</h4>${continuing.map(r=>showDayCard(r,day)).join("")}</div>`:""}
+    <div class="ss-lineup-group"><h4>${continuing.length?"Starting today":"The day’s lineup"}</h4>${starting.length?starting.map(r=>showDayCard(r,day)).join(""):`<div class="ss-day-empty"><span class="ss-empty-mark" aria-hidden="true">+</span><strong>Room for a show</strong><p>${showPlanner.platform!=="all"||showPlanner.seller!=="all"?"No shows starting match these filters.":"No shows start on this date."}</p><button class="ss-quiet-button" data-add-date="${dateKey(day)}">Schedule on ${day.toLocaleDateString([],{month:"short",day:"numeric"})}</button></div>`}</div>
+  </section>`;
 }
 function renderShowMonth() {
   const { start } = showGridRange();
+  const dayCount=Math.ceil((((state.currentMonth.getDay()+6)%7)+endOfMonth(state.currentMonth).getDate())/7)*7;
   const people=new Map(state.rows.filter(r=>!r.is_blocked&&showMatches(r)&&new Date(r.end_at)>start&&new Date(r.start_at)<addDays(start,42)).map(r=>[r.seller_employee_id,r.seller_name]));
-  return `<div class="ss-month-guide"><p>Tap a date to add a show. Tap a show for details.</p><div class="ss-month-key">${[...people].map(([id,name])=>`<span><b>${escapeHtml(showInitials(name))}</b>${escapeHtml(name)}</span>`).join("")}</div><small>a = AM · p = PM · +1 ends next day · ↳ continues</small></div><div class="ss-month-grid">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>`<div class="ss-month-weekday">${d}</div>`).join("")}${Array.from({length:42},(_,i)=>{
-    const d=addDays(start,i),rows=showRowsForDay(d),outside=d.getMonth()!==state.currentMonth.getMonth();
-    return `<div class="ss-month-day ${showDayClasses(d)} ${outside?"is-outside":""}" data-calendar-date="${dateKey(d)}"><button class="ss-month-date" data-add-date="${dateKey(d)}" aria-label="Add show on ${formatDayTitle(d)}"><strong>${d.getDate()}</strong><span aria-hidden="true">+</span></button>${rows.slice(0,3).map(r=>showMonthEvent(r,d)).join("")}${rows.length>3?`<button class="ss-month-more" data-day="${dateKey(d)}">+${rows.length-3} more</button>`:""}</div>`;
-  }).join("")}</div>`;
+  return `<div class="ss-month-layout"><div class="ss-month-overview"><div class="ss-month-guide"><p>Choose a day to see its lineup or add a show.</p><div class="ss-month-key">${[...people].map(([id,name])=>`<span><b class="ss-person-token ${showPersonClass(id)}">${escapeHtml(showInitials(name))}</b>${escapeHtml(name)}</span>`).join("")}</div></div><div class="ss-month-grid" aria-label="Choose a date">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>`<div class="ss-month-weekday">${d}</div>`).join("")}${Array.from({length:dayCount},(_,i)=>{
+    const d=addDays(start,i),rows=showRowsForDay(d),starting=rows.filter(r=>!r.is_blocked&&new Date(r.start_at)>=startOfToday(d));
+    const continuing=rows.filter(r=>!r.is_blocked&&new Date(r.start_at)<startOfToday(d)),outside=d.getMonth()!==state.currentMonth.getMonth();
+    const hosts=[...new Map(starting.map(r=>[r.seller_employee_id,r.seller_name])).entries()];
+    const caption=starting.length?`${starting.length} show${starting.length===1?"":"s"}`:continuing.length?"Overnight":rows.length?"Blocked":"";
+    return `<button class="ss-month-day ${showDayClasses(d)} ${outside?"is-outside":""}" data-select-day="${dateKey(d)}" aria-pressed="${dateKey(d)===dateKey(state.selectedDate)}" aria-label="${escapeHtml(`${formatDayTitle(d)}: ${starting.length} shows starting${continuing.length?", "+continuing.length+" continuing from the previous night":""}`)}"><strong class="ss-month-number">${d.getDate()}</strong><span class="ss-mini-hosts" aria-hidden="true">${hosts.slice(0,hosts.length>2?1:2).map(([id,name])=>`<span class="ss-person-token ${showPersonClass(id)}">${escapeHtml(showInitials(name))}</span>`).join("")}${hosts.length>2?`<span class="ss-host-more">+${hosts.length-1}</span>`:""}</span><span class="ss-mini-count">${caption||"&nbsp;"}</span></button>`;
+  }).join("")}</div><p class="ss-month-footnote">Counts show new starts. Overnight details are in the daily lineup.</p></div>${renderMonthLineup()}</div>`;
 }
 function renderShowAgenda(singleDay = false) {
   const { start } = showRange();
@@ -132,6 +152,7 @@ function renderShowControls() {
   renderShowSummary();
 }
 function renderShowPlanner() {
+  document.body.dataset.scheduleView=showPlanner.view;
   renderShowControls();
   $("seller-calendar").innerHTML=showPlanner.view==="month"?renderShowMonth():showPlanner.view==="agenda"?renderShowAgenda():showPlanner.mobile.matches?renderShowAgenda(true):renderShowWeek();
 }
@@ -247,13 +268,19 @@ function setupShowPlanner() {
   $("ss-seller-filter").addEventListener("change",e=>{showPlanner.seller=e.target.value;renderShowPlanner();renderSelectedDay();});
   async function boardClick(event) {
     if(state.busy)return;
+    const selected=event.target.closest("[data-select-day]");
+    if(selected){
+      const key=selected.dataset.selectDay;state.selectedDate=dateFromKey(key);renderShowPlanner();renderSelectedDay();
+      document.querySelector(`[data-select-day="${key}"]`)?.focus({preventScroll:true});
+      if(showPlanner.mobile.matches&&event.detail>0)document.querySelector("#ss-month-lineup .ss-day-show, #ss-month-lineup .ss-day-empty")?.scrollIntoView({block:"nearest",behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"instant":"smooth"});
+      return;
+    }
     const card=event.target.closest("[data-show-id]");if(card){openShowDetails(state.rows.find(r=>r.shift_id===card.dataset.showId));return;}
     const add=event.target.closest("[data-add-date]");if(add){openShowEditor(add.dataset.addDate,add.dataset.addPlatform);return;}
     const day=event.target.closest("[data-day]");
-    if(!day){const cell=event.target.closest("[data-calendar-date]");if(cell)openShowEditor(cell.dataset.calendarDate);return;}
+    if(!day)return;
     state.selectedDate=dateFromKey(day.dataset.day);
-    if(showPlanner.view==="month"){showPlanner.view="week";state.currentMonth=startOfMonth(state.selectedDate);await refreshAll();}
-    else{renderShowPlanner();renderSelectedDay();}
+    renderShowPlanner();renderSelectedDay();
   }
   $("seller-calendar").addEventListener("click",boardClick);$("ss-mobile-week").addEventListener("click",boardClick);
   $("ss-editor-close").addEventListener("click",()=>{if(!state.busy)$("ss-editor").close();});

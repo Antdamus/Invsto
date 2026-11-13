@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#183d35" />
   <title>Show Schedule · OG Jewelry</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-smart-calendar1" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-calendar-polish1" />
 
 </head>
-<body>
+<body class="ss-show-studio">
   <a class="ss-skip" href="#schedule-main">Skip to schedule</a>
   <div class="seller-page">
     <aside class="seller-sidebar">
@@ -30,7 +30,7 @@
       <nav class="seller-mobile-menu" id="seller-mobile-menu" aria-label="Mobile navigation"><a href="dashboard.html" data-management-link hidden>Overview</a><a href="live-sales.html">Live sales</a><a href="timeclock.html">Time clock</a><a href="#" id="seller-logout-mobile">Log out</a></nav>
       <header class="seller-header">
         <div><div class="seller-kicker"><span class="ss-live-dot"></span> THE SHOW STUDIO</div><h1 id="seller-greeting"><span class="ss-desktop-heading">Good shows start <em>here.</em></span><span class="ss-phone-heading">The show <em>lineup.</em></span></h1><p>Your sellers. Every platform. One beautiful plan.</p></div>
-        <button class="seller-submit ss-add-desktop" data-new-show><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Schedule a show</button>
+        <div class="ss-header-actions"><span id="task-updates-slot"></span><button class="seller-submit ss-add-desktop" data-new-show><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Schedule a show</button></div>
       </header>
       <div id="schedule-status" class="ss-status" role="status" aria-live="polite">Loading your schedule…</div>
       <section class="ss-summary" aria-label="Schedule summary">
@@ -212,7 +212,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js?v=20261113-smart-calendar1"></script>
-  <script src="seller-schedule.js?v=20261113-smart-calendar1"></script>
+  <script src="seller-dashboard.js?v=20261113-calendar-polish1"></script>
+  <script src="seller-schedule.js?v=20261113-calendar-polish1"></script>
 </body>
 </html>

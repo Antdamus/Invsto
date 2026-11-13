@@ -885,7 +885,7 @@ function setEditMode(row) {
   if (!row) return;
   const start = new Date(row.start_at);
   const end = new Date(row.end_at);
-  state.selectedDate = startOfToday(start);
+  if(showPlanner.view!=="month")state.selectedDate = startOfToday(start);
 
   $("booking-shift-id").value = row.shift_id || "";
   $("booking-date").value = dateKey(start);

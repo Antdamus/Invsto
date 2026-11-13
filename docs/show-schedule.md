@@ -2,7 +2,9 @@
 
 The recovered show scheduler lives at `seller-dashboard.html`, linked as **Show Schedule** in the admin and manager navigation. Seller sign-in still opens this page. It uses the original `seller_sale_shifts`, blocked times, approval requests, and commission workspace; no historical schedule rows are replaced.
 
-On a phone, Week shows a seven-day picker and the selected day's show cards. Desktop Week maps platforms to rows and days to columns. Month and Agenda are available on both, with platform and seller filters. In Month, tap a date or empty day space to open a show with that date selected; tap a show to open its details. Compact month cards show seller initials and both start/end times, with a seller key above the grid. `+1` means the show ends the next day; `↳` marks its continuation from the previous day, showing only that day's remaining hours. Times are explicitly labeled with the viewer's local timezone.
+On a phone, Week shows a seven-day picker and the selected day's show cards. Desktop Week maps platforms to rows and days to columns. Month and Agenda are available on both, with platform and seller filters. Month uses a compact date grid with seller initials and counts of shows starting each day. Select a date to see its full lineup below on phones or beside the calendar on wide screens. **Add show** opens the editor with that date selected. Daily cards show full names and readable start/end times; overnight carryover has a separate section, the original start time, and explicit end-day labels. Carryover is not counted as a new show. Times are explicitly labeled with the viewer's local timezone.
+
+Show Studio docks the existing Updates launcher in the page header. Unread counts and the inbox remain available there; automatic preview popovers are suppressed on this page so they cannot obscure calendar cells. The shared notification implementation is unchanged.
 
 The show editor automatically assigns Airport Store for new shows and edits. There is no store selector. If the active Airport Store record is unavailable, saving stops with an error instead of assigning another location.
 

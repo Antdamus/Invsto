@@ -24,6 +24,10 @@ window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmploye
  const q={select(){return q},eq(){return q},in(){return q},order(){return q},limit(){return q},update(){return q},maybeSingle:async()=>({data:testEmployee}),then(resolve){resolve({data:table==='store_locations'?[{id:'store-other',name:'Seybold Store',active:true},{id:'store-1',name:'Airport Store',active:true}]:[]})}};return q;
 },rpc:async(name,args)=>{
  window.testCalls.push({name,args});
+ if(name==='notification_inbox'){
+   const notice={id:'notification-1',recipient_user_id:testEmployee.user_id,notification_type:'task_assigned',category:'tasks',title:'Sample update',body:'Review your assigned work.',created_at:new Date().toISOString(),read_at:null};
+   return {data:{unread:[notice],entries:[notice],unread_count:124,total:1,counts:{all:124,tasks:124}}};
+ }
  if(name==='current_user_can_use_seller_schedule')return {data:true};
  if(name==='get_seller_schedule_month')return window.testFailLoad?{error:{message:'Connection unavailable'}}:{data:window.testRows};
  if(name==='get_live_sale_seller_directory')return {data:window.testSellers};
@@ -52,7 +56,6 @@ async function openPage(browser,width,employeeHost=false){
     if(url.hostname!=='schedule.test')return route.fulfill({body:'',contentType:url.pathname.endsWith('.css')?'text/css':'text/javascript'});
     const file=url.pathname.slice(1)||'seller-dashboard.html';
     if(file==='initSupabase.js')return route.fulfill({body:mock+(employeeHost?"testEmployee.role='employee';testEmployee.id='seller-sydney';":''),contentType:'text/javascript'});
-    if(file==='task-notifications.js')return route.fulfill({body:'',contentType:'text/javascript'});
     try{await route.fulfill({body:await readFile(new URL(file,root)),contentType:file.endsWith('.html')?'text/html':file.endsWith('.css')?'text/css':'text/javascript'});}catch{await route.fulfill({status:404,body:''});}
   });
   await page.goto('https://schedule.test/seller-dashboard.html');
@@ -173,7 +176,7 @@ test('assigned employee host can follow the schedule link on a phone',async()=>{
  }finally{await browser.close();}
 });
 
-for(const width of [360,390,1440])test(`month calendar at ${width}px shows initials and full time slots, opens dates, and saves custom repeats`,async()=>{
+for(const width of [320,360,390,1440])test(`month calendar at ${width}px separates compact dates, clear daily times and overnight carryover, and saves repeats`,async()=>{
  const browser=await chromium.launch();try{
    const {page,errors}=await openPage(browser,width);
    await page.locator('[data-view="month"]').click();
@@ -187,19 +190,40 @@ for(const width of [360,390,1440])test(`month calendar at ${width}px shows initi
      window.testRows=rows;state.rows=rows;renderAll();
    });
    assert.equal(await page.locator('.ss-month-grid').isVisible(),true);
-   assert.ok(await page.locator('.ss-month-event').count()>30);
-   assert.ok(await page.locator('.ss-month-person strong').getByText('SM',{exact:true}).count()>0);
-   assert.ok(await page.locator('.ss-month-range time').getByText('10:30p',{exact:true}).count()>0);
-   assert.ok(await page.locator('.ss-month-range time').getByText('–1:30a',{exact:true}).count()>0);
-   assert.ok(await page.locator('.ss-month-person small[aria-label="Continued from previous day"]').count()>0);
+   assert.ok(await page.locator('.ss-month-day').count()>=28);
+   assert.ok(await page.locator('.ss-mini-hosts').getByText('SM',{exact:true}).count()>0);
+   assert.ok((await page.locator('.ss-month-grid').boundingBox()).height<600,'whole-month overview stays compact');
+   const saturday=await page.evaluate(()=>dateKey(addDays(showWeekStart(new Date()),5)));
+   await page.locator('[data-select-day="'+saturday+'"]').click();
+   assert.equal(await page.locator('[data-select-day="'+saturday+'"]').getAttribute('aria-pressed'),'true');
+   assert.equal(await page.locator('#ss-month-lineup .ss-day-show.is-continuation').count(),1);
+   assert.equal(await page.locator('#ss-month-lineup .ss-day-show:not(.is-continuation)').count(),1);
+   assert.match(await page.locator('.ss-lineup-summary').innerText(),/1 show starting/);
+   assert.match(await page.locator('.is-continuation .ss-day-show-time').innerText(),/Midnight[\s\S]*1:30 AM/);
+   assert.match(await page.locator('.is-continuation .ss-day-show-detail').innerText(),/Started Friday at 10:30 PM/);
+   assert.match(await page.locator('.ss-day-show:not(.is-continuation) .ss-day-show-detail').innerText(),/Ends Sunday/);
+   assert.match(await page.locator('.ss-day-show:not(.is-continuation) .ss-day-show-time').innerText(),/10:30 PM[\s\S]*1:30 AM/);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-   assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.ss-month-range time')].every(el=>el.scrollWidth<=el.clientWidth+1)),true,'time ranges fit without clipping');
+   assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.ss-day-show-time')].every(el=>el.scrollWidth<=el.clientWidth+1)),true,'daily time ranges fit without clipping');
+   await page.evaluate(()=>window.OGTaskNotifications.ready);
+   assert.equal(await page.locator('#task-updates-slot .og-tu-launcher').count(),1);
+   assert.equal(await page.locator('#og-task-updates .og-tu-launcher').count(),0,'no floating launcher covers the calendar');
+   assert.equal(await page.locator('.og-tu-alert').isVisible(),false,'new-update preview cannot cover calendar cells');
+   assert.equal(await page.locator('#task-updates-slot .og-tu-count').innerText(),'99+');
+   await page.locator('#task-updates-slot .og-tu-launcher').click();
+   await page.locator('#og-tu-panel').waitFor();await page.locator('[data-tu-close]').click();
+   await page.locator('.ss-planner').scrollIntoViewIfNeeded();
    await page.screenshot({path:new URL('../output/show-studio/month-'+width+'.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
-   // Existing chips open details while the date itself opens a new show on that date.
-   await page.locator('.ss-month-event').first().click();assert.equal(await page.locator('#ss-editor-title').innerText(),'Edit show');
+   await page.locator('#ss-seller-filter').selectOption('seller-sydney');
+   assert.equal(await page.locator('#ss-month-lineup .ss-day-show').count(),0);
+   assert.equal(await page.locator('#ss-month-lineup .ss-day-empty').isVisible(),true);
+   await page.locator('#ss-seller-filter').selectOption('all');
+   await page.locator('#ss-month-lineup .ss-day-show.is-continuation').click();assert.equal(await page.locator('#ss-editor-title').innerText(),'Edit show');
    await page.locator('#ss-editor-close').click();
+   assert.equal(await page.locator('[data-select-day="'+saturday+'"]').getAttribute('aria-pressed'),'true','opening a carryover keeps the selected calendar date');
    const dates=await page.evaluate(()=>{const first=new Date();first.setDate(first.getDate()+((8-first.getDay())%7||7));return {first:dateKey(first),last:dateKey(addDays(first,13))};});
-   await page.locator('.ss-month-date[data-add-date="'+dates.first+'"]').click();
+   await page.locator('[data-select-day="'+dates.first+'"]').click();
+   await page.locator('.ss-lineup-add').click();
    assert.equal(await page.locator('#booking-date').inputValue(),dates.first);
    assert.equal(await page.locator('#booking-shift-id').inputValue(),'');
    await page.locator('#booking-seller').selectOption('seller-manny');
@@ -256,7 +280,8 @@ test('WebKit phone layout: calendar date selection, weekly repeat editor, and ke
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.locator('[data-view="month"]').click();
     const selected=await page.evaluate(()=>dateKey(addDays(new Date(),2)));
-    await page.locator('.ss-month-date[data-add-date="'+selected+'"]').click();
+    await page.locator('[data-select-day="'+selected+'"]').click();
+    await page.locator('.ss-lineup-add').click();
     assert.equal(await page.locator('#booking-date').inputValue(),selected);
     await page.locator('#booking-seller').selectOption('seller-manny');
     await page.locator('#booking-start').fill('22:00');await page.locator('#booking-end').fill('01:00');
