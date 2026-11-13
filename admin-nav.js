@@ -13,6 +13,7 @@
     { href: "inventory-catalogues.html", label: "Catalogues", mark: "CA" },
     { href: "print-stations.html", label: "Print Stations", mark: "P" },
     { href: "store-transfers.html", label: "Store Transfers", mark: "ST" },
+    { href: "seller-dashboard.html", label: "Show Schedule", mark: "SC" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
     { href: "sms-marketing.html", label: "SMS Alerts", mark: "SMS" },
     { href: "past-live-sales.html", label: "Past Live Sales", mark: "PL" },
@@ -28,6 +29,7 @@
   ];
 
   const WORKER_NAV_ITEMS = [
+    { href: "seller-dashboard.html", label: "Show Schedule", mark: "SC", requiresSellerManagement: true },
     { href: "worker-dashboard.html", label: "My Dashboard", mark: "D" },
     { href: "timeclock.html", label: "Time Sheet", mark: "T" },
     { href: "add-item.html", label: "Add Item", mark: "+" },
@@ -54,6 +56,7 @@
     const canAccessEmailTriage = window.__ogEmailTriageAccess === true;
     const canAccessPostOrderIssues = window.__ogPostOrderIssueAccess === true;
     return WORKER_NAV_ITEMS.filter((item) => {
+      if (item.requiresSellerManagement) return window.__ogSellerManagementAccess === true;
       if (item.requiresEmailTriageAccess) return canAccessEmailTriage;
       if (item.requiresPostOrderIssueAccess) return canAccessPostOrderIssues;
       return true;
@@ -344,6 +347,7 @@
     const employee = await getCurrentEmployee();
     const role = String(employee?.role || "").toLowerCase();
     if (employee?.active === false || !role) return;
+    window.__ogSellerManagementAccess = ["admin", "manager"].includes(role);
     window.__ogEmailTriageAccess = await checkEmailTriageAccess(employee);
     window.__ogPostOrderIssueAccess = await checkPostOrderIssueAccess(employee);
     renderRoleNavigation(role === "admin" ? "admin" : "worker");

@@ -24,9 +24,14 @@ function $(id) {
 }
 
 function waitForSupabaseReady() {
-  return new Promise((resolve) => {
-    if (window.supabase) return resolve(window.supabase);
-    document.addEventListener("supabase-ready", () => resolve(window.supabase), { once: true });
+  return new Promise((resolve, reject) => {
+    if (window.supabase?.auth?.getSession) return resolve(window.supabase);
+    const ready = () => { clearTimeout(timer); resolve(window.supabase); };
+    const timer = setTimeout(() => {
+      document.removeEventListener("supabase-ready", ready);
+      reject(new Error("Could not connect. Check your connection and reload the page."));
+    }, 10000);
+    document.addEventListener("supabase-ready", ready, { once: true });
   });
 }
 
@@ -105,7 +110,7 @@ function formatDateTime(value) {
 }
 
 function formatTimeRange(row) {
-  return `${formatTime(row.start_at)} - ${formatTime(row.end_at)}`;
+  return showTimeRange(row);
 }
 
 function formatCurrency(value) {
@@ -149,7 +154,7 @@ function formatHours(minutes) {
 }
 
 function normalizeChannel(value) {
-  return String(value || "").toLowerCase() === "whatnot" ? "whatnot" : "ebay";
+  return ["ebay", "whatnot", "tiktok"].includes(String(value).toLowerCase()) ? String(value).toLowerCase() : "ebay";
 }
 
 function isActiveShift(row) {
@@ -199,6 +204,7 @@ function setSelectedChannel(channel) {
   state.selectedChannel = normalizeChannel(channel);
   document.querySelectorAll(".seller-segment button").forEach((button) => {
     button.classList.toggle("active", button.dataset.channel === state.selectedChannel);
+    button.setAttribute("aria-pressed", String(button.dataset.channel === state.selectedChannel));
   });
   updateAvailabilityPreview();
 }
@@ -247,8 +253,6 @@ async function loadCurrentUser() {
 
   state.employee = employee;
   setEmailTriageAccessLinks(await checkEmailTriageAccess(employee));
-  const greeting = $("seller-greeting");
-  if (greeting) greeting.textContent = employee.display_name ? `${employee.display_name}'s Schedule` : "Schedule";
   return true;
 }
 
@@ -280,13 +284,7 @@ function renderStoreOptions() {
   select.value = state.stores.some((store) => store.id === current) ? current : state.stores[0].id;
 }
 
-async function loadSchedule() {
-  const { data, error } = await window.supabase.rpc("get_seller_schedule_month", {
-    _month: dateKey(state.currentMonth),
-  });
-  if (error) throw error;
-  state.rows = Array.isArray(data) ? data : [];
-}
+async function loadSchedule() { await loadShowRange(); }
 
 async function loadNotifications() {
   const { data, error } = await window.supabase
@@ -453,83 +451,32 @@ async function loadSellerSmsHealth() {
   state.smsHealth = data || null;
 }
 
-async function refreshAll() {
-  if (state.busy) return;
+async function refreshAll(options = {}) {
+  if (state.busy && !options.afterMutation) return false;
+  const wasBusy = state.busy;
   state.busy = true;
-  setStatus("");
+  $("seller-refresh").disabled = true;
+  $("ss-prev").disabled = true; $("ss-next").disabled = true;
+  showPageStatus("Refreshing your schedule…");
   try {
-    await Promise.all([
-      loadSchedule(),
-      loadNotifications(),
-      loadCommission(),
-      loadRequests(),
-      loadLiveSessions(),
-      loadSellerDirectory(),
-      loadUnassignedSales(),
-      loadSellerSmsHealth(),
-    ]);
+    await Promise.all([loadSchedule(), loadNotifications(), loadCommission(), loadRequests(), loadLiveSessions(), loadSellerDirectory(), loadUnassignedSales(), loadSellerSmsHealth(), loadShowSmsReadiness()]);
     renderAll();
+    showPageStatus("");
+    return true;
   } catch (error) {
-    console.error("Seller dashboard refresh failed:", error);
-    setStatus(error.message || "Could not refresh seller dashboard.", "error");
+    console.error("Seller schedule refresh failed:", error);
+    showPageStatus("Could not load the schedule. " + (error.message || "Try Refresh again."), true);
+    return false;
   } finally {
-    state.busy = false;
+    state.busy = wasBusy;
+    $("seller-refresh").disabled = false;
+    $("ss-prev").disabled = false; $("ss-next").disabled = false;
   }
 }
 
-function rowsForDate(key) {
-  return state.rows
-    .filter((row) => isSameDateKey(row.start_at, key))
-    .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-}
+function rowsForDate(key) { return showRowsForDay(dateFromKey(key)); }
 
-function renderCalendar() {
-  const label = $("seller-month-label");
-  if (label) label.textContent = formatMonth(state.currentMonth);
-
-  const calendar = $("seller-calendar");
-  if (!calendar) return;
-
-  const first = startOfMonth(state.currentMonth);
-  const last = endOfMonth(state.currentMonth);
-  const blanks = first.getDay();
-  const days = last.getDate();
-  const selectedKey = dateKey(state.selectedDate);
-  const todayKey = dateKey(new Date());
-
-  const cells = [];
-  for (let i = 0; i < blanks; i += 1) {
-    cells.push(`<div class="seller-day is-empty" aria-hidden="true"></div>`);
-  }
-
-  for (let day = 1; day <= days; day += 1) {
-    const cellDate = new Date(first.getFullYear(), first.getMonth(), day);
-    const key = dateKey(cellDate);
-    const dayRows = rowsForDate(key);
-    const classes = [
-      "seller-day",
-      key === selectedKey ? "is-selected" : "",
-      key === todayKey ? "is-today" : "",
-    ].filter(Boolean).join(" ");
-    const visibleRows = dayRows.slice(0, 4);
-    const hiddenCount = Math.max(0, dayRows.length - visibleRows.length);
-
-    cells.push(`
-      <button type="button" class="${classes}" data-date="${key}">
-        <span class="seller-day-number">
-          <span>${day}</span>
-          ${dayRows.length ? `<span class="seller-day-count">${dayRows.length}</span>` : ""}
-        </span>
-        <span class="seller-day-events">
-          ${visibleRows.map(renderDayEvent).join("")}
-          ${hiddenCount ? `<span class="seller-event">+${hiddenCount} more</span>` : ""}
-        </span>
-      </button>
-    `);
-  }
-
-  calendar.innerHTML = cells.join("");
-}
+function renderCalendar() { renderShowPlanner(); }
 
 function renderDayEvent(row) {
   const classes = [
@@ -557,15 +504,15 @@ function renderSelectedDay() {
 
   const dayRows = rowsForDate(selectedKey);
   if (!dayRows.length) {
-    roster.innerHTML = `<div class="seller-empty">No seller blocks on this day.</div>`;
+    roster.innerHTML = `<div class="seller-empty">No shows planned for this day. A fresh stage awaits.</div>`;
     return;
   }
 
   roster.innerHTML = dayRows.map((row) => {
-    const channel = row.channel === "whatnot" ? "Whatnot" : row.channel === "all" ? "All" : "eBay";
+    const channel = showPlatforms[row.channel] || row.channel;
     const name = row.is_blocked ? "Blocked" : row.seller_name || "Seller";
     const status = row.status ? `<span class="seller-pill">${escapeHtml(row.status.replace(/_/g, " "))}</span>` : "";
-    const mineActions = row.is_mine && !row.is_blocked && isActiveShift(row)
+    const mineActions = showEditable(row)
       ? `
         <div class="seller-row-actions">
           <button type="button" data-action="edit" data-shift-id="${escapeHtml(row.shift_id)}">Edit</button>
@@ -602,7 +549,7 @@ function renderMyShifts() {
 
   list.innerHTML = rows.map((row) => `
     <div class="seller-list-row">
-      <strong>${escapeHtml(row.channel === "whatnot" ? "Whatnot" : "eBay")} - ${escapeHtml(formatDateTime(row.start_at))}</strong>
+      <strong>${escapeHtml(showPlatforms[row.channel] || row.channel)} - ${escapeHtml(formatDateTime(row.start_at))}</strong>
       <span>${escapeHtml(formatTimeRange(row))}${row.store_name ? ` at ${escapeHtml(row.store_name)}` : ""}</span>
       <div><span class="seller-pill">${escapeHtml(String(row.status).replace(/_/g, " "))}</span></div>
       <div class="seller-row-actions">
@@ -871,8 +818,8 @@ function renderMetrics() {
 function renderDateBounds() {
   const dateInput = $("booking-date");
   if (!dateInput) return;
-  dateInput.min = dateKey(state.currentMonth);
-  dateInput.max = dateKey(endOfMonth(state.currentMonth));
+  if (canManageSellers()) { dateInput.removeAttribute("min"); dateInput.removeAttribute("max"); }
+  else {dateInput.min = dateKey(startOfMonth(new Date()));dateInput.max = dateKey(endOfMonth(new Date()));}
   if (!dateInput.value) dateInput.value = dateKey(state.selectedDate);
 }
 
@@ -901,72 +848,39 @@ function buildDateTime(dateValue, timeValue) {
 function getFormWindow() {
   const start = buildDateTime($("booking-date")?.value, $("booking-start")?.value);
   const end = buildDateTime($("booking-date")?.value, $("booking-end")?.value);
+  if (end && $("booking-overnight")?.checked) end.setDate(end.getDate() + 1);
   return { start, end };
 }
 
 function validateFormWindow() {
-  const { start, end } = getFormWindow();
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return { ok: false, message: "Choose a start and end time." };
-  }
-
-  if (dateKey(startOfMonth(start)) !== dateKey(state.currentMonth)) {
-    return { ok: false, message: "Bookings are limited to the current month." };
-  }
-
-  const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
-  if (durationMinutes < 120) {
-    return { ok: false, message: "Minimum booking is 2 hours." };
-  }
-
-  if (start.getMinutes() % 30 !== 0 || end.getMinutes() % 30 !== 0) {
-    return { ok: false, message: "Use 30-minute increments." };
-  }
-
-  return { ok: true, start, end, message: "" };
+  const {start, end} = getFormWindow();
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return {ok:false,message:"Choose a start and end time."};
+  if (!canManageSellers() && dateKey(startOfMonth(start)) !== dateKey(startOfMonth(new Date()))) return {ok:false,message:"Sellers can book shows in the current month."};
+  const minutes = (end - start) / 60000;
+  if (minutes < 120) return {ok:false,message:"Shows need at least 2 hours. For an overnight show, select ‘Ends the following day’."};
+  if (minutes > 1440) return {ok:false,message:"A show can be at most 24 hours."};
+  if (start.getMinutes() % 30 || end.getMinutes() % 30) return {ok:false,message:"Use 30-minute intervals, such as 6:00 or 6:30."};
+  return {ok:true,start,end};
 }
 
 function updateAvailabilityPreview() {
-  const box = $("booking-availability");
-  if (!box) return;
-
+  renderShowSmsReadiness();
+  const box = $("booking-availability"); if(!box) return;
   const validation = validateFormWindow();
   box.classList.remove("is-ok", "is-full");
-  if (!validation.ok) {
-    box.textContent = validation.message;
-    return;
-  }
-
-  const editingId = $("booking-shift-id")?.value || "";
-  const channel = getSelectedChannel();
-  const channelRows = state.rows.filter((row) => (
-    !row.is_blocked
-    && isActiveShift(row)
-    && row.channel === channel
-    && row.shift_id !== editingId
-    && overlaps(new Date(row.start_at), new Date(row.end_at), validation.start, validation.end)
-  ));
-  const blockRows = state.rows.filter((row) => (
-    row.is_blocked
-    && (row.channel === "all" || row.channel === channel)
-    && overlaps(new Date(row.start_at), new Date(row.end_at), validation.start, validation.end)
-  ));
-
-  if (blockRows.length) {
-    box.textContent = "Blocked by management for this time.";
-    box.classList.add("is-full");
-    return;
-  }
-
-  const remaining = Math.max(0, 2 - channelRows.length);
-  if (remaining <= 0) {
-    box.textContent = `${channel === "whatnot" ? "Whatnot" : "eBay"} is full for this time.`;
-    box.classList.add("is-full");
-    return;
-  }
-
-  const names = channelRows.map((row) => row.seller_name).filter(Boolean).join(", ");
-  box.textContent = `${remaining} ${remaining === 1 ? "spot" : "spots"} open${names ? ` with ${names}` : ""}.`;
+  if(!validation.ok){box.textContent=validation.message;return;}
+  const editingId=$("booking-shift-id").value, channel=getSelectedChannel();
+  const sellerId=$("booking-seller").value || (!canManageSellers()?state.employee?.id:"");
+  const rows=state.rows.filter(r=>r.shift_id!==editingId && overlaps(new Date(r.start_at),new Date(r.end_at),validation.start,validation.end));
+  let conflict="";
+  if(rows.some(r=>r.is_blocked&&(r.channel==="all"||r.channel===channel)))conflict="This time is blocked by management.";
+  else if(rows.some(r=>!r.is_blocked&&isActiveShift(r)&&String(r.seller_employee_id)===sellerId))conflict="This seller already has a show during this time, including on another platform.";
+  const channelRows=rows.filter(r=>!r.is_blocked&&isActiveShift(r)&&r.channel===channel);
+  const points=[validation.start.getTime(),...channelRows.map(r=>Math.max(validation.start,new Date(r.start_at)))];
+  const peak=Math.max(0,...points.map(t=>channelRows.filter(r=>new Date(r.start_at)<=t&&new Date(r.end_at)>t).length));
+  if(!conflict&&peak>=2)conflict=showPlatforms[channel]+" already has two sellers at this time.";
+  if(conflict){box.textContent=conflict;box.classList.add("is-full");return;}
+  box.textContent=formatHours(minutesBetween(validation.start,validation.end))+" · "+(2-peak)+" seller "+(peak===1?"spot":"spots")+" available on "+showPlatforms[channel]+". Availability is checked again when saving.";
   box.classList.add("is-ok");
 }
 
@@ -983,10 +897,17 @@ function setEditMode(row) {
   $("booking-note").value = row.notes || "";
   if (row.store_id && $("booking-store")) $("booking-store").value = row.store_id;
   setSelectedChannel(row.channel);
-  $("booking-submit").textContent = row.can_change_without_approval ? "Save Changes" : "Request Change";
+  $("booking-submit").textContent = row.can_change_without_approval || canManageSellers() ? "Save changes" : "Request change";
   $("booking-cancel-shift")?.classList.remove("hidden");
   $("seller-clear-edit")?.classList.remove("hidden");
+  $("booking-overnight").checked = dateKey(start) !== dateKey(end);
   renderAll();
+  $("booking-seller").value = row.seller_employee_id || "";
+  $("booking-seller").disabled = true;
+  $("ss-editor-title").textContent = "Edit show";
+  $("ss-editor-caption").textContent = `${row.seller_name || "Seller"} · ${showPlatforms[row.channel] || row.channel}`;
+  updateAvailabilityPreview();
+  if (!$("ss-editor").open) $("ss-editor").showModal();
 }
 
 function clearEditMode() {
@@ -996,7 +917,10 @@ function clearEditMode() {
   $("booking-start").value = "";
   $("booking-end").value = "";
   $("booking-note").value = "";
-  $("booking-submit").textContent = "Book Shift";
+  $("booking-submit").textContent = "Schedule show";
+  $("booking-overnight").checked = false;
+  $("booking-seller").disabled = false;
+  $("ss-editor-title").textContent = "Schedule a show";
   $("booking-cancel-shift")?.classList.add("hidden");
   $("seller-clear-edit")?.classList.add("hidden");
   setStatus("");
@@ -1004,82 +928,68 @@ function clearEditMode() {
 }
 
 async function submitBooking(event) {
-  event.preventDefault();
-  if (state.busy) return;
-
-  const validation = validateFormWindow();
-  if (!validation.ok) {
-    setStatus(validation.message, "error");
-    return;
-  }
-
-  const storeId = $("booking-store")?.value || null;
-  const note = $("booking-note")?.value || null;
-  const shiftId = $("booking-shift-id")?.value || "";
-  const channel = getSelectedChannel();
-  const params = {
-    _channel: channel,
-    _store_id: storeId,
-    _start_at: validation.start.toISOString(),
-    _end_at: validation.end.toISOString(),
-  };
-
-  state.busy = true;
-  $("booking-submit").disabled = true;
-  setStatus(shiftId ? "Saving shift..." : "Booking shift...");
-
-  try {
-    if (shiftId) {
-      const { error, data } = await window.supabase.rpc("request_seller_sale_shift_edit", {
-        _shift_id: shiftId,
-        ...params,
-        _reason: note,
-      });
-      if (error) throw error;
-      const status = data?.status === "approval_requested" ? "Change request sent to management." : "Shift updated.";
-      setStatus(status);
-    } else {
-      const { error } = await window.supabase.rpc("book_seller_sale_shift", {
-        ...params,
-        _notes: note,
-      });
-      if (error) throw error;
-      setStatus("Shift booked.");
-    }
-
-    clearEditMode();
-    await refreshAll();
-  } catch (error) {
-    console.error("Seller booking failed:", error);
-    setStatus(error.message || "Could not save seller shift.", "error");
-  } finally {
-    state.busy = false;
-    $("booking-submit").disabled = false;
-  }
+  event.preventDefault(); if(state.busy)return;
+  const validation=validateFormWindow();
+  if(!validation.ok){setStatus(validation.message,"error");return;}
+  if($("booking-availability").classList.contains("is-full")){setStatus($("booking-availability").textContent,"error");return;}
+  const shiftId=$("booking-shift-id").value;
+  const params={_channel:getSelectedChannel(),_store_id:$("booking-store").value||null,_start_at:validation.start.toISOString(),_end_at:validation.end.toISOString()};
+  const note=$("booking-note").value||null;
+  const sellerId=$("booking-seller").value;
+  if(canManageSellers()&&!sellerId){setStatus("Choose the seller for this show.","error");return;}
+  state.busy=true;$("booking-submit").disabled=true;setStatus("Saving your show…");
+  try{
+    let result;
+    if(shiftId) result=await window.supabase.rpc("request_seller_sale_shift_edit",{_shift_id:shiftId,...params,_reason:$("booking-note").value});
+    else if(canManageSellers())result=await window.supabase.rpc("admin_schedule_seller_show",{...params,_seller_employee_id:sellerId,_notes:note});
+    else result=await window.supabase.rpc("book_seller_sale_shift",{...params,_notes:note});
+    if(result.error)throw result.error;
+    const message=result.data?.status==="approval_requested"?"Change request sent to management.":shiftId?"Show updated.":"Show scheduled. Your stage is set.";
+    state.selectedDate=startOfToday(validation.start);state.currentMonth=startOfMonth(validation.start);
+    $("ss-editor").close();clearEditMode();
+    if(await refreshAll({afterMutation:true}))showPageStatus(message);
+  }catch(error){setStatus(error.message||"Could not save this show. Your details are still here; please try again.","error");}
+  finally{state.busy=false;$("booking-submit").disabled=false;}
 }
 
 async function cancelShift(shiftId) {
   if (!shiftId || state.busy) return;
-  const reason = window.prompt("Reason for cancellation");
-  if (reason === null) return;
+  const row = state.rows.find(item => item.shift_id === shiftId);
+  if (!row || !showEditable(row)) return;
+  const dialog = $("ss-cancel-dialog");
+  dialog.dataset.shiftId = shiftId;
+  $("ss-cancel-reason").value = "";
+  $("ss-cancel-status").textContent = "";
+  $("ss-cancel-caption").textContent = `${row.seller_name} · ${showPlatforms[row.channel]} · ${formatDateTime(row.start_at)}. ${row.can_change_without_approval || canManageSellers() ? "This will free the slot on your schedule." : "Management will review your cancellation request."}`;
+  dialog.showModal();
+}
 
+async function confirmCancelShow(event) {
+  event.preventDefault();
+  if (state.busy) return;
+  const shiftId = $("ss-cancel-dialog").dataset.shiftId;
+  if (!shiftId) return;
   state.busy = true;
-  setStatus("Cancelling shift...");
+  $("ss-cancel-submit").disabled = true;
+  $("ss-cancel-status").textContent = "Updating the schedule…";
 
   try {
     const { data, error } = await window.supabase.rpc("cancel_seller_sale_shift", {
       _shift_id: shiftId,
-      _reason: reason,
+      _reason: $("ss-cancel-reason").value || null,
     });
     if (error) throw error;
-    setStatus(data?.status === "approval_requested" ? "Cancellation sent to management." : "Shift cancelled.");
+    $("ss-cancel-dialog").close();
+    $("ss-editor").close();
     clearEditMode();
-    await refreshAll();
+    if (await refreshAll({ afterMutation: true })) showPageStatus(data?.status === "approval_requested" ? "Cancellation sent to management." : "Show cancelled.");
   } catch (error) {
     console.error("Seller shift cancellation failed:", error);
-    setStatus(error.message || "Could not cancel seller shift.", "error");
+    $("ss-cancel-status").textContent = error.message || "Could not cancel the show. Please try again.";
+    $("ss-cancel-status").classList.add("is-error");
   } finally {
     state.busy = false;
+    $("ss-cancel-submit").disabled = false;
   }
 }
 
@@ -1117,7 +1027,7 @@ async function reviewSellerRequest(requestId, decision) {
     });
     if (error) throw error;
     if (statusEl) statusEl.textContent = "Request updated.";
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Seller request review failed:", error);
     if (statusEl) {
@@ -1165,7 +1075,7 @@ async function submitBlock(event) {
     $("block-start").value = "";
     $("block-end").value = "";
     $("block-reason").value = "";
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Seller block save failed:", error);
     if (statusEl) {
@@ -1209,7 +1119,7 @@ async function submitPayout(event) {
     if (error) throw error;
     const count = Array.isArray(data) ? data.length : 0;
     if (statusEl) statusEl.textContent = count ? `Prepared ${count} payout${count === 1 ? "" : "s"}.` : "No unpaid commission entries for that period.";
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Seller payout preparation failed:", error);
     if (statusEl) {
@@ -1235,7 +1145,7 @@ async function markPayoutPaid(payoutId) {
     });
     if (error) throw error;
     setStatus("Payout marked paid.");
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Seller payout paid failed:", error);
     setStatus(error.message || "Could not mark payout paid.", "error");
@@ -1281,7 +1191,7 @@ async function assignUnassignedSeller(button) {
     if (error) throw error;
     setStatus("Seller assigned and commission ledger synced.");
     state.busy = false;
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Unassigned seller assignment failed:", error);
     setStatus(error.message || "Could not assign seller to that sale.", "error");
@@ -1315,7 +1225,8 @@ function handleActionClick(event) {
 
 function setupListeners() {
   $("seller-menu-toggle")?.addEventListener("click", () => {
-    $("seller-mobile-menu")?.classList.toggle("show");
+    const open = $("seller-mobile-menu")?.classList.toggle("show");
+    $("seller-menu-toggle").setAttribute("aria-expanded", String(open));
   });
 
   const signOut = async (event) => {
@@ -1365,20 +1276,19 @@ function setupListeners() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  await waitForSupabaseReady();
-  const ok = await loadCurrentUser();
-  if (!ok) return;
-
-  await markAcceptedIfNeeded();
-  setupListeners();
-  setSelectedChannel("ebay");
-
   try {
+    await waitForSupabaseReady();
+    const ok = await loadCurrentUser();
+    if (!ok) return;
+    await markAcceptedIfNeeded();
+    setupListeners();
+    setupShowPlanner();
+    setSelectedChannel("ebay");
     await loadStores();
     renderDateBounds();
-    await refreshAll();
+    await refreshAll({ afterMutation: true });
   } catch (error) {
     console.error("Seller dashboard boot failed:", error);
-    setStatus(error.message || "Could not load seller dashboard.", "error");
+    showPageStatus(error.message || "Could not load your schedule.", true);
   }
 });

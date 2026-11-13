@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:show-schedule": "node --test tests/seller-schedule-database.test.mjs tests/seller-schedule-browser.test.mjs",
     "test:shared-inventory": "node --test tests/shared-inventory-database.test.mjs tests/pending-inventory-browser.test.mjs",
     "test:pending-inventory": "node --test tests/pending-inventory-database.test.mjs tests/pending-inventory-browser.test.mjs",
     "test:packaging": "node --test tests/packaging-database.test.mjs tests/packaging-browser.test.mjs",

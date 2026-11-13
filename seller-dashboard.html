@@ -2,183 +2,55 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OG Jewelry - Seller Dashboard</title>
-  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="seller-dashboard.css" />
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#183d35" />
+  <title>Show Schedule · OG Jewelry</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-show-studio1" />
+
 </head>
 <body>
-  <div class="seller-mobile-header">
-    <button class="seller-menu-button" id="seller-menu-toggle" type="button" aria-label="Open menu">
-      <i data-lucide="menu"></i>
-    </button>
-    <span>Seller</span>
-  </div>
-
-  <div class="seller-mobile-menu" id="seller-mobile-menu">
-    <nav>
-      <a href="seller-dashboard.html" class="active">Schedule</a>
-      <a href="timeclock.html">Time Clock</a>
-      <a href="live-sales.html">Live Sales</a>
-      <a href="email-triage.html" data-email-triage-access-link hidden>Email Triage</a>
-      <a href="#" id="seller-logout-mobile">Logout</a>
-    </nav>
-  </div>
-
+  <a class="ss-skip" href="#schedule-main">Skip to schedule</a>
   <div class="seller-page">
     <aside class="seller-sidebar">
-      <div class="seller-logo">OG</div>
-      <nav class="seller-nav">
-        <a class="active" href="seller-dashboard.html">
-          <i data-lucide="calendar-days"></i>
-          <span>Schedule</span>
-        </a>
-        <a href="timeclock.html">
-          <i data-lucide="clock-3"></i>
-          <span>Time Clock</span>
-        </a>
-        <a href="live-sales.html">
-          <i data-lucide="radio"></i>
-          <span>Live Sales</span>
-        </a>
-        <a href="email-triage.html" data-email-triage-access-link hidden>
-          <i data-lucide="mail"></i>
-          <span>Email Triage</span>
-        </a>
-        <a href="#" id="seller-logout">
-          <i data-lucide="log-out"></i>
-          <span>Logout</span>
-        </a>
+      <a class="ss-brand" href="dashboard.html"><span class="seller-logo">OG</span><span>OG JEWELRY<small>THE TEAM WORKSPACE</small></span></a>
+      <div class="ss-nav-label">WORKSPACE</div>
+      <nav class="seller-nav" aria-label="Main navigation">
+        <a href="dashboard.html" data-management-link hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</a>
+        <a class="active" href="seller-dashboard.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-13 4h1m3 0h1m3 0h1m-9 3h1m3 0h1"/></svg>Show schedule<span class="ss-nav-dot"></span></a>
+        <a href="live-sales.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 7.8a6 6 0 0 0 0 8.4M19 5a10 10 0 0 1 0 14M5 5a10 10 0 0 0 0 14"/></svg>Live sales</a>
+        <a href="timeclock.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5h5"/></svg>Time clock</a>
+        <a href="email-triage.html" data-email-triage-access-link hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>Email triage</a>
       </nav>
+      <div class="ss-sidebar-note"><span class="ss-star">✳</span><strong>A little planning.<br>A great show.</strong><p>Your people, platforms, and next big moment.</p></div>
+      <div class="ss-profile"><span class="ss-avatar" id="ss-user-initials">OG</span><span id="ss-user-name">Your workspace</span><a href="#" id="seller-logout" aria-label="Log out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5m6-12 4 4-4 4m-7-4h11"/></svg></a></div>
     </aside>
-
-    <main class="seller-main">
+    <main class="seller-main" id="schedule-main">
+      <div class="ss-mobile-bar"><a href="dashboard.html" aria-label="OG home" class="ss-mobile-logo">OG</a><span>SHOW STUDIO</span><button id="seller-menu-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="seller-mobile-menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button></div>
+      <nav class="seller-mobile-menu" id="seller-mobile-menu" aria-label="Mobile navigation"><a href="dashboard.html" data-management-link hidden>Overview</a><a href="live-sales.html">Live sales</a><a href="timeclock.html">Time clock</a><a href="#" id="seller-logout-mobile">Log out</a></nav>
       <header class="seller-header">
-        <div>
-          <span class="seller-kicker">Seller Dashboard</span>
-          <h1 id="seller-greeting">Schedule</h1>
-        </div>
-        <div class="seller-header-actions">
-          <a class="seller-action" href="timeclock.html">
-            <i data-lucide="clock"></i>
-            <span>Clock In</span>
-          </a>
-          <a class="seller-action seller-action-primary" href="live-sales.html">
-            <i data-lucide="radio-tower"></i>
-            <span>Open Live</span>
-          </a>
-          <a class="seller-action" href="email-triage.html" data-email-triage-access-link hidden>
-            <i data-lucide="mail"></i>
-            <span>Email Triage</span>
-          </a>
-        </div>
+        <div><div class="seller-kicker"><span class="ss-live-dot"></span> THE SHOW STUDIO</div><h1 id="seller-greeting"><span class="ss-desktop-heading">Good shows start <em>here.</em></span><span class="ss-phone-heading">The show <em>lineup.</em></span></h1><p>Your sellers. Every platform. One beautiful plan.</p></div>
+        <button class="seller-submit ss-add-desktop" data-new-show><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Schedule a show</button>
       </header>
-
-      <section class="seller-metrics" aria-label="Seller summary">
-        <div class="seller-metric">
-          <span>Next Shift</span>
-          <strong id="metric-next-shift">-</strong>
-        </div>
-        <div class="seller-metric">
-          <span>Booked This Month</span>
-          <strong id="metric-booked-hours">0h</strong>
-        </div>
-        <div class="seller-metric">
-          <span>Estimated Commission</span>
-          <strong id="metric-commission">$0.00</strong>
-        </div>
-        <div class="seller-metric">
-          <span>Pending Approvals</span>
-          <strong id="metric-pending">0</strong>
-        </div>
+      <div id="schedule-status" class="ss-status" role="status" aria-live="polite">Loading your schedule…</div>
+      <section class="ss-summary" aria-label="Schedule summary">
+        <div><span>SHOWS PLANNED</span><strong id="ss-total">—</strong><small id="ss-period-caption">This week</small></div>
+        <div><span>ON THE AIR</span><strong id="ss-hours">—</strong><small>Scheduled seller hours</small></div>
+        <div><span>THE LINEUP</span><strong id="ss-sellers">—</strong><small>Sellers on the schedule</small></div>
+        <div class="ss-next"><span>UP NEXT</span><strong id="ss-next-name">—</strong><small id="ss-next-time">Checking the lineup</small></div>
       </section>
-
-      <section class="seller-layout">
-        <div class="seller-calendar-panel">
-          <div class="seller-toolbar">
-            <div>
-              <span class="seller-kicker">Current Month</span>
-              <h2 id="seller-month-label">-</h2>
-            </div>
-            <div class="seller-toolbar-actions">
-              <button id="seller-refresh" class="seller-icon-button" type="button" aria-label="Refresh schedule">
-                <i data-lucide="refresh-cw"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="seller-weekdays" aria-hidden="true">
-            <span>Sun</span>
-            <span>Mon</span>
-            <span>Tue</span>
-            <span>Wed</span>
-            <span>Thu</span>
-            <span>Fri</span>
-            <span>Sat</span>
-          </div>
-          <div id="seller-calendar" class="seller-calendar" aria-label="Seller sale calendar"></div>
+      <section class="ss-planner" aria-label="Show planner">
+        <div class="seller-toolbar">
+          <div class="ss-date-navigation"><button id="ss-prev" class="seller-icon-button" aria-label="Previous period"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><div><span id="ss-range-year">YOUR SCHEDULE</span><h2 id="seller-month-label">Your week</h2></div><button id="ss-next" class="seller-icon-button" aria-label="Next period"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button></div>
+          <div class="ss-toolbar-actions"><button id="ss-today" class="ss-quiet-button">Today</button><div class="ss-view-switch" role="group" aria-label="Schedule view"><button data-view="week" aria-pressed="true">Week</button><button data-view="month" aria-pressed="false">Month</button><button data-view="agenda" aria-pressed="false">Agenda</button></div><button id="seller-refresh" class="seller-icon-button" aria-label="Refresh schedule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div>
         </div>
-
-        <aside class="seller-booking-panel">
-          <div class="seller-panel-head">
-            <div>
-              <span class="seller-kicker">Selected Day</span>
-              <h2 id="selected-day-title">Today</h2>
-            </div>
-            <button id="seller-clear-edit" class="seller-text-button hidden" type="button">New</button>
-          </div>
-
-          <div id="selected-day-roster" class="seller-roster"></div>
-
-          <form id="seller-booking-form" class="seller-form">
-            <input id="booking-shift-id" type="hidden" />
-
-            <label>
-              Date
-              <input id="booking-date" type="date" required />
-            </label>
-
-            <div class="seller-segment" role="group" aria-label="Sale channel">
-              <button type="button" class="active" data-channel="ebay">eBay</button>
-              <button type="button" data-channel="whatnot">Whatnot</button>
-            </div>
-
-            <label>
-              Store
-              <select id="booking-store" required></select>
-            </label>
-
-            <div class="seller-time-grid">
-              <label>
-                Start
-                <input id="booking-start" type="time" step="1800" required />
-              </label>
-              <label>
-                End
-                <input id="booking-end" type="time" step="1800" required />
-              </label>
-            </div>
-
-            <label>
-              Note
-              <textarea id="booking-note" rows="2" placeholder="Optional"></textarea>
-            </label>
-
-            <div id="booking-availability" class="seller-availability">Choose a time.</div>
-
-            <div class="seller-form-actions">
-              <button id="booking-submit" class="seller-submit" type="submit">Book Shift</button>
-              <button id="booking-cancel-shift" class="seller-danger hidden" type="button">Cancel Shift</button>
-            </div>
-            <div id="seller-form-status" class="seller-status" role="status" aria-live="polite"></div>
-          </form>
-        </aside>
+        <div class="ss-filters"><div class="ss-platform-filters" role="group" aria-label="Filter by platform"><button data-platform="all" aria-pressed="true">All platforms <span id="ss-count-all">0</span></button><button data-platform="ebay" aria-pressed="false"><span class="ss-dot ss-ebay"></span>eBay <span id="ss-count-ebay">0</span></button><button data-platform="whatnot" aria-pressed="false"><span class="ss-dot ss-whatnot"></span>Whatnot <span id="ss-count-whatnot">0</span></button><button data-platform="tiktok" aria-pressed="false"><span class="ss-dot ss-tiktok"></span>TikTok <span id="ss-count-tiktok">0</span></button></div><label class="ss-seller-filter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5"/></svg><span class="ss-sr-only">Filter by seller</span><select id="ss-seller-filter"><option value="all">All sellers</option></select></label></div>
+        <div class="ss-mobile-week" id="ss-mobile-week" aria-label="Choose a day"></div>
+        <div id="seller-calendar" aria-label="Show schedule"></div>
+        <footer class="ss-board-footer"><span id="ss-timezone"></span><span><span class="ss-dot ss-pending"></span> Pending approval</span></footer>
       </section>
-
-      <section id="seller-management-panel" class="seller-management-panel hidden">
+      <section class="ss-underboard"><div class="ss-day-lineup"><div class="seller-panel-head"><div><span class="seller-kicker">A CLOSER LOOK</span><h2 id="selected-day-title">Today's lineup</h2></div><button class="ss-quiet-button" data-new-show>Add show <span aria-hidden="true">↗</span></button></div><div id="selected-day-roster" class="seller-roster"></div></div><aside class="ss-planning-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7ZM21 2v4m-2-2h4"/></svg><span class="seller-kicker">ROOM FOR YOUR NEXT BIG THING</span><h2>Make time for<br><em>something great.</em></h2><p>Choose a day, pick a platform, and put your sellers in the spotlight.</p><span class="ss-rule">2-hour minimum · 30-minute intervals</span></aside></section>
+            <details id="seller-management-panel" class="seller-management-panel hidden"><summary>Team management <span>Approvals, blocked time &amp; payouts</span></summary><div class="ss-details-body">
         <div class="seller-panel-head">
           <div>
             <span class="seller-kicker">Management</span>
@@ -209,7 +81,7 @@
               <select id="block-channel">
                 <option value="all">All</option>
                 <option value="ebay">eBay</option>
-                <option value="whatnot">Whatnot</option>
+                <option value="whatnot">Whatnot</option><option value="tiktok">TikTok</option>
               </select>
             </label>
             <label>
@@ -252,9 +124,9 @@
             <div id="seller-payout-status" class="seller-status" role="status" aria-live="polite"></div>
           </form>
         </div>
-      </section>
+      </div></details>
 
-      <section class="seller-bottom-grid">
+      <details class="ss-account"><summary>Seller workspace <span>Upcoming shifts, commission &amp; notifications</span></summary><section class="seller-bottom-grid">
         <div class="seller-list-panel">
           <div class="seller-panel-head">
             <div>
@@ -295,13 +167,40 @@
           </div>
           <div id="seller-notifications" class="seller-list"></div>
         </div>
-      </section>
+      </section></details>
+      <footer class="ss-page-footer"><span>OG Jewelry · Show studio</span><span>A shared stage. A clear schedule.</span></footer>
     </main>
   </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <div class="ss-mobile-dock"><a href="seller-dashboard.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-13 4h1m3 0h1m3 0h1m-9 3h1m3 0h1"/></svg><span>Schedule</span></a><button data-new-show><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New show</button><a href="live-sales.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 7.8a6 6 0 0 0 0 8.4M19 5a10 10 0 0 1 0 14M5 5a10 10 0 0 0 0 14"/></svg><span>Go live</span></a></div>
+  <dialog id="ss-editor" class="seller-booking-panel" aria-labelledby="ss-editor-title">
+    <div class="ss-editor-head"><div><span class="seller-kicker">SET THE STAGE</span><h2 id="ss-editor-title">Schedule a show</h2><p id="ss-editor-caption">Give your next show a place on the calendar.</p></div><button id="ss-editor-close" class="seller-icon-button" aria-label="Close show editor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <form id="seller-booking-form" class="seller-form">
+      <input id="booking-shift-id" type="hidden" />
+      <label id="ss-booking-seller-label" hidden>Seller<select id="booking-seller"></select></label>
+      <fieldset class="ss-platform-field"><legend>Platform</legend><div class="seller-segment"><button type="button" data-channel="ebay" class="active" aria-pressed="true"><span class="ss-dot ss-ebay"></span>eBay</button><button type="button" data-channel="whatnot" aria-pressed="false"><span class="ss-dot ss-whatnot"></span>Whatnot</button><button type="button" data-channel="tiktok" aria-pressed="false"><span class="ss-dot ss-tiktok"></span>TikTok</button></div></fieldset>
+      <div class="seller-time-grid"><label>Date<input id="booking-date" type="date" required /></label><label>Studio / store<select id="booking-store" required></select></label></div>
+      <div class="seller-time-grid"><label>Starts at<input id="booking-start" type="time" step="1800" required /></label><label>Ends at<input id="booking-end" type="time" step="1800" required /></label></div>
+      <label class="ss-checkbox"><input id="booking-overnight" type="checkbox" /> Ends the following day</label>
+      <p id="ss-form-timezone" class="ss-form-hint"></p>
+      <div id="ss-reminder-status" class="ss-reminder-status" role="status">Host reminder · Checking SMS setup…</div>
+      <label>Show notes<textarea id="booking-note" rows="3" maxlength="2000" placeholder="The theme, the collection, or something the team should know…"></textarea></label>
+      <div id="booking-availability" class="seller-availability" role="status">Choose a start and end time.</div>
+      <div id="seller-form-status" class="seller-status" role="status" aria-live="polite"></div>
+      <div class="seller-form-actions"><button id="booking-cancel-shift" class="seller-danger hidden" type="button">Cancel show</button><button id="seller-clear-edit" class="ss-quiet-button hidden" type="button">New show</button><button id="booking-submit" class="seller-submit" type="submit">Schedule show</button></div>
+    </form>
+  </dialog>
+  <dialog id="ss-cancel-dialog" class="seller-booking-panel ss-cancel-panel" aria-labelledby="ss-cancel-title">
+    <div class="ss-editor-head"><div><span class="seller-kicker">A CHANGE OF PLANS</span><h2 id="ss-cancel-title">Cancel this show?</h2><p id="ss-cancel-caption"></p></div></div>
+    <form id="ss-cancel-form" class="seller-form">
+      <label>Reason <textarea id="ss-cancel-reason" rows="3" maxlength="2000" placeholder="Let the team know what changed (optional)"></textarea></label>
+      <p id="ss-cancel-status" class="seller-status" role="status"></p>
+      <div class="seller-form-actions"><button id="ss-cancel-keep" class="ss-quiet-button" type="button">Keep show</button><button id="ss-cancel-submit" class="seller-danger" type="submit">Cancel show</button></div>
+    </form>
+  </dialog>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js"></script>
+  <script src="seller-dashboard.js?v=20261113-show-studio1"></script>
+  <script src="seller-schedule.js?v=20261113-show-studio1"></script>
 </body>
 </html>
