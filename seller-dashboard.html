@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#183d35" />
   <title>Show Schedule · OG Jewelry</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-calendar-polish1" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-calendar-report1" />
+  <link rel="stylesheet" href="seller-schedule-report.css?v=20261113-calendar-report1" />
 
 </head>
 <body class="ss-show-studio">
@@ -45,6 +46,7 @@
           <div class="ss-toolbar-actions"><button id="ss-today" class="ss-quiet-button">Today</button><div class="ss-view-switch" role="group" aria-label="Schedule view"><button data-view="week" aria-pressed="true">Week</button><button data-view="month" aria-pressed="false">Month</button><button data-view="agenda" aria-pressed="false">Agenda</button></div><button id="seller-refresh" class="seller-icon-button" aria-label="Refresh schedule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div>
         </div>
         <div class="ss-filters"><div class="ss-platform-filters" role="group" aria-label="Filter by platform"><button data-platform="all" aria-pressed="true">All platforms <span id="ss-count-all">0</span></button><button data-platform="ebay" aria-pressed="false"><span class="ss-dot ss-ebay"></span>eBay <span id="ss-count-ebay">0</span></button><button data-platform="whatnot" aria-pressed="false"><span class="ss-dot ss-whatnot"></span>Whatnot <span id="ss-count-whatnot">0</span></button><button data-platform="tiktok" aria-pressed="false"><span class="ss-dot ss-tiktok"></span>TikTok <span id="ss-count-tiktok">0</span></button></div><label class="ss-seller-filter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5"/></svg><span class="ss-sr-only">Filter by seller</span><select id="ss-seller-filter"><option value="all">All sellers</option></select></label></div>
+        <div class="ss-report-entry"><span>See every hour. Take the plan with you.</span><button id="ss-open-report" class="ss-quiet-button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Report <span aria-hidden="true">↗</span></button></div>
         <div class="ss-mobile-week" id="ss-mobile-week" aria-label="Choose a day"></div>
         <div id="seller-calendar" aria-label="Show schedule"></div>
         <footer class="ss-board-footer"><span id="ss-timezone"></span><span><span class="ss-dot ss-pending"></span> Pending approval</span></footer>
@@ -212,7 +214,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js?v=20261113-calendar-polish1"></script>
-  <script src="seller-schedule.js?v=20261113-calendar-polish1"></script>
+  <script src="seller-dashboard.js?v=20261113-calendar-report1"></script>
+  <script src="seller-schedule.js?v=20261113-calendar-report1"></script>
+  <script src="seller-schedule-report.js?v=20261113-calendar-report1"></script>
 </body>
 </html>

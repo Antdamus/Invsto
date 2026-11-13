@@ -2,8 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { chromium, webkit } from '@playwright/test';
+import { createRequire } from 'node:module';
+const {PDFDocument}=createRequire(import.meta.url)('../vendor/pdf-lib/pdf-lib.min.js');
 
 const root=new URL('../',import.meta.url);
+const reportOutput=name=>new URL('../output/show-studio/'+name,import.meta.url).pathname.replace(/^\/(\w:)/,'$1');
 const mock = `
 const testEmployee={id:'seller-admin',user_id:'user-admin',display_name:'Jose',email:'jose@example.test',role:'admin',active:true};
 window.testCalls=[];window.testFailSave=false;window.testFailLoad=false;
@@ -293,6 +296,124 @@ test('WebKit phone layout: calendar date selection, weekly repeat editor, and ke
     await page.keyboard.press('Escape');
     await page.waitForFunction(()=>!document.querySelector('#ss-editor').open);
     assert.equal(await page.getByRole('dialog').count(),0);
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});
+
+async function reportFixture(page){
+  await page.evaluate(()=>{
+    state.selectedDate=new Date(2026,10,16);state.currentMonth=new Date(2026,10,1);
+    const fixture=[],at=(day,hour,minute=0)=>new Date(2026,10,16+day,hour,minute).toISOString();
+    function row(day,start,end,seller,name){fixture.push({row_type:'shift',shift_id:'report-'+fixture.length,seller_employee_id:seller,seller_name:name,channel:'ebay',start_at:at(day,...start),end_at:at(day+(end[0]<start[0]?1:0),...end),store_name:'Airport Store',status:'booked',is_blocked:false});}
+    for(let day=0;day<5;day++){row(day,[10],[13],'seller-sydney','Sydney Miller');row(day,[14],[17],'seller-sydney','Sydney Miller');}
+    for(const day of [-1,4,5,6])row(day,[22,30],[1,30],'seller-otello','Otello Guillen');
+    window.testRows=fixture;state.rows=fixture;renderShowPlanner();
+  });
+}
+
+for(const width of [320,1440])test(`hourly calendar report at ${width}px exports a full-page PDF and preserves schedule data`,async()=>{
+  const browser=await chromium.launch();try{
+    const {page,errors}=await openPage(browser,width);await reportFixture(page);
+    await page.locator('#ss-open-report').click();
+    await page.waitForFunction(()=>document.querySelector('#ss-report-download').disabled===false);
+    assert.equal(await page.locator('.ss-report-day-heading').count(),7);
+    assert.equal(await page.locator('.ss-report-hours>span').count(),25);
+    assert.equal(await page.locator('.ss-report-event').count(),16,'overnight portions appear in the following column');
+    assert.match(await page.locator('#ss-report-summary').innerText(),/14 shows · 39 host hours · 2 hosts/);
+    assert.equal(await page.evaluate(()=>showReport.model.rows.length),14,'month RPC results are deduplicated');
+    assert.equal(await page.evaluate(()=>document.querySelector('#ss-report').scrollWidth<=document.querySelector('#ss-report').clientWidth),true);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.locator('#ss-report-preview').scrollIntoViewIfNeeded();
+    await page.screenshot({path:reportOutput(`report-${width}.png`)});
+    const download=page.waitForEvent('download');await page.locator('#ss-report-download').click();
+    const result=await download;await result.saveAs(reportOutput(`calendar-${width}.pdf`));
+    assert.equal(result.suggestedFilename(),'show-schedule-2026-11-16-to-2026-11-22.pdf');
+    const pdf=await PDFDocument.load(await readFile(reportOutput(`calendar-${width}.pdf`)));
+    assert.equal(pdf.getPageCount(),1,'default PDF is the calendar itself');
+    assert.deepEqual(pdf.getPage(0).getSize(),{width:1224,height:792},'large landscape calendar');
+    assert.equal(await page.locator('#ss-report-ready').isVisible(),true);
+    await page.locator('#ss-report-paper').selectOption('letter');await page.locator('#ss-report-details').check();
+    const letterDownload=page.waitForEvent('download');await page.locator('#ss-report-download').click();
+    await (await letterDownload).saveAs(reportOutput(`calendar-letter-${width}.pdf`));
+    const letter=await PDFDocument.load(await readFile(reportOutput(`calendar-letter-${width}.pdf`)));
+    assert.equal(letter.getPageCount(),3,'one calendar plus paginated full lineup');
+    assert.deepEqual(letter.getPage(0).getSize(),{width:792,height:612});
+    if(width===1440){
+      await page.locator('#ss-report-details').uncheck();await page.locator('#ss-report-paper').selectOption('tabloid');
+      await page.locator('[data-report-range="month"]').click();
+      await page.waitForFunction(()=>showReport.model?.pages.length===6);
+      assert.equal(await page.locator('.ss-report-day.is-outside').count(),6,'partial weeks retain Monday through Sunday columns');
+      const monthDownload=page.waitForEvent('download');await page.locator('#ss-report-download').click();
+      await (await monthDownload).saveAs(reportOutput('calendar-month.pdf'));
+      const monthPdf=await PDFDocument.load(await readFile(reportOutput('calendar-month.pdf')));
+      assert.equal(monthPdf.getPageCount(),6);
+      await page.locator('[data-report-range="day"]').click();
+      await page.waitForFunction(()=>showReport.model?.pages[0].days.length===1);
+      assert.equal(await page.locator('.ss-report-day-heading').count(),1);
+      await page.locator('[data-report-range="week"]').click();
+      await page.waitForFunction(()=>showReport.model?.pages[0].days.length===7);
+    }
+    await page.locator('#ss-report-platform').selectOption('tiktok');
+    await page.waitForFunction(()=>document.querySelector('#ss-report-status').textContent.includes('No shows match'));
+    assert.equal(await page.locator('.ss-report-event').count(),0);
+    assert.equal(await page.locator('#ss-report-ready').isVisible(),false,'changed filters invalidate the old export');
+    await page.locator('#ss-report-platform').selectOption('all');
+    await page.locator('#ss-report-seller').selectOption('seller-otello');
+    await page.waitForFunction(()=>document.querySelector('#ss-report-summary').textContent.startsWith('4 shows'));
+    assert.match(await page.locator('#ss-report-summary').innerText(),/4 shows · 9 host hours · 1 host/);
+    await page.locator('#ss-report-from').fill('2026-10-31');await page.locator('#ss-report-to').fill('2026-11-03');
+    await page.waitForFunction(()=>showReport.model&&dateKey(showReport.model.start)==='2026-10-31');
+    assert.equal(await page.evaluate(()=>showReport.model.pages.length),2);
+    assert.equal(await page.locator('.ss-report-day-heading').count(),7);
+    assert.equal(await page.locator('.ss-report-day.is-outside').count(),5);
+    await page.locator('#ss-report-next').click();assert.equal(await page.locator('.ss-report-day-heading').count(),7);
+    assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c.name==='get_seller_schedule_month'&&c.args._month==='2026-10-01')));
+    await page.locator('#ss-report-to').fill('2026-12-31');
+    await page.waitForFunction(()=>document.querySelector('#ss-report-status').textContent.includes('31 days'));
+    assert.equal(await page.locator('#ss-report-download').isDisabled(),true);
+    await page.evaluate(()=>window.testFailLoad=true);await page.locator('[data-report-range="week"]').click();
+    await page.waitForFunction(()=>document.querySelector('#ss-report-status').textContent.includes('Connection unavailable'));
+    assert.equal(await page.locator('#ss-report-download').isDisabled(),true);
+    await page.evaluate(()=>window.testFailLoad=false);await page.locator('#ss-report-reload').click();
+    await page.waitForFunction(()=>!document.querySelector('#ss-report-download').disabled);
+    await page.locator('#ss-report-close').click();assert.equal(await page.getByRole('dialog').count(),0);
+    assert.equal(await page.evaluate(()=>dateKey(state.selectedDate)),'2026-11-16','report ranges leave the planner selection alone');
+    assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>/^(admin_|book_|request_|cancel_)/.test(c.name)).length),0,'report never writes schedules or sends reminders');
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});
+
+test('report handles overlaps, midnight boundaries, DST hours, blocked time, stale loads, and WebKit PDF download',async()=>{
+  const browser=await webkit.launch();try{
+    const {page,errors}=await openPage(browser,390);await reportFixture(page);
+    const model=await page.evaluate(()=>{
+      const rows=[
+        {shift_id:'a',seller_employee_id:'a',seller_name:'One',start_at:'2026-11-01T00:00:00-04:00',end_at:'2026-11-01T03:00:00-05:00',channel:'ebay',status:'booked'},
+        {shift_id:'b',seller_employee_id:'b',seller_name:'Two',start_at:'2026-11-01T02:00:00-05:00',end_at:'2026-11-01T04:00:00-05:00',channel:'ebay',status:'booked'},
+        {shift_id:'c',seller_employee_id:'c',seller_name:'Three',start_at:'2026-11-01T04:00:00-05:00',end_at:'2026-11-02T00:00:00-05:00',channel:'ebay',status:'booked'},
+        {block_id:'d',is_blocked:true,start_at:'2026-11-01T06:00:00-05:00',end_at:'2026-11-01T08:00:00-05:00',channel:'all',status:'blocked'},
+        {shift_id:'e',start_at:'2026-11-01T01:00:00-04:00',end_at:'2026-11-01T03:00:00-05:00',channel:'ebay',status:'cancelled'},
+      ];
+      const report=buildShowReportModel(rows,new Date(2026,10,1),new Date(2026,10,2),'ebay','all','All sellers');
+      return {hours:report.hours,shows:report.shows,segments:report.pages[0].days[0].segments.map(s=>({id:s.row.shift_id||s.row.block_id,from:s.from,to:s.to,lane:s.lane,lanes:s.lanes,continues:s.continues})),next:reportDaySegments(rows.slice(0,3),new Date(2026,10,2)).length};
+    });
+    assert.equal(model.shows,3);assert.equal(model.hours,26,'DST elapsed hours and overlapping host hours are counted accurately');
+    assert.equal(model.segments[0].lanes,2);assert.equal(model.segments[1].lane,1);
+    assert.equal(model.segments[2].to,1440);assert.equal(model.segments[2].continues,false);assert.equal(model.next,0,'midnight end does not create a phantom carryover');
+    await page.locator('#ss-open-report').click();await page.waitForFunction(()=>showReport.model!==null);
+    await page.evaluate(()=>{
+      const rpc=window.supabase.rpc;
+      window.supabase.rpc=(name,args)=>name==='get_seller_schedule_month'&&args._month==='2026-12-01'?new Promise(resolve=>setTimeout(()=>resolve({data:[]}),250)):rpc(name,args);
+    });
+    await page.locator('#ss-report-from').fill('2026-12-01');await page.locator('#ss-report-to').fill('2026-12-07');
+    await page.locator('[data-report-range="week"]').click();await page.waitForFunction(()=>showReport.model?.shows===14);
+    await page.waitForTimeout(300);assert.equal(await page.evaluate(()=>dateKey(showReport.model.start)),'2026-11-16');
+    await page.locator('[data-report-hour="20"]').click();
+    assert.ok(await page.locator('#ss-report-preview').evaluate(el=>el.scrollTop>700));
+    const download=page.waitForEvent('download');await page.locator('#ss-report-download').click();
+    await (await download).saveAs(reportOutput('calendar-webkit.pdf'));
+    assert.equal((await PDFDocument.load(await readFile(reportOutput('calendar-webkit.pdf')))).getPageCount(),1);
+    await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#ss-report').open);assert.equal(await page.getByRole('dialog').count(),0);
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
 });

@@ -257,6 +257,7 @@ function getShowRepeatRequest() {
   return {_request_id:showPlanner.repeatRequest.id,...args};
 }
 function setupShowPlanner() {
+  setupShowReport();
   const name=state.employee?.display_name||"Your workspace";
   $("ss-user-name").textContent=name;$("ss-user-initials").textContent=showInitials(name);
   document.querySelectorAll("[data-management-link]").forEach(el=>el.hidden=!canManageSellers());
