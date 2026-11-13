@@ -18,10 +18,10 @@ window.testRows=[
  {shift_id:'s6',seller_employee_id:'seller-otello',seller_name:'Otello',channel:'ebay',start_at:at(4,20),end_at:at(5,1),notes:'Friday night, in good company'},
  {shift_id:'s7',seller_employee_id:'seller-sydney',seller_name:'Sydney',channel:'whatnot',start_at:at(5,13),end_at:at(5,16),notes:'Weekend treasures'},
  {shift_id:'s8',seller_employee_id:'seller-manny',seller_name:'Manny',channel:'tiktok',start_at:at(6,16),end_at:at(6,19),notes:'The Sunday selection'},
-].map(r=>({...r,metadata:['s1','s3'].includes(r.shift_id)?{recurrence_id:'repeat-1'}:{},row_type:'shift',store_id:'store-1',store_name:'Main studio',status:'booked',is_blocked:false,is_mine:false,can_change_without_approval:true}));
+].map(r=>({...r,metadata:['s1','s3'].includes(r.shift_id)?{recurrence_id:'repeat-1'}:{},row_type:'shift',store_id:'store-1',store_name:'Airport Store',status:'booked',is_blocked:false,is_mine:false,can_change_without_approval:true}));
 window.testSellers=[testEmployee,{id:'seller-otello',display_name:'Otello'},{id:'seller-sydney',display_name:'Sydney'},{id:'seller-manny',display_name:'Manny'}];
 window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmployee.user_id}}}}),signOut:async()=>({})},from(table){
- const q={select(){return q},eq(){return q},in(){return q},order(){return q},limit(){return q},update(){return q},maybeSingle:async()=>({data:testEmployee}),then(resolve){resolve({data:table==='store_locations'?[{id:'store-1',name:'Main studio',active:true}]:[]})}};return q;
+ const q={select(){return q},eq(){return q},in(){return q},order(){return q},limit(){return q},update(){return q},maybeSingle:async()=>({data:testEmployee}),then(resolve){resolve({data:table==='store_locations'?[{id:'store-other',name:'Seybold Store',active:true},{id:'store-1',name:'Airport Store',active:true}]:[]})}};return q;
 },rpc:async(name,args)=>{
  window.testCalls.push({name,args});
  if(name==='current_user_can_use_seller_schedule')return {data:true};
@@ -31,7 +31,7 @@ window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmploye
  if(['admin_schedule_seller_show','book_seller_sale_shift'].includes(name)){
    if(window.testFailSave)return {error:{message:'Please try again. Connection interrupted.'}};
    const person=window.testSellers.find(s=>s.id===args._seller_employee_id)||testEmployee;
-   window.testRows.push({row_type:'shift',shift_id:'created',seller_employee_id:person.id,seller_name:person.display_name,channel:args._channel,store_id:args._store_id,store_name:'Main studio',start_at:args._start_at,end_at:args._end_at,notes:args._notes,status:'booked',is_mine:false,can_change_without_approval:true});return {data:{status:'booked'}};
+   window.testRows.push({row_type:'shift',shift_id:'created',seller_employee_id:person.id,seller_name:person.display_name,channel:args._channel,store_id:args._store_id,store_name:'Airport Store',start_at:args._start_at,end_at:args._end_at,notes:args._notes,status:'booked',is_mine:false,can_change_without_approval:true});return {data:{status:'booked'}};
  }
  if(name==='request_seller_sale_shift_edit'){const row=window.testRows.find(r=>r.shift_id===args._shift_id);Object.assign(row,{channel:args._channel,start_at:args._start_at,end_at:args._end_at,notes:args._reason});return {data:{status:'updated'}};}
  if(name==='cancel_seller_sale_shift'){window.testRows=window.testRows.filter(r=>r.shift_id!==args._shift_id);return {data:{status:'cancelled'}};}
@@ -109,6 +109,7 @@ for(const width of [360,390,430,1440])test(`show planner at ${width}px: views, f
     await page.waitForFunction(()=>document.querySelector('#schedule-status').textContent.includes('stage is set'));
     const saved=await page.evaluate(()=>window.testCalls.filter(c=>c.name==='admin_schedule_seller_show').at(-1));
     assert.equal(saved.args._seller_employee_id,'seller-manny');assert.equal(saved.args._channel,'tiktok');
+    assert.equal(saved.args._store_id,'store-1','automatically uses Airport Store even when another store is listed first');
     assert.equal((new Date(saved.args._end_at)-new Date(saved.args._start_at))/3600000,3);
     assert.equal(await page.locator('#seller-calendar img').count(),0,'notes are escaped');
     await page.locator('#seller-calendar [data-show-id="created"]').first().click();

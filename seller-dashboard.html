@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#183d35" />
   <title>Show Schedule · OG Jewelry</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-recurring-shows1" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-airport-shows1" />
 
 </head>
 <body>
@@ -178,7 +178,8 @@
       <input id="booking-shift-id" type="hidden" />
       <label id="ss-booking-seller-label" hidden>Seller<select id="booking-seller"></select></label>
       <fieldset class="ss-platform-field"><legend>Platform</legend><div class="seller-segment"><button type="button" data-channel="ebay" class="active" aria-pressed="true"><span class="ss-dot ss-ebay"></span>eBay</button><button type="button" data-channel="whatnot" aria-pressed="false"><span class="ss-dot ss-whatnot"></span>Whatnot</button><button type="button" data-channel="tiktok" aria-pressed="false"><span class="ss-dot ss-tiktok"></span>TikTok</button></div></fieldset>
-      <div class="seller-time-grid"><label>Date<input id="booking-date" type="date" required /></label><label>Studio / store<select id="booking-store" required></select></label></div>
+      <label>Date<input id="booking-date" type="date" required /></label>
+      <p class="ss-form-hint">All shows take place at Airport Store.</p>
       <div class="seller-time-grid"><label>Starts at<input id="booking-start" type="time" step="1800" required /></label><label>Ends at<input id="booking-end" type="time" step="1800" required /></label></div>
       <label class="ss-checkbox"><input id="booking-overnight" type="checkbox" /> Ends the following day</label>
       <p id="ss-form-timezone" class="ss-form-hint"></p>
@@ -201,7 +202,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js?v=20261113-recurring-shows1"></script>
-  <script src="seller-schedule.js?v=20261113-recurring-shows1"></script>
+  <script src="seller-dashboard.js?v=20261113-airport-shows1"></script>
+  <script src="seller-schedule.js?v=20261113-airport-shows1"></script>
 </body>
 </html>

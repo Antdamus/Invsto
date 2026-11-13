@@ -271,23 +271,6 @@ async function loadStores() {
 
   if (error) throw error;
   state.stores = Array.isArray(data) ? data : [];
-  renderStoreOptions();
-}
-
-function renderStoreOptions() {
-  const select = $("booking-store");
-  if (!select) return;
-
-  if (!state.stores.length) {
-    select.innerHTML = `<option value="">No active stores</option>`;
-    return;
-  }
-
-  const current = select.value || state.stores[0]?.id || "";
-  select.innerHTML = state.stores
-    .map((store) => `<option value="${escapeHtml(store.id)}">${escapeHtml(store.name || "Store")}</option>`)
-    .join("");
-  select.value = state.stores.some((store) => store.id === current) ? current : state.stores[0].id;
 }
 
 async function loadSchedule() { await loadShowRange(); }
@@ -901,7 +884,6 @@ function setEditMode(row) {
   $("booking-start").value = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
   $("booking-end").value = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
   $("booking-note").value = row.notes || "";
-  if (row.store_id && $("booking-store")) $("booking-store").value = row.store_id;
   setSelectedChannel(row.channel);
   $("booking-submit").textContent = row.can_change_without_approval || canManageSellers() ? "Save changes" : "Request change";
   $("booking-cancel-shift")?.classList.remove("hidden");
@@ -943,7 +925,9 @@ async function submitBooking(event) {
   if(!validation.ok){setStatus(validation.message,"error");return;}
   if($("booking-availability").classList.contains("is-full")){setStatus($("booking-availability").textContent,"error");return;}
   const shiftId=$("booking-shift-id").value;
-  const params={_channel:getSelectedChannel(),_store_id:$("booking-store").value||null,_start_at:validation.start.toISOString(),_end_at:validation.end.toISOString()};
+  const store=state.stores.find(item=>item.active!==false&&String(item.name||"").trim().toLowerCase()==="airport store");
+  if(!store){setStatus("Airport Store is unavailable. Please contact management before scheduling.","error");return;}
+  const params={_channel:getSelectedChannel(),_store_id:store.id,_start_at:validation.start.toISOString(),_end_at:validation.end.toISOString()};
   const note=$("booking-note").value||null;
   const sellerId=$("booking-seller").value;
   if(canManageSellers()&&!sellerId){setStatus("Choose the seller for this show.","error");return;}
@@ -1268,7 +1252,7 @@ function setupListeners() {
     button.addEventListener("click", () => setSelectedChannel(button.dataset.channel));
   });
 
-  ["booking-date", "booking-start", "booking-end", "booking-store"].forEach((id) => {
+  ["booking-date", "booking-start", "booking-end"].forEach((id) => {
     $(id)?.addEventListener("change", updateAvailabilityPreview);
     $(id)?.addEventListener("input", updateAvailabilityPreview);
   });
