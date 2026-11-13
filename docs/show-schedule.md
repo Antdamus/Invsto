@@ -2,13 +2,15 @@
 
 The recovered show scheduler lives at `seller-dashboard.html`, linked as **Show Schedule** in the admin and manager navigation. Seller sign-in still opens this page. It uses the original `seller_sale_shifts`, blocked times, approval requests, and commission workspace; no historical schedule rows are replaced.
 
-On a phone, Week shows a seven-day picker and the selected day's show cards. Desktop Week maps platforms to rows and days to columns. Month and Agenda are available on both, with platform and seller filters. Overnight shows also appear on the following day as continuations. Times are explicitly labeled with the viewer's local timezone.
+On a phone, Week shows a seven-day picker and the selected day's show cards. Desktop Week maps platforms to rows and days to columns. Month and Agenda are available on both, with platform and seller filters. In Month, tap a date or empty day space to open a show with that date selected; tap a show to open its details. Compact month cards show seller initials and both start/end times, with a seller key above the grid. `+1` means the show ends the next day; `↳` marks its continuation from the previous day, showing only that day's remaining hours. Times are explicitly labeled with the viewer's local timezone.
 
 The show editor automatically assigns Airport Store for new shows and edits. There is no store selector. If the active Airport Store record is unavailable, saving stops with an error instead of assigning another location.
 
 Managers can assign an active team member to eBay, Whatnot, or TikTok in any month. Sellers can self-book in the current store-local month. Existing near-start edit and cancellation approvals remain in place. Shows use half-hour intervals, run between two and 24 hours, and may cross midnight. Capacity is two simultaneous sellers per platform; the same seller cannot overlap across platforms. Blocks apply across sellers. Saves recheck availability on the server.
 
-Persistent weekly patterns are stored in `seller_show_recurrences`. The daily `materialize recurring seller shows` cron extends their upcoming 90-day calendar window. Store-local times preserve daylight-saving changes; overnight shows end on the next local date. Individual edits and cancellations retain their occurrence key and never get recreated. Conflicts are recorded in `seller_show_recurrence_conflicts` and retried on the next daily run. Managers can open a repeating show and choose **Stop repeating**, which cancels future shows, pending change requests, and pending reminders for that time slot. Other recurring slots remain active. Pattern creation currently uses an authorized database operation; the editor creates individual shows.
+Managers can choose **Repeat** in the new-show editor: weekly, weekdays, daily, or custom weekdays, with an optional inclusive end date. The selected start date must match a repeat day. Patterns are stored in `seller_show_recurrences`; calendar-created patterns retain the editor's stated timezone across daylight-saving changes. Older patterns retain their store timezone. The first 90 days from the selected start date are checked and saved atomically, including existing patterns beyond the current calendar window. A conflict rolls back the whole new series. A request ID prevents duplicate shows when retrying a save.
+
+The daily `materialize recurring seller shows` cron extends the upcoming 90-day window. Individual edits and cancellations retain their occurrence key and never get recreated. Later conflicts are recorded in `seller_show_recurrence_conflicts` and retried on the next daily run. Managers can open a repeating show and choose **Stop repeating**, which cancels future shows, pending change requests, and pending reminders for that time slot. Other recurring slots remain active.
 
 ## Release
 
@@ -17,6 +19,8 @@ Apply `supabase/migrations/20261113010000_show_schedule_studio.sql` and `2026111
 Apply `20261113030000_recurring_seller_shows.sql` for weekly patterns and the stop-series control. The migration installs the tables, protected functions, and daily refill job; actual host patterns are configured separately.
 
 Active employees assigned to upcoming shows or an active recurring pattern can follow the schedule link with their existing account. Their employee role and manager permissions remain unchanged.
+
+Apply `20261113040000_show_calendar_recurrence_editor.sql` before publishing the calendar repeat controls. It adds the manager-only creation RPC, idempotency and explicit pattern timezones, and shares occurrence generation between creation and the existing refill job. It does not change existing show assignments or create test bookings.
 
 Host reminders use the existing employee SMS system: the active worker-reminder job calls `enqueue_upcoming_shift_reminders()` every 30 seconds, which queues show reminders during the 30 minutes before a show's start. The existing `sms-dispatcher` sends them through `sms_outbox`. Each message names the assigned host, platform, store-local start/end time, studio, and schedule link. Only the host's linked `user_phones` record with `can_sms=true` is eligible; manager alert recipients are never substituted.
 

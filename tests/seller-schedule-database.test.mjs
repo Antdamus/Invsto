@@ -34,6 +34,8 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261113020000_show_schedule_host_reminders.sql',import.meta.url),'utf8'));
  await db.exec(`create schema cron;create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261113030000_recurring_seller_shows.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261113040000_show_calendar_recurrence_editor.sql',import.meta.url),'utf8'));
+ await db.exec("insert into store_locations(id,name,timezone,active) values('20000000-0000-0000-0000-000000000002','Airport Store','America/New_York',true)");
 });
 
 async function resetSms(){
@@ -114,6 +116,72 @@ async function seedRecurringWeek(){
  ($2::uuid,array[0,5,6],'22:30'::time,'01:30'::time,true)) v(employee,days,start_time,end_time,overnight)
  returning id,to_char(effective_from,'YYYY-MM-DD') as first_day`,[ids.s1,ids.s2,ids.store])).rows;
 }
+const createPattern=async(args)=>(await db.query('select admin_create_seller_show_recurrence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result',args)).rows[0].result;
+async function patternArgs(){
+ const dates=(await db.query("select to_char(date_trunc('week',now() at time zone 'America/New_York')::date+7,'YYYY-MM-DD') as first,to_char(date_trunc('week',now() at time zone 'America/New_York')::date+20,'YYYY-MM-DD') as last")).rows[0];
+ return ['30000000-0000-0000-0000-000000000001',ids.s1,'ebay',dates.first,'10:00','13:00',false,[1,3,5],'America/Los_Angeles',dates.last,'Weekly collection'];
+}
+
+test('calendar creates custom weekly shows at Airport Store with timezone, end date and safe save retries',async()=>{
+ await resetSms();const args=await patternArgs();const saved=await createPattern(args);
+ assert.equal(saved.created,6);assert.equal(saved.replayed,false);
+ const rows=(await db.query("select store_id,recurrence_date,to_char(start_at at time zone 'America/Los_Angeles','HH24:MI') as start,to_char(end_at at time zone 'America/Los_Angeles','HH24:MI') as finish from seller_sale_shifts")).rows;
+ assert.equal(rows.length,6);assert.ok(rows.every(r=>r.store_id==='20000000-0000-0000-0000-000000000002'&&r.start==='10:00'&&r.finish==='13:00'));
+ const retry=await createPattern(args);assert.equal(retry.recurrence_id,saved.recurrence_id);assert.equal(retry.replayed,true);
+ assert.equal((await db.query('select count(*)::int n from seller_sale_shifts')).rows[0].n,6);
+ await assert.rejects(createPattern([...args.slice(0,10),'Different request']),/different show details/);
+});
+
+test('a conflict in a later occurrence rolls back the whole repeating schedule',async()=>{
+ await resetSms();const args=await patternArgs();
+ const later=(await db.query("select ($1::date+7+time '10:00') at time zone 'America/Los_Angeles' as start,($1::date+7+time '13:00') at time zone 'America/Los_Angeles' as finish",[args[3]])).rows[0];
+ await book(ids.s1,'whatnot',later.start,later.finish);
+ await assert.rejects(createPattern(args),/Cannot schedule .*already has a shift/);
+ assert.equal((await db.query('select count(*)::int n from seller_show_recurrences')).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from seller_sale_shifts')).rows[0].n,1);
+ await db.exec("update seller_sale_shifts set status='cancelled'");
+ assert.equal((await createPattern(args)).created,6,'a failed request can be retried after resolving its conflict');
+});
+
+test('calendar recurrence rejects invalid requests and supports an initial date beyond the rolling window',async()=>{
+ await resetSms();const args=await patternArgs();
+ await db.exec(`set test.uid='${ids.s1}'`);await assert.rejects(createPattern(args),/Only managers/);
+ await db.exec(`set test.uid='${ids.admin}'`);
+ const badDays=[...args];badDays[7]=[];await assert.rejects(createPattern(badDays),/repeat day/);
+ badDays[7]=[null];await assert.rejects(createPattern(badDays),/repeat day/);
+ const badZone=[...args];badZone[8]='Wrong/Zone';await assert.rejects(createPattern(badZone),/timezone/);
+ const badEnd=[...args];badEnd[9]='2000-01-01';await assert.rejects(createPattern(badEnd),/end date/);
+ const badStart=[...args];badStart[7]=[2];await assert.rejects(createPattern(badStart),/start date/);
+ const future=(await db.query("select to_char(current_date+400,'YYYY-MM-DD') as day,extract(dow from current_date+400)::int as weekday")).rows[0];
+ const far=[...args];far[3]=future.day;far[7]=[future.weekday];far[9]=null;far[4]='22:30';far[5]='01:30';far[6]=true;
+ const result=await createPattern(far);assert.equal(result.created,13);
+ assert.equal((await db.query("select bool_and((end_at at time zone 'America/Los_Angeles')::date=recurrence_date+1) as overnight from seller_sale_shifts")).rows[0].overnight,true);
+ const grants=(await db.query("select has_function_privilege('authenticated','materialize_seller_show_pattern(uuid,date,date,boolean)','execute') as staff,has_function_privilege('anon','admin_create_seller_show_recurrence(uuid,uuid,text,date,time,time,boolean,integer[],text,date,text)','execute') as anon")).rows[0];
+ assert.deepEqual(grants,{staff:false,anon:false});
+});
+
+test('a calendar-created repeating show enters the host reminder queue',async()=>{
+ await resetSms();const args=await patternArgs();
+ const time=(await db.query(`with t as(select date_trunc('hour',now() at time zone 'America/New_York')+make_interval(mins=>case when extract(minute from now() at time zone 'America/New_York')<30 then 30 else 60 end) as start)
+ select to_char(start,'YYYY-MM-DD') as day,to_char(start,'HH24:MI') as start,to_char(start+interval '3 hours','HH24:MI') as finish,
+ (start+interval '3 hours')::date>start::date as overnight,extract(dow from start)::int as weekday from t`)).rows[0];
+ Object.assign(args,{3:time.day,4:time.start,5:time.finish,6:time.overnight,7:[time.weekday],8:'America/New_York',9:time.day});
+ assert.equal((await createPattern(args)).created,1);
+ assert.equal((await db.query('select enqueue_seller_show_reminders() as n')).rows[0].n,1);
+ const sms=(await db.query('select * from sms_outbox')).rows[0];assert.equal(sms.to_phone,'+12025550101');assert.match(sms.body,/Airport Store/);
+ await resetSms();
+});
+
+test('future calendar bookings respect existing indefinite patterns beyond their materialized window',async()=>{
+ await resetSms();const args=await patternArgs();args[9]=null;await createPattern(args);
+ const before=(await db.query('select count(*)::int n from seller_sale_shifts')).rows[0].n;
+ const far=[...args];far[0]='30000000-0000-0000-0000-000000000002';
+ far[3]=(await db.query("select to_char($1::date+364,'YYYY-MM-DD') as day",[args[3]])).rows[0].day;
+ await assert.rejects(createPattern(far),/already has a shift/);
+ assert.equal((await db.query('select count(*)::int n from seller_sale_shifts')).rows[0].n,before);
+ assert.equal((await db.query('select count(*)::int n from seller_show_recurrences')).rows[0].n,1);
+ await resetSms();
+});
 async function fillRecurringWeek(firstDay){return (await db.query('select materialize_seller_show_recurrences($1::date+6) as result',[firstDay])).rows[0].result;}
 
 test('weekly patterns create thirteen correct local-time shows, cross midnight, extend and deduplicate',async()=>{

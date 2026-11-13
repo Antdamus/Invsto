@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#183d35" />
   <title>Show Schedule · OG Jewelry</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-airport-shows1" />
+  <link rel="stylesheet" href="seller-dashboard.css?v=20261113-smart-calendar1" />
 
 </head>
 <body>
@@ -183,6 +183,16 @@
       <div class="seller-time-grid"><label>Starts at<input id="booking-start" type="time" step="1800" required /></label><label>Ends at<input id="booking-end" type="time" step="1800" required /></label></div>
       <label class="ss-checkbox"><input id="booking-overnight" type="checkbox" /> Ends the following day</label>
       <p id="ss-form-timezone" class="ss-form-hint"></p>
+      <section id="booking-recurrence-panel" class="ss-repeat-panel" hidden>
+        <label>Repeat<select id="booking-repeat"><option value="none">Does not repeat</option><option value="weekly">Every week</option><option value="weekdays">Weekdays · Monday–Friday</option><option value="daily">Every day</option><option value="custom">Custom days</option></select></label>
+        <div id="booking-repeat-options" hidden>
+          <fieldset class="ss-repeat-days"><legend>Repeat on</legend><div>
+            <button type="button" data-repeat-day="1" aria-label="Monday" aria-pressed="false">M</button><button type="button" data-repeat-day="2" aria-label="Tuesday" aria-pressed="false">T</button><button type="button" data-repeat-day="3" aria-label="Wednesday" aria-pressed="false">W</button><button type="button" data-repeat-day="4" aria-label="Thursday" aria-pressed="false">T</button><button type="button" data-repeat-day="5" aria-label="Friday" aria-pressed="false">F</button><button type="button" data-repeat-day="6" aria-label="Saturday" aria-pressed="false">S</button><button type="button" data-repeat-day="0" aria-label="Sunday" aria-pressed="false">S</button>
+          </div></fieldset>
+          <div class="seller-time-grid"><label>Ends<select id="booking-repeat-end"><option value="never">Never</option><option value="date">On a date</option></select></label><label id="booking-repeat-until-label" hidden>Last show date<input id="booking-repeat-until" type="date" /></label></div>
+          <p id="booking-repeat-summary" class="ss-form-hint" aria-live="polite"></p>
+        </div>
+      </section>
       <div id="ss-reminder-status" class="ss-reminder-status" role="status">Host reminder · Checking SMS setup…</div>
       <label>Show notes<textarea id="booking-note" rows="3" maxlength="2000" placeholder="The theme, the collection, or something the team should know…"></textarea></label>
       <div id="booking-availability" class="seller-availability" role="status">Choose a start and end time.</div>
@@ -202,7 +212,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
-  <script src="seller-dashboard.js?v=20261113-airport-shows1"></script>
-  <script src="seller-schedule.js?v=20261113-airport-shows1"></script>
+  <script src="seller-dashboard.js?v=20261113-smart-calendar1"></script>
+  <script src="seller-schedule.js?v=20261113-smart-calendar1"></script>
 </body>
 </html>

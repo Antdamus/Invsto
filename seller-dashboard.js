@@ -849,10 +849,18 @@ function validateFormWindow() {
   if (minutes < 120) return {ok:false,message:"Shows need at least 2 hours. For an overnight show, select ‘Ends the following day’."};
   if (minutes > 1440) return {ok:false,message:"A show can be at most 24 hours."};
   if (start.getMinutes() % 30 || end.getMinutes() % 30) return {ok:false,message:"Use 30-minute intervals, such as 6:00 or 6:30."};
+  if(showIsRepeating()){
+    const days=showRepeatDays();
+    if(!days.length)return {ok:false,message:"Choose at least one repeat day."};
+    if(!days.includes(start.getDay()))return {ok:false,message:"Include the start date’s weekday in your repeat days, or choose a matching start date."};
+    if(start<=new Date())return {ok:false,message:"Repeating shows must start in the future."};
+    if($("booking-repeat-end").value==="date"&&(!$("booking-repeat-until").value||$("booking-repeat-until").value<$("booking-date").value))return {ok:false,message:"Choose a last show date on or after the start date."};
+  }
   return {ok:true,start,end};
 }
 
 function updateAvailabilityPreview() {
+  renderShowRepeat();
   renderShowSmsReadiness();
   const box = $("booking-availability"); if(!box) return;
   const validation = validateFormWindow();
@@ -907,6 +915,8 @@ function clearEditMode() {
   $("booking-start").value = "";
   $("booking-end").value = "";
   $("booking-note").value = "";
+  $("booking-repeat").value="none";$("booking-repeat-end").value="never";$("booking-repeat-until").value="";
+  showPlanner.repeatRequest=null;
   $("booking-submit").textContent = "Schedule show";
   $("booking-overnight").checked = false;
   $("booking-seller").disabled = false;
@@ -931,14 +941,16 @@ async function submitBooking(event) {
   const note=$("booking-note").value||null;
   const sellerId=$("booking-seller").value;
   if(canManageSellers()&&!sellerId){setStatus("Choose the seller for this show.","error");return;}
+  const repeatRequest=getShowRepeatRequest();
   state.busy=true;$("booking-submit").disabled=true;setStatus("Saving your show…");
   try{
     let result;
     if(shiftId) result=await window.supabase.rpc("request_seller_sale_shift_edit",{_shift_id:shiftId,...params,_reason:$("booking-note").value});
+    else if(repeatRequest)result=await window.supabase.rpc("admin_create_seller_show_recurrence",repeatRequest);
     else if(canManageSellers())result=await window.supabase.rpc("admin_schedule_seller_show",{...params,_seller_employee_id:sellerId,_notes:note});
     else result=await window.supabase.rpc("book_seller_sale_shift",{...params,_notes:note});
     if(result.error)throw result.error;
-    const message=result.data?.status==="approval_requested"?"Change request sent to management.":shiftId?"Show updated.":"Show scheduled. Your stage is set.";
+    const message=repeatRequest?`Repeating schedule saved. ${result.data.created} upcoming shows scheduled.`:result.data?.status==="approval_requested"?"Change request sent to management.":shiftId?"Show updated.":"Show scheduled. Your stage is set.";
     state.selectedDate=startOfToday(validation.start);state.currentMonth=startOfMonth(validation.start);
     $("ss-editor").close();clearEditMode();
     if(await refreshAll({afterMutation:true}))showPageStatus(message);

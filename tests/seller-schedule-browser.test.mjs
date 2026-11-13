@@ -28,6 +28,10 @@ window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:testEmploye
  if(name==='get_seller_schedule_month')return window.testFailLoad?{error:{message:'Connection unavailable'}}:{data:window.testRows};
  if(name==='get_live_sale_seller_directory')return {data:window.testSellers};
  if(name==='get_seller_show_sms_readiness')return {data:window.testSellers.map(s=>({seller_employee_id:s.id,sms_ready:s.id!=='seller-otello',phone_last_four:s.id==='seller-sydney'?'7356':'1234',reason:s.id==='seller-otello'?'missing_phone':'ready'}))};
+ if(name==='admin_create_seller_show_recurrence'){
+   if(window.testFailSave)return {error:{message:'Please try again. Connection interrupted.'}};
+   return {data:{status:'scheduled',recurrence_id:'new-pattern',created:4}};
+ }
  if(['admin_schedule_seller_show','book_seller_sale_shift'].includes(name)){
    if(window.testFailSave)return {error:{message:'Please try again. Connection interrupted.'}};
    const person=window.testSellers.find(s=>s.id===args._seller_employee_id)||testEmployee;
@@ -161,8 +165,59 @@ test('assigned employee host can follow the schedule link on a phone',async()=>{
  const browser=await chromium.launch();try{
    const {page,errors}=await openPage(browser,390,true);
    assert.equal(await page.locator('#seller-management-panel').isVisible(),false);
+   await page.locator('.ss-mobile-dock [data-new-show]').click();
+   assert.equal(await page.locator('#booking-recurrence-panel').isVisible(),false);
    assert.equal(await page.evaluate(()=>window.testCalls.filter(c=>c.name==='current_user_can_use_seller_schedule').length),1);
    assert.equal(new URL(page.url()).pathname,'/seller-dashboard.html');
+   assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+for(const width of [360,390,1440])test(`month calendar at ${width}px shows initials and full time slots, opens dates, and saves custom repeats`,async()=>{
+ const browser=await chromium.launch();try{
+   const {page,errors}=await openPage(browser,width);
+   await page.locator('[data-view="month"]').click();
+   await page.evaluate(()=>{
+     const first=showGridRange().start,rows=[];
+     function add(d,start,end,id,name,overnight=false){
+       const begins=new Date(d),ends=new Date(d);begins.setHours(...start,0,0);ends.setHours(...end,0,0);if(overnight)ends.setDate(ends.getDate()+1);
+       rows.push({row_type:'shift',shift_id:id+'-'+dateKey(d)+'-'+start[0],seller_employee_id:id,seller_name:name,channel:'ebay',store_id:'store-1',store_name:'Airport Store',start_at:begins.toISOString(),end_at:ends.toISOString(),status:'booked',metadata:{recurrence_id:'repeat-'+id},is_mine:false,can_change_without_approval:true});
+     }
+     for(let i=-1;i<42;i++){const d=addDays(first,i);if([1,2,3,4,5].includes(d.getDay())){add(d,[10,0],[13,0],'seller-sydney','Sydney Miller');add(d,[14,0],[17,0],'seller-sydney','Sydney Miller');}if([0,5,6].includes(d.getDay()))add(d,[22,30],[1,30],'seller-otello','Otello Guillen',true);}
+     window.testRows=rows;state.rows=rows;renderAll();
+   });
+   assert.equal(await page.locator('.ss-month-grid').isVisible(),true);
+   assert.ok(await page.locator('.ss-month-event').count()>30);
+   assert.ok(await page.locator('.ss-month-person strong').getByText('SM',{exact:true}).count()>0);
+   assert.ok(await page.locator('.ss-month-range time').getByText('10:30p',{exact:true}).count()>0);
+   assert.ok(await page.locator('.ss-month-range time').getByText('–1:30a',{exact:true}).count()>0);
+   assert.ok(await page.locator('.ss-month-person small[aria-label="Continued from previous day"]').count()>0);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.ss-month-range time')].every(el=>el.scrollWidth<=el.clientWidth+1)),true,'time ranges fit without clipping');
+   await page.screenshot({path:new URL('../output/show-studio/month-'+width+'.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
+   // Existing chips open details while the date itself opens a new show on that date.
+   await page.locator('.ss-month-event').first().click();assert.equal(await page.locator('#ss-editor-title').innerText(),'Edit show');
+   await page.locator('#ss-editor-close').click();
+   const dates=await page.evaluate(()=>{const first=new Date();first.setDate(first.getDate()+((8-first.getDay())%7||7));return {first:dateKey(first),last:dateKey(addDays(first,13))};});
+   await page.locator('.ss-month-date[data-add-date="'+dates.first+'"]').click();
+   assert.equal(await page.locator('#booking-date').inputValue(),dates.first);
+   assert.equal(await page.locator('#booking-shift-id').inputValue(),'');
+   await page.locator('#booking-seller').selectOption('seller-manny');
+   await page.locator('#booking-start').fill('10:00');await page.locator('#booking-end').fill('13:00');
+   await page.locator('#booking-repeat').selectOption('weekdays');assert.equal(await page.locator('[data-repeat-day][aria-pressed="true"]').count(),5);
+   await page.locator('#booking-repeat').selectOption('daily');assert.equal(await page.locator('[data-repeat-day][aria-pressed="true"]').count(),7);
+   await page.locator('#booking-repeat').selectOption('weekly');
+   await page.locator('[data-repeat-day="5"]').click();assert.equal(await page.locator('#booking-repeat').inputValue(),'custom');
+   await page.locator('#booking-repeat-end').selectOption('date');await page.locator('#booking-repeat-until').fill(dates.last);
+   await page.locator('#booking-repeat-summary').scrollIntoViewIfNeeded();
+   await page.screenshot({path:new URL('../output/show-studio/repeat-editor-'+width+'.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1')});
+   await page.evaluate(()=>window.testFailSave=true);await page.locator('#booking-submit').click();
+   await page.getByText('Please try again. Connection interrupted.').waitFor();
+   await page.evaluate(()=>window.testFailSave=false);await page.locator('#booking-submit').click();
+   await page.waitForFunction(()=>document.querySelector('#schedule-status').textContent.includes('4 upcoming shows scheduled'));
+   const calls=await page.evaluate(()=>window.testCalls.filter(c=>c.name==='admin_create_seller_show_recurrence'));
+   assert.equal(calls.length,2);assert.equal(calls[0].args._request_id,calls[1].args._request_id);
+   assert.deepEqual(calls[1].args._weekdays,[1,5]);assert.equal(calls[1].args._effective_to,dates.last);assert.equal(calls[1].args._timezone,'America/New_York');
    assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 });
@@ -193,16 +248,21 @@ test('phone recurring show distinguishes one cancellation from stopping its seri
  }finally{await browser.close();}
 });
 
-test('WebKit phone layout: date selection, full-screen editor, and keyboard escape',async()=>{
+test('WebKit phone layout: calendar date selection, weekly repeat editor, and keyboard escape',async()=>{
   const browser=await webkit.launch();try{
     const {page,errors}=await openPage(browser,390);
     await page.locator('#ss-mobile-week button').nth(3).click();
     assert.equal(await page.locator('#seller-calendar [data-show-id]').count(),2);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    await page.locator('.ss-mobile-dock [data-new-show]').click();
+    await page.locator('[data-view="month"]').click();
+    const selected=await page.evaluate(()=>dateKey(addDays(new Date(),2)));
+    await page.locator('.ss-month-date[data-add-date="'+selected+'"]').click();
+    assert.equal(await page.locator('#booking-date').inputValue(),selected);
     await page.locator('#booking-seller').selectOption('seller-manny');
     await page.locator('#booking-start').fill('22:00');await page.locator('#booking-end').fill('01:00');
     await page.locator('#booking-overnight').check();
+    await page.locator('#booking-repeat').selectOption('weekly');
+    assert.equal(await page.locator('[data-repeat-day][aria-pressed="true"]').count(),1);
     await page.screenshot({path:new URL('../output/show-studio/phone-editor.png',import.meta.url).pathname.replace(/^\/(\w:)/,'$1')});
     assert.equal(Math.round((await page.getByRole('dialog').boundingBox()).width),390);
     await page.keyboard.press('Escape');

@@ -706,6 +706,12 @@ h1,h2,h3,p {
   grid-template-columns:repeat(7,minmax(0,1fr));
   border-top:1px solid var(--line)
 }
+.ss-month-guide {padding:16px 22px;display:grid;gap:10px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.ss-month-guide>p {color:var(--ink);font-weight:600}
+.ss-month-guide>small {font-size:10px}
+.ss-month-key {display:flex;flex-wrap:wrap;gap:8px 18px}
+.ss-month-key>span {display:inline-flex;align-items:center;gap:7px}
+.ss-month-key b {display:grid;place-items:center;min-width:26px;height:26px;border-radius:50%;background:#e9eee3;color:var(--green);font-size:10px}
 .ss-month-weekday {
   font-size:10px;
   color:var(--muted);
@@ -719,6 +725,7 @@ h1,h2,h3,p {
   border-top:1px solid var(--line);
   border-left:1px solid var(--line)
 }
+.ss-month-day {cursor:pointer}
 .ss-month-day.is-outside {
   background:#f5f6f0;
   opacity:.55
@@ -728,12 +735,17 @@ h1,h2,h3,p {
   background:transparent;
   font-size:12px;
   font-weight:700;
-  border-radius:50%;
-  min-height:30px;
-  min-width:30px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+  min-height:36px;
+  padding:0 3px;
   margin-bottom:5px
 }
-.ss-month-day.is-today .ss-month-date {
+.ss-month-date strong {display:grid;place-items:center;min-width:26px;height:26px;border-radius:50%}
+.ss-month-date>span {font-size:14px;font-weight:400;color:var(--muted)}
+.ss-month-day.is-today .ss-month-date strong {
   background:var(--green);
   color:white
 }
@@ -741,22 +753,27 @@ h1,h2,h3,p {
   background:#f3f6ed
 }
 .ss-month-event {
-  display:block;
+  display:grid;
+  gap:4px;
   width:100%;
   text-align:left;
   font-size:9px;
-  white-space:nowrap;
-  text-overflow:ellipsis;
-  overflow:hidden;
+  min-width:0;
   line-height:1.5;
   border:0;
   border-left:2px solid var(--accent,#909a87);
   background:var(--tint,#edf0e7);
-  padding:5px;
-  margin:3px 0;
-  border-radius:3px;
-  color:var(--accent,var(--ink))
+  padding:7px 5px;
+  margin:4px 0;
+  border-radius:5px;
+  color:var(--ink)
 }
+.ss-month-person {display:flex;align-items:center;gap:5px;min-width:0}
+.ss-month-person>strong {font-size:10px;letter-spacing:.02em;color:var(--accent,var(--ink))}
+.ss-month-person>small {margin-left:auto;font-size:9px;font-weight:700;flex-shrink:0}
+.ss-month-name {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}
+.ss-month-range {display:flex;flex-wrap:wrap;gap:0 3px;font-size:11px;line-height:1.4;font-variant-numeric:tabular-nums;font-weight:600}
+.ss-month-range time {white-space:nowrap}
 .ss-month-more {
   font-size:9px;
   border:0;
@@ -1155,6 +1172,13 @@ body:has(dialog[open]) {
   color:var(--muted);
   line-height:1.6
 }
+.ss-repeat-panel {display:grid;gap:12px;padding:14px;background:#f5f7f0;border:1px solid var(--line);border-radius:10px;min-width:0}
+#booking-repeat-options {display:grid;gap:14px}
+.ss-repeat-days {margin:0;padding:0;border:0;min-width:0}
+.ss-repeat-days legend {font-size:11px;font-weight:700;color:#697766;margin-bottom:8px}
+.ss-repeat-days>div {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.ss-repeat-days button {min-height:44px;padding:0;border:1px solid var(--line);border-radius:50%;background:white;font-size:12px;font-weight:700}
+.ss-repeat-days button[aria-pressed="true"] {background:var(--green);border-color:var(--green);color:white}
 .seller-availability {
   font-size:11px;
   line-height:1.7;
@@ -1652,8 +1676,8 @@ body:has(dialog[open]) {
     font-size:27px
   }
   .ss-month-day {
-    min-height:85px;
-    padding:4px;
+    min-height:94px;
+    padding:2px;
     min-width:0
   }
   .ss-month-weekday {
@@ -1662,20 +1686,30 @@ body:has(dialog[open]) {
   }
   .ss-month-date {
     font-size:11px;
-    min-width:28px;
-    min-height:28px;
-    margin-bottom:4px
+    min-width:0;
+    min-height:40px;
+    margin-bottom:0;
+    padding:0
   }
+  .ss-month-date strong {min-width:24px;height:24px}
+  .ss-month-date>span {font-size:11px;padding-right:1px}
   .ss-month-event {
-    font-size:8px;
-    padding:3px 1px
+    padding:5px 2px;
+    gap:3px;
+    min-height:57px
   }
+  .ss-month-person {gap:1px}
+  .ss-month-person>strong {font-size:10px}
+  .ss-month-person>small {font-size:8px}
+  .ss-month-name {display:none}
+  .ss-month-range {display:grid;gap:0;font-size:9.5px;line-height:1.4;letter-spacing:-.2px}
+  .ss-month-guide {padding:13px 12px;gap:8px;font-size:10px}
+  .ss-month-guide>small {font-size:9px}
+  .ss-month-key {gap:6px 12px}
+  .ss-month-key b {min-width:23px;height:23px;font-size:9px}
   .ss-month-more {
     font-size:8px;
     padding:2px
-  }
-  .ss-month-time {
-    display:none
   }
   .seller-management-panel>summary,.ss-account>summary {
     font-size:12px;
