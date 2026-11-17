@@ -9,6 +9,7 @@ import vm from 'node:vm';
 
 const root = new URL('../', import.meta.url);
 const bridge = await readFile(new URL('tools/ebay-og-order-link-extension/app-bridge.js', root), 'utf8');
+const tiktokBridge = await readFile(new URL('tools/ebay-og-order-link-extension/tiktok-orders-bridge.js', root), 'utf8');
 const manifest = JSON.parse(await readFile(new URL('tools/ebay-og-order-link-extension/manifest.json', root)));
 const published = JSON.parse(await readFile(new URL('downloads/og-ebay-order-link-release.json', root)));
 let server, browser, origin;
@@ -39,13 +40,13 @@ async function installBridge(page, version) {
       getManifest: () => ({version}),
       sendMessage: async () => ({appUrl: location.origin + '/pending-orders.html'}),
       onMessage: {addListener() {}},
-    }};
+    }, storage: {sync: {get: async () => ({ogPendingOrdersUrl: location.origin + '/pending-orders.html'})}}};
   }, version);
-  await page.addScriptTag({content: bridge});
+  await page.addScriptTag({content: new URL(page.url()).pathname.endsWith('/pending-tiktok-orders.html') ? tiktokBridge : bridge});
 }
 
-async function open(t, {version = manifest.version, release = published, width = 1360, hash = '#extension-updates'} = {}) {
-  const context = await browser.newContext({viewport: {width, height: 1100}});
+async function open(t, {version = manifest.version, release = published, width = 1360, hash = '#extension-updates', firefox = false, pageName = 'pending-orders.html'} = {}) {
+  const context = await browser.newContext({viewport: {width, height: 1100}, ...(firefox ? {userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0'} : {})});
   t.after(() => context.close());
   await context.route('**/*', r => r.request().url().startsWith(origin) ? r.continue() : r.abort());
   const page = await context.newPage();
@@ -53,11 +54,11 @@ async function open(t, {version = manifest.version, release = published, width =
   page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, []));
   const fixture = {release, requests: []};
-  await page.route('**/og-ebay-order-link-release.json?*', route => {
+  await page.route(`**/${firefox ? 'og-firefox-order-link-release' : 'og-ebay-order-link-release'}.json?*`, route => {
     fixture.requests.push(route.request().url());
     return route.fulfill({status: fixture.release ? 200 : 503, contentType: 'application/json', body: JSON.stringify(fixture.release)});
   });
-  await page.goto(origin + '/pending-orders.html' + hash);
+  await page.goto(origin + '/' + pageName + hash);
   if (version) await installBridge(page, version);
   await page.addScriptTag({url: origin + '/extension-updates.js'});
   return {page, fixture};
@@ -77,6 +78,25 @@ test('current bridge and published version agree; popup/download metadata use th
   assert.equal(download.searchParams.get('build'), published.sha256.slice(0, 12));
   await mkdir(new URL('test-results', root), {recursive: true});
   await page.locator('#extension-updates').screenshot({path: fileURLToPath(new URL('test-results/extension-updates-desktop.png', root))});
+});
+
+test('Firefox receives the signed package and persistent-install instructions on both order pages', async t => {
+  const release = JSON.parse(await readFile(new URL('downloads/og-firefox-order-link-release.json', root)));
+  assert.equal(release.version, manifest.version);
+  assert.equal(release.sha256, createHash('sha256').update(await readFile(new URL('downloads/OG-Order-Link-Firefox.xpi', root))).digest('hex'));
+  for (const pageName of ['pending-orders.html', 'pending-tiktok-orders.html']) {
+    const {page, fixture} = await open(t, {firefox: true, release, pageName});
+    await expect(page.locator('#extension-update-badge')).toHaveText('Up to date');
+    await expect(page.locator('#extension-download')).toHaveText(`Download v${release.version} signed Firefox extension`);
+    assert.equal(new URL(await page.locator('#extension-download').getAttribute('href')).pathname, '/downloads/OG-Order-Link-Firefox.xpi');
+    await expect(page.locator('[data-extension-browser="firefox"]')).toBeVisible();
+    await expect(page.locator('[data-extension-browser="chromium"]')).toBeHidden();
+    await expect(page.locator('[data-extension-browser="firefox"]')).toContainText('Install Add-on From File');
+    fixture.release = null;
+    await page.locator('#extension-check').click();
+    await expect(page.locator('#extension-update-badge')).toHaveText('Check unavailable');
+    assert.equal(await page.locator('#extension-download').getAttribute('href'), origin + '/downloads/OG-Order-Link-Firefox.xpi');
+  }
 });
 
 test('numeric version comparison handles multi-digit releases and refreshes published versions', async t => {

@@ -10,8 +10,13 @@
   const download = document.getElementById("extension-download");
   const checkButton = document.getElementById("extension-check");
   const scriptUrl = document.currentScript.src;
-  const releaseUrl = new URL("downloads/og-ebay-order-link-release.json", scriptUrl);
-  const downloadUrl = new URL("downloads/OG-eBay-Order-Link.zip", scriptUrl);
+  const firefox = /Firefox\//i.test(navigator.userAgent);
+  const packageLabel = firefox ? "signed Firefox extension" : "ZIP";
+  const releaseUrl = new URL(firefox ? "downloads/og-firefox-order-link-release.json" : "downloads/og-ebay-order-link-release.json", scriptUrl);
+  const downloadUrl = new URL(firefox ? "downloads/OG-Order-Link-Firefox.xpi" : "downloads/OG-eBay-Order-Link.zip", scriptUrl);
+  section.querySelectorAll("[data-extension-browser]").forEach(element => {
+    element.hidden = element.dataset.extensionBrowser !== (firefox ? "firefox" : "chromium");
+  });
   let checking = false;
   let lastCheck = 0;
 
@@ -83,7 +88,7 @@
     lastCheck = Date.now();
     checkButton.disabled = true;
     installed.textContent = latest.textContent = "Checking…";
-    download.textContent = "Download extension ZIP";
+    download.textContent = firefox ? "Download signed Firefox extension" : "Download extension ZIP";
     // Do not retain a stale version-specific download if this check fails.
     download.href = downloadUrl.href;
     setStatus("checking", "Checking…", "Checking the installed extension and latest release…");
@@ -96,7 +101,7 @@
         url.searchParams.set("v", release.version);
         url.searchParams.set("build", release.sha256.slice(0, 12));
         download.href = url.href;
-        download.textContent = `Download v${release.version} ZIP`;
+        download.textContent = `Download v${release.version} ${packageLabel}`;
       }
       if (!release) {
         setStatus("unknown", "Check unavailable", "Could not check the latest release. Check your connection and try again; this browser’s update status is unverified.");

@@ -52,12 +52,20 @@ https://raw.githubusercontent.com/mozilla-firefox/firefox/main/gfx/layers/DcompS
 
 ## Permanent installation
 
-Submit the ZIP to Mozilla Add-ons for signing using **On your own** distribution
-if this is an internal extension. Install the signed XPI returned by Mozilla.
+Version 1.0.36 was approved and signed by Mozilla for **On your own** distribution.
+Download `downloads/OG-Order-Link-Firefox.xpi`. In Firefox's Add-ons Manager,
+choose the gear menu, **Install Add-on From File**, and select the XPI. Review
+Firefox's permissions to finish. This installation persists across restarts.
+The signed package must be copied unchanged; modifying it invalidates signing.
+
+For later releases, submit the new unsigned ZIP and reproducible source archive
+to Mozilla Add-ons using **On your own** distribution, then publish the signed
+XPI and its `downloads/og-firefox-order-link-release.json` metadata together.
 Do not disable signature checks. A temporary add-on is not a permanent deployment.
 The stable add-on ID is `og-order-link@invsto.app`; retain it for later versions.
-Firefox builds must be signed again after updates. The existing Invsto update
-panel currently distributes the Edge/Chrome ZIP, not a signed Firefox XPI.
+Firefox builds must be signed again after updates. Invsto's update panel selects
+the signed XPI for Firefox and the separate ZIP for Edge/Chrome. Updates remain
+manual; the extension has no automatic update URL.
 
 ## TikTok receipt browser setting
 
