@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="tiktok-cards.css?v=20261018-front-tasks">
 <link rel="stylesheet" href="tiktok-reversal.css?v=20261018-manager-reversals">
 <link rel="stylesheet" href="tiktok-order-chats.css?v=20261031">
-<link rel="stylesheet" href="marketplace-queue-cards.css?v=20261031-note-photos"></head><body class="tiktok-workspace">
+<link rel="stylesheet" href="marketplace-queue-cards.css?v=20261031-note-photos"><link rel="stylesheet" href="tiktok-receipt-browser.css?v=20261116"><script src="tiktok-receipt-browser.js?v=20261116" defer></script></head><body class="tiktok-workspace">
  <header class="phone-orders-header phone-only"><a href="dashboard.html" class="phone-brand" aria-label="OG dashboard">OG</a><div><span>FULFILLMENT · TIKTOK</span><strong id="tk-phone-title">Pending orders</strong></div><button type="button" class="phone-icon-button" id="tk-phone-refresh" aria-label="Refresh TikTok orders">↻</button></header>
  <div class="mobile-header"><button class="menu-toggle" id="menu-toggle" aria-label="Open navigation">☰</button><span class="mobile-title">TikTok orders</span></div>
  <div class="mobile-menu" id="mobile-menu"><nav class="mobile-nav-links"><a href="dashboard.html">Dashboard</a><a href="pending-tiktok-orders.html">TikTok pending orders</a><a href="pending-tiktok-orders.html?view=history">TikTok history</a><a href="pending-tiktok-orders.html?view=cancellations">Cancellations</a><a href="print-stations.html">Print stations</a></nav></div>
@@ -34,7 +34,7 @@
  <div class="main"><header class="header"><div class="header-inner"><div class="greeting"><strong>Fulfillment</strong></div><a href="print-stations.html" class="secondary-btn">Print stations</a></div></header>
  <main class="content pending-content">
   <nav class="order-marketplace-tabs" aria-label="Order marketplace"><a id="ebay-tab" href="pending-orders.html">eBay</a><a href="pending-tiktok-orders.html" aria-current="page">TikTok</a><a href="pending-whatnot-orders.html">Whatnot</a></nav>
-  <section class="pending-header"><div><span class="eyebrow">Order Fulfillment</span><h1 id="tk-title">Pending TikTok Orders</h1></div><div class="header-actions"><button id="tk-refresh" type="button" class="secondary-btn">↻ Refresh</button><a href="dashboard.html" class="secondary-btn">← Back</a></div></section>
+  <section class="pending-header"><div><span class="eyebrow">Order Fulfillment</span><h1 id="tk-title">Pending TikTok Orders</h1></div><div class="header-actions"><button type="button" class="secondary-btn" data-tk-receipt-settings>Receipt settings</button><button id="tk-refresh" type="button" class="secondary-btn">↻ Refresh</button><a href="dashboard.html" class="secondary-btn">← Back</a></div></section>
   <nav class="tk-views" aria-label="TikTok workflow"><a href="pending-tiktok-orders.html" id="tk-pending-link">Pending</a><a href="pending-tiktok-orders.html?view=history" id="tk-history-link">History</a><a id="tk-cancelled-link" href="pending-tiktok-orders.html?view=cancellations">Cancellations</a><a href="tiktok-messages.html">Messages</a></nav>
   <div id="tk-money-cards" aria-label="Queue filters"></div>
   <section id="tk-selection-totals" class="mq-selection" aria-label="Queue totals" aria-live="polite"></section>

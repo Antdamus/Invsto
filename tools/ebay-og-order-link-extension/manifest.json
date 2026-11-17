@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OG eBay Order Link",
   "description": "Connects eBay, TikTok and Whatnot orders, receipts and shipping evidence to Invsto.",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "permissions": [
     "alarms",
     "storage",
@@ -134,6 +134,7 @@
         "tiktok-orders-bridge.js",
         "tiktok-labels-bridge.js",
         "tiktok-receipt-bridge.js",
+        "tiktok-receipt-launch-bridge.js",
         "whatnot-receipt-bridge.js"
       ],
       "run_at": "document_idle"

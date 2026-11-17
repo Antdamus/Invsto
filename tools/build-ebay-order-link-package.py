@@ -9,6 +9,8 @@ files=('manifest.json','worker.js','background.js','content.js','app-bridge.js',
 files+=('holds-bridge.js','holds-background.js','holds-reader.js')
 files+=('report-bridge.js','report-background.js','report-reader.js')
 files+=('claim-export.js','report-csv-probe.js')
+files+=('performance-background.js','performance-reader.js')
+files+=('tiktok-receipt-launch-background.js','tiktok-receipt-launch-bridge.js')
 (folder/'claim-export.js').write_bytes((root/'weekly-ebay-claims.js').read_bytes())
 with zipfile.ZipFile(root/'downloads/OG-eBay-Order-Link.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
  for name in files:

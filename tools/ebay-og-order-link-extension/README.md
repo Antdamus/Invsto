@@ -14,6 +14,14 @@ This unpacked Chrome/Edge extension adds OG shortcuts to eBay pages that show bu
 
 ## Check and distribute updates
 
+Version 1.0.34 adds the TikTok receipt browser handoff. Invsto's **Receipt settings**
+can choose Microsoft Edge or Firefox on a Windows computer. Firefox uses a
+separate compatibility build and the Invsto receipt opener. The handoff keeps
+order/SKU values as strings, prepares a receiving Invsto tab, and opens TikTok only
+after that tab is ready. See `tools/firefox-order-link.md` for signing and setup.
+The package also includes the performance reader/background scripts referenced
+by version 1.0.33's manifest and worker.
+
 Version 1.0.33 checks OG Jewelers’ Seller Hub in the background while Edge and Invsto are signed in. It reads held entries in exact ranges of 30 and verifies their count and total against eBay before replacing the previous list. It also checks order delivery, published statements, claim exports, original sales, cancellations, and refunds. When a canceled listing loses its item link, the reader checks the item number on eBay’s contact link for that case and buyer. Older sales paid in the current week retain their original sale date after a server match. A report tab does not need to stay open.
 
 Open **Extension updates** near the top of OG Pending Orders on each computer, or follow the link in the extension popup. It compares the installed version in that browser with the published release and offers the latest ZIP. Checks run on page load, on request, and every five minutes while the page is visible.

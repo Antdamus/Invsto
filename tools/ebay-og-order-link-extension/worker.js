@@ -2,3 +2,4 @@ importScripts('background.js', 'online-print-background.js', 'tiktok-orders-back
 importScripts('holds-background.js');
 importScripts('report-background.js');
 importScripts('performance-background.js');
+importScripts('tiktok-receipt-launch-background.js');
