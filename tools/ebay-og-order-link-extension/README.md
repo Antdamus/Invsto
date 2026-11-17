@@ -14,6 +14,8 @@ This unpacked Chrome/Edge extension adds OG shortcuts to eBay pages that show bu
 
 ## Check and distribute updates
 
+Version 1.0.36 also rejects black frames containing a large centered play icon.
+
 Version 1.0.35 rejects blank TikTok video captures and adds **Capture from window**
 for Firefox's Windows Media Engine playback. Select the window showing the
 receipt, review the automatically cropped image, then save it to OG. Sharing

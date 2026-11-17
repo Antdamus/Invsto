@@ -4,6 +4,7 @@ This is a Firefox compatibility build of the shared OG eBay Order Link extension
 It includes the existing TikTok receipt capture and Invsto delivery workflow.
 The Firefox package is built separately from the Edge/Chrome ZIP. Version 1.0.35
 adds a window-capture fallback for video surfaces missing from tab screenshots.
+Version 1.0.36 strengthens the blank-frame check for centered play icons.
 Version 1.0.34 added the receipt-launch bridge shared by both builds.
 
 ## Build

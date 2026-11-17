@@ -18,6 +18,8 @@ test('wrong windows, stale markers, missing corners and resized players are reje
 test('black video with bright player controls is considered blank, while a visible item is accepted',()=>{
  const context={getImageData(x,y,w,h){assert.ok(y+h<500,'ignore player controls at bottom');return {data:new Uint8ClampedArray(w*h*4)};}};assert.equal(pixels.blank(context,250,500),true);
  assert.equal(pixels.blank({getImageData:()=>({data:Uint8ClampedArray.from([32,100,150,255])})},250,500),false);
+ const icon=new Uint8ClampedArray(1000*4);for(let i=0;i<1000;i++){icon[i*4+3]=255;if(i<30)icon.fill(255,i*4,i*4+3);}
+ assert.equal(pixels.blank({getImageData:()=>({data:icon})},250,500),true,'a bright play icon covering 3% is still a blank frame');
 });
 test('window capture previews only the item, stops sharing before review, and saves only after confirmation',async t=>{
  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage({viewport:{width:1000,height:750}});

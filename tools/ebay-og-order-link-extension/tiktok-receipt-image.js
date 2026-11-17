@@ -5,7 +5,8 @@
   const x=Math.floor(width*.2),y=Math.floor(height*.15),w=Math.max(1,Math.floor(width*.6)),h=Math.max(1,Math.floor(height*.65));
   const pixels=context.getImageData(x,y,w,h).data;let visible=0,total=0;
   for(let i=0;i<pixels.length;i+=Math.max(1,Math.floor(w*h/4096))*4){total++;if(pixels[i+3]>32&&Math.max(pixels[i],pixels[i+1],pixels[i+2])>20)visible++;}
-  return visible/total<.01;
+  // A centered play icon can occupy a few percent of an otherwise black frame.
+  return visible/total<.05;
  }
  function locate(image,colors,expected){
   const {data,width,height}=image,sets=colors.map(()=>new Set());
