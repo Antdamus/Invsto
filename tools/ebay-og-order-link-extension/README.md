@@ -14,6 +14,11 @@ This unpacked Chrome/Edge extension adds OG shortcuts to eBay pages that show bu
 
 ## Check and distribute updates
 
+Version 1.0.35 rejects blank TikTok video captures and adds **Capture from window**
+for Firefox's Windows Media Engine playback. Select the window showing the
+receipt, review the automatically cropped image, then save it to OG. Sharing
+stops before review; canceling or choosing another window does not upload.
+
 Version 1.0.34 adds the TikTok receipt browser handoff. Invsto's **Receipt settings**
 can choose Microsoft Edge or Firefox on a Windows computer. Firefox uses a
 separate compatibility build and the Invsto receipt opener. The handoff keeps

@@ -1,4 +1,4 @@
-importScripts('background.js', 'online-print-background.js', 'tiktok-orders-background.js', 'tiktok-receipt-background.js', 'whatnot-receipt-background.js');
+importScripts('background.js', 'online-print-background.js', 'tiktok-orders-background.js', 'tiktok-receipt-image.js', 'tiktok-receipt-background.js', 'whatnot-receipt-background.js');
 importScripts('holds-background.js');
 importScripts('report-background.js');
 importScripts('performance-background.js');

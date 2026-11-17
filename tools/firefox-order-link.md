@@ -2,9 +2,9 @@
 
 This is a Firefox compatibility build of the shared OG eBay Order Link extension.
 It includes the existing TikTok receipt capture and Invsto delivery workflow.
-The Firefox package is built separately from the Edge/Chrome ZIP. Version 1.0.34
-adds a receipt-launch bridge shared by both builds; existing capture behavior is
-preserved.
+The Firefox package is built separately from the Edge/Chrome ZIP. Version 1.0.35
+adds a window-capture fallback for video surfaces missing from tab screenshots.
+Version 1.0.34 added the receipt-launch bridge shared by both builds.
 
 ## Build
 
@@ -34,6 +34,20 @@ Verify the actual end-to-end flow before calling the Firefox build operational:
 3. Pause on the correct item and click **Capture item photo → OG**.
 4. Confirm Invsto saves the image to the correct order line and returns to it.
 5. Reopen the saved image and verify the frame and item association.
+
+If the normal capture reports a blank frame while the item is visible, use
+**Capture from window**. Choose the Firefox window showing the receipt (or that
+screen if window capture also omits the video). Four temporary corner markers
+verify and crop the selected surface to this receipt. Full-window pixels stay
+in memory on the computer; only the cropped JPEG can be sent to Invsto. Sharing
+stops before the review dialog appears. Check the preview, then choose **Save
+photo to OG**. Cancel, missing markers, changed receipt identity/time/geometry,
+and blank frames do not upload a photo. No additional persistent extension
+permission is added; the browser asks for a screen/window choice each time.
+
+Firefox's Media Engine DcompSurfaceImage cannot provide a source surface for
+ordinary screenshot readback:
+https://raw.githubusercontent.com/mozilla-firefox/firefox/main/gfx/layers/DcompSurfaceImage.h
 
 ## Permanent installation
 

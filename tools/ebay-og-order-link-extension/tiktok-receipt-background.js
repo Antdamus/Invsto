@@ -23,11 +23,19 @@
    const x=Math.round(rect.x*sx),y=Math.round(rect.y*sy),w=Math.round(rect.width*sx),h=Math.round(rect.height*sy);
    if(w<40||h<40||x+w>bitmap.width||y+h>bitmap.height)throw Error('Keep the whole video visible.');
    const scale=Math.min(1,1600/Math.max(w,h)),canvas=new OffscreenCanvas(Math.round(w*scale),Math.round(h*scale));
-   canvas.getContext('2d').drawImage(bitmap,x,y,w,h,0,0,canvas.width,canvas.height);
+   const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(bitmap,x,y,w,h,0,0,canvas.width,canvas.height);
+   if(ogTikTokReceiptImage.blank(context,canvas.width,canvas.height))throw Object.assign(Error('This capture looks blank. Play the video to a clear item frame, or use “Capture from window” if the item is already visible.'),{code:'BLANK_FRAME'});
    const blob=await canvas.convertToBlob({type:'image/jpeg',quality:.9}),bytes=new Uint8Array(await blob.arrayBuffer());
    if(bytes.length>5*1024*1024)throw Error('The capture is too large. Reduce the video size and retry.');
    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
    return 'data:image/jpeg;base64,'+btoa(binary);
+  }finally{bitmap.close();}
+ }
+ async function windowImage(image){
+  if(typeof image!=='string'||image.length>7*1024*1024||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(image))throw Error('Invalid window photo.');
+  const bitmap=await createImageBitmap(await (await fetch(image)).blob());
+  try{if(bitmap.width<40||bitmap.height<40||Math.max(bitmap.width,bitmap.height)>1600)throw Error('Invalid window photo dimensions.');
+   return await crop(image,{x:0,y:0,width:bitmap.width,height:bitmap.height},{width:bitmap.width,height:bitmap.height});
   }finally{bitmap.close();}
  }
  async function handle(m,sender){
@@ -40,9 +48,15 @@
    if(!r||!v||![r.x,r.y,r.width,r.height,v.width,v.height,m.videoTime].every(Number.isFinite)||r.x<0||r.y<0||r.width<40||r.height<40||v.width>16000||v.height>16000||r.x+r.width>v.width||r.y+r.height>v.height||m.videoTime<0||m.videoTime>604800)throw Error('Invalid video capture area.');
    const tab=await assertActive(sender,source),og=await receiver(destination,tab);
    await assertActive(sender,source);
-   const shot=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'png'});
+   let image;
+   if(m.captureMode==='window')image=await windowImage(m.image);
+   else{
+    if(m.captureMode!==undefined||m.image!==undefined)throw Error('Unsupported capture mode.');
+    const shot=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'png'});
+    image=await crop(shot,r,v);
+   }
    await assertActive(sender,source);
-   const image=await crop(shot,r,v),all=await chrome.storage.local.get(null);
+   const all=await chrome.storage.local.get(null);
    const expired=Object.keys(all).filter(k=>k.startsWith(PREFIX)&&Date.now()-all[k].createdAt>TTL);if(expired.length)await chrome.storage.local.remove(expired);
    await chrome.storage.local.set({[key]:{transferId:id,orderNumber:m.orderNumber,skuId:m.skuId,videoTime:m.videoTime,image,createdAt:Date.now(),target:destination.href,receiverTabId:og.id}});
    const accepted=await chrome.tabs.sendMessage(og.id,{type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:id});
@@ -65,6 +79,6 @@
   if(!['OG_TIKTOK_RECEIPT_CAPTURE','OG_TIKTOK_RECEIPT_GET','OG_TIKTOK_RECEIPT_ACK'].includes(m?.type))return;
   const key=m.type+':'+sender.tab?.id+':'+m.transferId;
   if(!inflight.has(key))inflight.set(key,handle(m,sender).finally(()=>inflight.delete(key)));
-  inflight.get(key).then(reply,e=>reply({ok:false,error:e.message}));return true;
+  inflight.get(key).then(reply,e=>reply({ok:false,error:e.message,code:e.code}));return true;
  });
 })();
