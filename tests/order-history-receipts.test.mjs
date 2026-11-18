@@ -26,7 +26,12 @@ before(async () => {
   await mkdir(new URL('../test-results', import.meta.url), {recursive: true});
 });
 after(async () => {
-  await browser?.close(); await browserServer?.close();
+  let teardownTimer;
+  await Promise.race([
+    Promise.allSettled([browser?.close(), browserServer?.close()]),
+    new Promise(resolve => {teardownTimer = setTimeout(() => {browserServer?.process()?.kill(); resolve();}, 2500);}),
+  ]);
+  clearTimeout(teardownTimer);
   await new Promise(resolve => {server.close(resolve); server.closeAllConnections();});
 });
 
@@ -137,4 +142,81 @@ test('phone history shows reconciled earnings and opens the order directly from 
   await expect(page.locator('#summary-payout')).toHaveText('Needs verification');
   await expect(page.locator('#summary-payout-detail')).toContainText('unavailable');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+});
+
+
+for (const width of [320, 390, 1366]) test(`shipment ledger keeps packages, reports and actions separate at ${width}px`, async t => {
+  const page = await openHistory(t, {width, role: 'admin', screenshot: false});
+  await page.evaluate(() => {
+    state.expandedHistoryGroupIds.clear();
+    state.lines = [1,2,3,4,5].map(number => normalizeLine({
+      id: `shipment-line-${number}`, order_id: `shipment-order-${number}`,
+      item_title: `Example jewelry ${number}`, item_number: String(123456780000 + number),
+      line_status: 'fulfilled', quantity: 1, fulfilled_quantity: 1,
+      fulfilled_at: `2026-10-0${9-number}T20:44:00Z`, fulfilled_by_email: 'packer@example.test', total_price: 20,
+      order: {id: `shipment-order-${number}`, order_number: `11-22222-3333${number}`, buyer_username: 'sample.buyer',
+        tracking_number: number < 3 ? '9400111899560000000001' : number === 3 ? '9400111899560000000002' : ''},
+    }));
+    state.adminEvents = [{id: 'bulk-closeout', action: 'fulfilled_no_inventory', order_line_ids: state.lines.map(l=>l.id)}];
+    state.relatedOrderTaskEvents = [];
+    openHistoryExtraPhotoModal = group => {window.evidenceScope = group.lines.map(l=>l.id);};
+    rebuildHistoryLineSearchIndex(); applyFilters();
+  });
+  await expect(page.locator('.history-order-card')).toHaveCount(4);
+  await expect(page.locator('#history-count')).toHaveText('2 shipments · 2 separate orders');
+  await expect(page.locator('.history-shipment-summary.is-linked')).toHaveCount(2);
+  await expect(page.locator('.history-shipment-summary.is-unconfirmed')).toHaveCount(2);
+  const card = page.locator('.history-order-card').filter({hasText: '9400111899560000000001'});
+  await expect(card.locator('.history-shipment-summary')).toBeVisible();
+  await expect(card.locator('.history-order-count-pill')).toHaveText('2 orders - 2 lines - Qty 2');
+  await expect(card.getByRole('link', {name: 'Full history report', exact: true})).toHaveAttribute('href', /buyer=sample.buyer&scope=all$/);
+  await expect(card.getByRole('link', {name: 'Pending items report', exact: true})).toHaveAttribute('href', /scope=pending$/);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({path: `test-results/order-history-shipments-${width}.png`, fullPage: true});
+  await card.locator('[data-history-group-toggle]').click();
+  await expect(card.locator('.history-line-row')).toHaveCount(2);
+  await expect(card.locator('[data-history-label-group]')).toHaveAttribute('data-history-label-group', '11-22222-33331,11-22222-33332');
+  await card.getByRole('button', {name: 'Add Evidence', exact: true}).click();
+  assert.deepEqual(await page.evaluate(() => evidenceScope), ['shipment-line-1','shipment-line-2']);
+  await expect(card.locator('[data-revert-lines]')).toHaveAttribute('data-revert-lines', 'shipment-line-1,shipment-line-2');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+});
+
+
+for (const width of [390,1366]) test(`normal completion cards keep their own packing photos at ${width}px`,async t=>{
+  const page=await openHistory(t,{width,role:'admin',screenshot:false});
+  await page.evaluate(()=>{
+    state.expandedHistoryGroupIds.clear();
+    state.lines=[1,2,3,4,5].map(n=>normalizeLine({id:`batch-line-${n}`,order_id:`batch-order-${n}`,
+      item_title:`Packed item ${n}`,item_number:String(123456781000+n),line_status:'fulfilled',quantity:1,fulfilled_quantity:1,
+      fulfilled_at:'2026-10-12T18:00:00Z',fulfilled_by:'staff',fulfilled_by_email:'packer@example.test',
+      order:{id:`batch-order-${n}`,order_number:`11-22222-4444${n}`,buyer_username:'sample.buyer'}}));
+    const event=(id,ids,normal)=>({id,action:'fulfilled_no_inventory',order_line_ids:ids.map(n=>`batch-line-${n}`),
+      signed_by:'staff',signed_by_email:'packer@example.test',created_at:'2026-10-12T18:00:00Z',
+      payload:normal?{source:'worker_physical_item_not_in_inventory_batch',completed_at:'2026-10-12T18:00:00Z',
+        evidence_photos:[{bucket:'proof',path:`packing/${id}.jpg`,label:`${id} packing photo`}]}:{closed_at:'2026-10-12T18:00:00Z'}});
+    state.adminEvents=[event('Batch one',[1,2],true),event('Batch two',[3],true),event('Forced close',[4,5],false)];
+    state.relatedOrderTaskEvents=[];
+    rebuildHistoryLineSearchIndex();applyFilters();
+  });
+  await expect(page.locator('.history-order-card')).toHaveCount(4);
+  await expect(page.locator('#history-count')).toHaveText('2 completed groups · 2 separate orders');
+  await expect(page.locator('.history-shipment-summary').getByText('Completed together',{exact:true})).toHaveCount(2);
+  const card=page.locator('.history-order-card').filter({hasText:'11-22222-44441'});
+  await expect(card.locator('.history-order-count-pill')).toHaveText('2 orders - 2 lines - Qty 2');
+  await expect(card).toContainText('Completed Oct 12');
+  await expect(card).toContainText('packer@example.test');
+  await card.locator('[data-history-group-toggle]').click();
+  await expect(card.locator('.history-line-row')).toHaveCount(2);
+  const photo=card.locator('[data-evidence-photo-url]');
+  await expect(photo).toHaveCount(1);
+  await expect(photo).toHaveAttribute('data-evidence-photo-label','Batch one packing photo');
+  await photo.click();
+  await expect(page.locator('#evidence-photo-viewer-title')).toHaveText('Batch one packing photo');
+  await page.locator('#close-evidence-photo-viewer').click();
+  await card.locator('[data-history-group-toggle]').click();
+  await card.scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:`test-results/order-history-completion-batches-${width}.png`,fullPage:true});
 });

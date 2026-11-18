@@ -3127,3 +3127,17 @@ body.modal-open {
 .history-purchase-time strong {color:var(--history-gold, #efd293);font-size:.95rem;line-height:1.45;overflow-wrap:anywhere;}
 .history-video-receipt-head:has(.history-purchase-time) {padding:12px 14px;border:1px solid rgba(239,210,147,.25);border-radius:12px;background:rgba(239,210,147,.05);}
 @media(max-width:600px){.history-purchase-time{flex-basis:100%;}.history-video-receipt-head:has(.history-purchase-time) a{white-space:normal;}}
+
+/* Keep the package identity visible on phones as well as desktop cards. */
+.history-shipment-guide { color: #bcb6ad; font-size: 13px; line-height: 1.6; margin: 0 0 16px; max-width: 760px; }
+.history-shipment-summary { display: grid; gap: 5px; padding: 10px 12px; border-radius: 10px; border-left: 3px solid #75b69a; background: rgba(55, 130, 102, .12); min-width: 0; }
+.history-shipment-summary strong { font-size: 12px; letter-spacing: .04em; color: #b9e3d0; }
+.history-shipment-summary span { font-size: 12px; line-height: 1.5; color: #d4ddd8; overflow-wrap: anywhere; }
+.history-shipment-summary.is-unconfirmed { border-color: #bda172; background: rgba(189, 161, 114, .08); }
+.history-shipment-summary.is-unconfirmed strong { color: #ead3a7; }
+.history-shipment-summary.is-unconfirmed span { color: #c9c1b3; }
+#history-count { white-space: normal; text-align: right; }
+@media (max-width: 700px) {
+  .history-shipment-guide { font-size: 12px; margin: 0 0 12px; }
+  #history-count { max-width: 55%; font-size: 11px; }
+}

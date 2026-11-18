@@ -3,6 +3,7 @@ const state = {
   employee: null,
   lines: [],
   historyFinancials: new Map(),
+  historyCheckoutTransactions: [],
   historyFinancialsStatus: "idle",
   adminEvents: [],
   revertEvents: [],
@@ -155,6 +156,7 @@ const ORDER_HISTORY_LINE_SELECT = `
     sale_date,
     paid_on_date,
     ship_by_date,
+    shipped_on_date,
     status,
     shipping_and_handling,
     seller_collected_tax,
@@ -461,6 +463,8 @@ function getHistoryLineTimelineText(line = {}) {
 }
 
 function getHistoryGroupTimelineText(group = {}) {
+  if (group.completion) return `Completed ${formatDateTime(group.completion.completedAt)}`;
+  if (group.shippedAt) return `Shipped ${formatDateTime(group.shippedAt)}`;
   const allApi = (group.lines || []).length > 0 && (group.lines || []).every(isEbayApiHistoryLine);
   const dateText = formatDateTime(group.latestAt);
   if (allApi) return `eBay archive date ${dateText}`;
@@ -2667,6 +2671,7 @@ async function loadOrderHistory() {
 
   const closedLines = (linesResult.data || []).map(normalizeLine);
   const financialsPromise = fetchHistoryFinancials(closedLines);
+  const checkoutTransactionsPromise = fetchHistoryCheckoutTransactions(closedLines);
   const closedLineIds = closedLines.map((line) => line.id).filter(Boolean);
   const closedOrderIds = [...new Set(closedLines.map((line) => line.order_id).filter(Boolean))];
   state.historySearchRelatedLineIds = new Set(linesResult.relatedLineIds || []);
@@ -2732,7 +2737,7 @@ async function loadOrderHistory() {
     }
   }
 
-  const financials = await financialsPromise;
+  const [financials, checkoutTransactions] = await Promise.all([financialsPromise, checkoutTransactionsPromise]);
   if (loadVersion !== historyLoadVersion) return;
   state.adminEvents = adminEventsResult.data || [];
   state.revertEvents = revertEventsResult.data || [];
@@ -2751,6 +2756,7 @@ async function loadOrderHistory() {
       .flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
   );
   state.lines = closedLines;
+  state.historyCheckoutTransactions = checkoutTransactions;
   state.historyFinancials = financials.records;
   state.historyFinancialsStatus = financials.status;
   state.historyLoadedTargetedSearch = targetedRangeSearch;
@@ -5022,11 +5028,12 @@ function getHistoryGroupStatus(group) {
   if (group.events.some((event) => event.category === "revert")) return "Has reversal";
   if (group.events.some(isRefundCloseoutEvent)) return "Refunded";
   if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
+  if (group.kind === "completion") return "Completed";
   if ((group.lines || []).length && group.lines.every(isEbayApiHistoryLine)) return "Archived sale";
   if (group.events.some((event) => event.action === "fulfilled_no_inventory") || group.lines.some(isAdminCloseoutLine)) {
     return "No-inventory completion";
   }
-  return "Shipped";
+  return group.kind === "order" ? "Closed" : "Shipment record";
 }
 
 function getHistoryGroupStatusClass(group) {
@@ -5040,7 +5047,9 @@ function getHistoryGroupStatusClass(group) {
 function getHistoryGroupEvidencePhotos(group) {
   const seen = new Set();
   return [
-    ...(group.events || []).flatMap(getEventEvidencePhotos),
+    ...(group.events || [])
+      .filter((event) => !isNormalHistoryCompletion(event) || group.completion?.eventIds.includes(event.id))
+      .flatMap(getEventEvidencePhotos),
     ...(group.lines || []).flatMap(getLineCancellationEvidencePhotos),
   ]
     .filter((photo) => !isVideoReceiptEvidencePhoto(photo))
@@ -5088,79 +5097,235 @@ function groupLinesByOrder(lines) {
   });
 }
 
-function buildHistoryGroups(lines) {
+const HISTORY_NORMAL_COMPLETION_SOURCES = new Set([
+  "worker_physical_item_not_in_inventory",
+  "worker_physical_item_not_in_inventory_batch",
+  "mixed_pending_checkout",
+]);
+
+function isNormalHistoryCompletion(event) {
+  return event?.action === "fulfilled_no_inventory"
+    && HISTORY_NORMAL_COMPLETION_SOURCES.has(event.payload?.source);
+}
+
+function historyCompletionMatchesLine(line, at, userId, email) {
+  if (line.line_status !== "fulfilled" || !line.fulfilled_at || !at
+    || !Number.isFinite(Date.parse(at)) || Date.parse(line.fulfilled_at) !== Date.parse(at)) return false;
+  if (line.fulfilled_by && userId) return line.fulfilled_by === userId;
+  return Boolean(line.fulfilled_by_email && email
+    && line.fulfilled_by_email.trim().toLowerCase() === email.trim().toLowerCase());
+}
+
+function getHistoryNormalCompletions(lines) {
+  const result = new Map();
   const lineById = getLineByIdMap(lines);
-  const coveredLineIds = new Set();
-  const groups = [];
-  const completionEvents = getFilteredEvents({ category: "admin" })
-    .filter((event) =>
-      event.category === "admin"
-      && getEventLineIds(event).some((lineId) => lineById.has(lineId))
-    );
-
-  completionEvents.forEach((event) => {
-    const eventLineIds = getEventLineIds(event).filter((lineId) => lineById.has(lineId));
-    const eventLines = eventLineIds.map((lineId) => lineById.get(lineId)).filter(Boolean);
-    if (!eventLines.length) return;
-
-    eventLineIds.forEach((lineId) => coveredLineIds.add(lineId));
-    const relatedEvents = getRelatedEventsForLineIds(eventLineIds);
-    const orderNumbers = getEventOrderNumbers(event, eventLines);
-    const latestAt = event.created_at || eventLines[0]?.fulfilled_at || null;
-    groups.push({
-      id: `event-${event.id}`,
-      kind: "event",
-      buyer: getEventBuyerLabel(event, eventLines),
-      subtitle: orderNumbers.length ? `${orderNumbers.length} order(s): ${orderNumbers.join(", ")}` : "Grouped completion",
-      lines: eventLines,
-      events: relatedEvents,
-      gross: eventLines.reduce((sum, line) => sum + getLineGross(line), 0),
-      payout: eventLines.reduce((sum, line) => sum + getLinePayout(line), 0),
-      latestAt,
+  const forced = new Set();
+  const events = uniqueById([...state.relatedAdminEvents, ...state.adminEvents])
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+      || String(a.id).localeCompare(String(b.id)));
+  events.forEach((event) => {
+    if (event.action !== "fulfilled_no_inventory") return;
+    const completedAt = event.payload?.completed_at || event.created_at;
+    getEventLineIds(event).forEach((id) => {
+      const line = lineById.get(id);
+      if (!line || !historyCompletionMatchesLine(line, completedAt, event.signed_by, event.signed_by_email)) return;
+      if (!isNormalHistoryCompletion(event)) { forced.add(id); return; }
+      if (result.has(id)) return;
+      const request = event.payload?.checkout_request_id;
+      result.set(id, {
+        key: request ? `checkout:${event.signed_by || event.signed_by_email}:${request}` : `completion:${event.id}`,
+        completedAt, eventIds: [event.id],
+      });
     });
   });
+  const transactions = new Map(state.historyCheckoutTransactions.map((row) => [row.id, row]));
+  lines.forEach((line) => {
+    if (forced.has(line.id)) { result.delete(line.id); return; }
+    if (result.has(line.id)) return;
+    const transaction = transactions.get(line.stock_transaction_id);
+    const completedAt = transaction?.confirmed_at || transaction?.timestamp;
+    if (transaction?.action_type !== "checkout"
+      || !historyCompletionMatchesLine(line, completedAt, transaction.user_id, transaction.email)) return;
+    const request = transaction.metadata?.pending_checkout_request_id;
+    result.set(line.id, {
+      key: request ? `checkout:${transaction.user_id || transaction.email}:${request}` : `checkout-line:${transaction.id}`,
+      completedAt, eventIds: [],
+    });
+  });
+  return result;
+}
 
-  const remainingGroups = new Map();
-  lines.filter((line) => !coveredLineIds.has(line.id)).forEach((line) => {
-    const key = getBuyerKeyFromLine(line);
-    if (!remainingGroups.has(key)) {
-      remainingGroups.set(key, {
-        id: `buyer-${key}`,
-        kind: "buyer",
-        buyer: getBuyerLabelFromLine(line),
-        subtitle: "Closed order lines",
-        lines: [],
-        events: [],
-        gross: 0,
-        payout: 0,
-        latestAt: null,
-      });
+async function fetchHistoryCheckoutTransactions(lines) {
+  const ids = unique(lines.map((line) => line.stock_transaction_id));
+  if (!ids.length) return [];
+  try {
+    const result = await fetchHistoryRowsInChunks(ids, (chunk) => supabase.from("stock_transactions")
+      .select("id,action_type,confirmed_at,timestamp,user_id,email,metadata")
+      .in("id", chunk).limit(chunk.length));
+    if (result.error) console.warn("Some history checkout records could not load:", result.error);
+    return result.data || [];
+  } catch (error) {
+    console.warn("History checkout records could not load:", error);
+    return [];
+  }
+}
+
+// Shipment identity is independent of the buyer and of administrative closeouts.
+// Never join packages transitively through an order with multiple tracking numbers.
+function historyShipmentTokens(values, tracking = false) {
+  return unique(values.flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter((value) => typeof value === "string")
+    .flatMap((value) => tracking ? value.split(/[,;|\n]+/) : [value])
+    .map((value) => tracking ? value.replace(/[\s-]/g, "").toUpperCase() : value.trim())
+    .filter((value) => tracking ? /^[A-Z0-9]{6,40}$/.test(value) && /\d/.test(value) : Boolean(value)));
+}
+
+function getHistoryLabelShipmentEvidence(record = {}, order = {}) {
+  const metadata = record.label_metadata || {};
+  const rows = Array.isArray(metadata.labelRows) ? metadata.labelRows.filter(Boolean) : [];
+  const tracking = (value) => historyShipmentTokens([
+    value.trackingNumber, value.trackingNumbers, value.shippingBarcodeNumber, value.shippingBarcodeNumbers,
+  ], true);
+  const shipments = (value) => historyShipmentTokens([value.shipmentId, value.shipmentIds]);
+  const orderNumber = normalizeEbayOrderNumber(order.order_number);
+  const matching = orderNumber ? rows.filter((row) => historyShipmentTokens([
+    row.orderNumber, row.orderNumbers, row.orderId, row.orderIds,
+  ]).map(normalizeEbayOrderNumber).includes(orderNumber)) : [];
+  // Bulk exports can contain both a whole-page row and individual package rows.
+  // Use package rows explicitly naming this order, never the batch's first tracker.
+  const specific = matching.filter((row) => tracking(row).length <= 1 && shipments(row).length <= 1
+    && (tracking(row).length || shipments(row).length));
+  const scoped = specific.length ? specific : matching;
+  const trackingNumbers = scoped.length
+    ? historyShipmentTokens(scoped.flatMap(tracking), true)
+    : historyShipmentTokens([record.tracking_number, ...tracking(metadata), ...rows.flatMap(tracking)], true);
+  const shipmentIds = scoped.length ? historyShipmentTokens(scoped.flatMap(shipments))
+    : historyShipmentTokens([record.ebay_shipment_id, record.shipment_id, ...shipments(metadata), ...rows.flatMap(shipments)]);
+  const multiple = trackingNumbers.length > 1 || shipmentIds.length > 1
+    || (!scoped.length && Number(metadata.labelCount) > 1);
+  const file = record.label_file_path
+    ? `${record.label_storage_bucket || "ebay-labels"}/${record.label_file_path}` : "";
+  let key = "";
+  if (!multiple && trackingNumbers.length === 1) key = `tracking:${trackingNumbers[0]}`;
+  else if (!multiple && shipmentIds.length === 1) key = `shipment:${shipmentIds[0]}`;
+  else if (!multiple && file && Number(metadata.labelCount) === 1) key = `label:${file}`;
+  return { key, trackingNumbers, shipmentIds, multiple, file,
+    reason: multiple ? "Multiple packages or conflicting shipping records. Kept separate until the items can be matched."
+      : "No single shipment is recorded for this order. Kept separate from the buyer’s other orders." };
+}
+
+function getHistoryOrderShipmentEvidence(order, lines, labelRows) {
+  const matches = new Set([
+    ...getHistoryRowsByKeys(labelRows, "order_line_ids", lines.map((line) => line.id)),
+    ...getHistoryRowsByKeys(labelRows, "order_numbers", [normalizeEbayOrderNumber(order.order_number)]),
+  ]);
+  const events = [...matches].map((row) => row.event)
+    .filter((event) => ["attached", "replaced", "extra_label"].includes(event.action))
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
+  const primary = events.find((event) => event.action !== "extra_label"
+    && (!order.label_file_path || event.label_file_path === order.label_file_path));
+  const saved = getHistoryLabelShipmentEvidence(order, order);
+  // Current order metadata wins over historical/replaced labels. Event metadata
+  // only fills a missing identity for the same current label (or a legacy order).
+  const evidence = !saved.key && !saved.multiple && primary
+    ? getHistoryLabelShipmentEvidence({ ...primary, tracking_number: order.tracking_number }, order) : saved;
+  const lineShipments = lines.flatMap((line) => Array.isArray(line.raw_payload?.shipping_reconciliation?.shipments)
+    ? line.raw_payload.shipping_reconciliation.shipments : []);
+  const knownTrackers = historyShipmentTokens([
+    ...evidence.trackingNumbers, ...lineShipments.map((entry) => entry?.trackingNumber),
+  ], true);
+  if (lineShipments.length && knownTrackers.length > 1) return { ...evidence, key: "", multiple: true,
+    reason: "Items in this order have different shipment records. Items without a package match stay separate." };
+  const extras = events.filter((event) => event.action === "extra_label")
+    .map((event) => getHistoryLabelShipmentEvidence(event, order));
+  if (extras.some((extra) => extra.multiple || (extra.key ? extra.key !== evidence.key : extra.file !== evidence.file))) {
+    return { ...evidence, key: "", multiple: true,
+      reason: "Additional shipping labels are saved. The item-to-package assignment needs confirmation." };
+  }
+  return evidence;
+}
+
+function getHistoryLineShipmentEvidence(line, orderEvidence) {
+  // Cancellation/admin batch membership does not prove shipment.
+  if (line.line_status === "cancelled") return { key: "", trackingNumbers: [],
+    reason: "Canceled order. Kept separate from shipped items." };
+  const shipments = line.raw_payload?.shipping_reconciliation?.shipments;
+  if (Array.isArray(shipments) && shipments.length) {
+    const trackingNumbers = historyShipmentTokens(shipments.map((entry) => entry?.trackingNumber), true);
+    if (trackingNumbers.length === 1 && shipments.every((entry) => historyShipmentTokens([entry?.trackingNumber], true).length)) {
+      return { key: `tracking:${trackingNumbers[0]}`, trackingNumbers,
+        shippedAt: getValidDateValue(...shipments.map((entry) => entry?.shippedAt)) };
     }
-    const group = remainingGroups.get(key);
+    return { key: "", trackingNumbers, multiple: true,
+      reason: "This item has multiple shipment records. Kept separate to avoid combining different packages." };
+  }
+  return { ...orderEvidence, shippedAt: orderEvidence.key ? getValidDateValue(line.order?.shipped_on_date) : null };
+}
+
+function buildHistoryGroups(lines = []) {
+  const groups = new Map();
+  const completions = getHistoryNormalCompletions(lines);
+  const labelRows = getHistoryLabelSearchRows();
+  const orderLines = new Map();
+  const orderKey = (line) => line.order?.id || line.order_id || line.order?.order_number || line.id;
+  // Use all loaded lines to assess order-level ambiguity, even when a line filter
+  // hides part of an order. Never let searching make an ambiguous package certain.
+  uniqueById([...state.lines, ...lines]).forEach((line) => {
+    const key = orderKey(line);
+    if (!orderLines.has(key)) orderLines.set(key, []);
+    orderLines.get(key).push(line);
+  });
+  const orderEvidence = new Map();
+  const seen = new Set();
+  lines.forEach((line) => {
+    if (!line?.id || seen.has(line.id)) return;
+    seen.add(line.id);
+    const orderId = orderKey(line);
+    if (!orderEvidence.has(orderId)) orderEvidence.set(orderId,
+      getHistoryOrderShipmentEvidence(line.order || {}, orderLines.get(orderId) || [line], labelRows));
+    const evidence = getHistoryLineShipmentEvidence(line, orderEvidence.get(orderId));
+    const completion = completions.get(line.id);
+    const kind = completion ? "completion" : evidence.key ? "shipment" : "order";
+    // Buyer is a boundary, not evidence. Unknown buyers stay separated by order.
+    const key = completion ? JSON.stringify([getBuyerKeyFromLine(line), completion.key])
+      : evidence.key ? JSON.stringify([getBuyerKeyFromLine(line), evidence.key])
+      : JSON.stringify([orderId, line.line_status === "cancelled" ? "cancelled" : "unconfirmed"]);
+    if (!groups.has(key)) groups.set(key, {
+      id: `${kind}-${key}`, kind, buyer: getBuyerLabelFromLine(line), lines: [], events: [],
+      gross: 0, payout: 0, latestAt: null, shippedAt: null, shipment: evidence,
+      completion: completion ? { ...completion, eventIds: [] } : null,
+    });
+    const group = groups.get(key);
     group.lines.push(line);
+    if (completion) group.completion.eventIds = unique([...group.completion.eventIds, ...completion.eventIds]);
     group.gross += getLineGross(line);
     group.payout += getLinePayout(line);
-    const historyAt = getHistoryLineTimelineAt(line);
-    const fulfilledAt = historyAt ? new Date(historyAt) : null;
-    if (fulfilledAt && !Number.isNaN(fulfilledAt.getTime())) {
-      const current = group.latestAt ? new Date(group.latestAt) : null;
-      if (!current || fulfilledAt > current) group.latestAt = historyAt;
-    }
+    if (evidence.multiple) group.shipment = evidence;
+    const historyAt = completion?.completedAt || evidence.shippedAt || getHistoryLineTimelineAt(line);
+    if ((Date.parse(historyAt) || 0) > (Date.parse(group.latestAt) || 0)) group.latestAt = historyAt;
+    if ((Date.parse(evidence.shippedAt) || 0) > (Date.parse(group.shippedAt) || 0)) group.shippedAt = evidence.shippedAt;
   });
+  return [...groups.values()].map((group) => {
+    group.events = getRelatedEventsForLineIds(group.lines.map((line) => line.id));
+    const numbers = unique(group.lines.map((line) => line.order?.order_number));
+    group.subtitle = `${numbers.length} order(s): ${numbers.join(", ")}`;
+    return group;
+  }).sort((a, b) => (Date.parse(b.latestAt) || 0) - (Date.parse(a.latestAt) || 0) || a.id.localeCompare(b.id));
+}
 
-  remainingGroups.forEach((group) => {
-    const lineIds = group.lines.map((line) => line.id);
-    group.events = getRelatedEventsForLineIds(lineIds);
-    const orderNumbers = [...new Set(group.lines.map((line) => line.order?.order_number).filter(Boolean))];
-    group.subtitle = orderNumbers.length ? `${orderNumbers.length} order(s): ${orderNumbers.join(", ")}` : group.subtitle;
-    groups.push(group);
-  });
-
-  return groups.sort((a, b) => {
-    const aTime = a.latestAt ? new Date(a.latestAt).getTime() : 0;
-    const bTime = b.latestAt ? new Date(b.latestAt).getTime() : 0;
-    return bTime - aTime;
-  });
+function renderHistoryShipmentSummary(group) {
+  const shipment = group.shipment || {};
+  const completed = group.kind === "completion";
+  const confirmed = completed || group.kind === "shipment";
+  const cancelled = group.lines.every((line) => line.line_status === "cancelled");
+  const title = completed ? "Completed together" : confirmed ? "Shipment record" : cancelled ? "Canceled order" : "Shipment unconfirmed";
+  const detail = completed ? "Items closed in the same normal packing batch, with their saved proof." : confirmed
+    ? shipment.trackingNumbers?.length ? `Tracking · ${shipment.trackingNumbers.join(", ")}`
+      : shipment.shipmentIds?.length ? `Shipment · ${shipment.shipmentIds.join(", ")}` : "One saved shipping label"
+    : shipment.reason || "No single shipment is recorded for this order.";
+  return `<div class="history-shipment-summary ${confirmed ? "is-linked" : "is-unconfirmed"}">
+    <strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span>
+  </div>`;
 }
 
 function getUniqueOrdersFromLines(lines = []) {
@@ -5305,13 +5470,13 @@ function renderGroupLabelControl(group, orders = []) {
   const orderNumbers = getOrderNumbersFromOrders(orders);
   const attachedOrder = getAttachedHistoryOrder(orders);
   const labelPath = attachedOrder?.label_file_path || "";
-  const trackingText = getLabelTrackingDisplay(attachedOrder?.label_metadata || {});
+  const trackingText = (group.shipment?.trackingNumbers || []).join(", ") || getLabelTrackingDisplay(attachedOrder?.label_metadata || {});
   const orderCount = orderNumbers.length || orders.length;
   const orderWord = orderCount === 1 ? "order" : "orders";
   const attachedCount = orders.filter((order) => order?.label_file_path).length;
   const labelSummary = labelPath
     ? `Attached ${formatDateTime(attachedOrder.label_uploaded_at)} - ${attachedCount >= orderCount ? `covers ${orderCount} ${orderWord}` : `${attachedCount} of ${orderCount} ${orderWord}`}`
-    : `One label for this grouped completion - ${orderCount} ${orderWord}`;
+    : `No label attached - ${orderCount} ${orderWord}`;
   const extraLabelEvents = getExtraLabelEventsForOrderNumbers(orderNumbers);
   const encodedOrderNumbers = escapeHtml(orderNumbers.join(","));
 
@@ -6346,7 +6511,14 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
   const list = $("history-list");
   if (!list) return;
 
-  $("history-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
+  const shipmentCount = groups.filter((group) => group.kind === "shipment").length;
+  const completionCount = groups.filter((group) => group.kind === "completion").length;
+  const separateCount = groups.length - shipmentCount - completionCount;
+  $("history-count").textContent = [
+    completionCount ? `${completionCount} completed group${completionCount === 1 ? "" : "s"}` : "",
+    shipmentCount ? `${shipmentCount} shipment${shipmentCount === 1 ? "" : "s"}` : "",
+    separateCount ? `${separateCount} separate order${separateCount === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ") || "0 shipments";
 
   if (!groups.length) {
     const term = String($("history-search")?.value || "").trim();
@@ -6490,8 +6662,8 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     card.innerHTML = `
       <div class="history-order-summary" data-history-group-summary>
         <div class="history-order-identity">
+          ${renderHistoryShipmentSummary(group)}
           <div class="history-order-title-row">
-            <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
             <button
               type="button"
               class="buyer-insight-link history-buyer-insight-link"
